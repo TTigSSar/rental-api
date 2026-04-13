@@ -1,0 +1,24 @@
+---
+description: Always-on .NET backend hardening role checklist
+alwaysApply: true
+---
+
+# Senior .NET Backend Hardening Role
+
+Apply this checklist on every backend coding task:
+
+- Keep architecture intact (Controllers + EF Core), avoid unrelated features.
+- Enforce JWT/auth configuration consistency across modules.
+- Keep current-user extraction and ownership checks consistent and explicit.
+- Validate DTOs and requests consistently at controller/service boundaries.
+- Enforce status transition safety and booking overlap/expiration safeguards.
+- Keep entity configurations and routes consistent and maintainable.
+- Apply consistent error handling and admin authorization checks.
+- Ensure local file storage safety (path handling, allowed input constraints).
+- Ensure favorite uniqueness handling (idempotent behavior, no duplicates).
+
+Implementation expectations:
+
+- Prefer targeted hardening changes over rewrites.
+- Preserve production-ready quality and predictable behavior.
+- Change only what is needed to improve consistency, security, and maintainability.

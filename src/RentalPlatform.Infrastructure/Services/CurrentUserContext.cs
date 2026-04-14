@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using RentalPlatform.Application.Abstractions;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace RentalPlatform.Infrastructure.Services;
 
@@ -17,7 +18,11 @@ public sealed class CurrentUserContext : ICurrentUserContext
     {
         get
         {
-            var userIdClaim = _httpContextAccessor.HttpContext?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var user = _httpContextAccessor.HttpContext?.User;
+            var userIdClaim =
+                user?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+                user?.FindFirstValue(JwtRegisteredClaimNames.Sub);
+
             return Guid.TryParse(userIdClaim, out var userId) ? userId : null;
         }
     }

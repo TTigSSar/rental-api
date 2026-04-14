@@ -43,6 +43,11 @@ public sealed class LocalFileStorageService : IFileStorageService
         var storageFileName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
         var fullPath = Path.Combine(_targetDirectory, storageFileName);
 
+        if (content.CanSeek)
+        {
+            content.Position = 0;
+        }
+
         await using var destination = File.Create(fullPath);
         await content.CopyToAsync(destination, cancellationToken);
 

@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using RentalPlatform.Infrastructure.DependencyInjection;
 using RentalPlatform.Infrastructure.Services;
+using System.Security.Claims;
 
 namespace RentalPlatform.Api.Extensions;
 
@@ -15,6 +16,7 @@ public static class ServiceCollectionExtensions
     {
         var jwtSettings = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
             ?? throw new InvalidOperationException("JWT settings are not configured.");
+        ValidateJwtOptions(jwtSettings);
 
         services.AddControllers();
         services.AddEndpointsApiExplorer();
@@ -30,6 +32,8 @@ public static class ServiceCollectionExtensions
                     ValidIssuer = jwtSettings.Issuer,
                     ValidAudience = jwtSettings.Audience,
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
+                    NameClaimType = ClaimTypes.Email,
+                    RoleClaimType = ClaimTypes.Role,
                     ClockSkew = TimeSpan.Zero
                 };
             });
@@ -67,5 +71,28 @@ public static class ServiceCollectionExtensions
         services.AddInfrastructure(configuration);
 
         return services;
+    }
+
+    private static void ValidateJwtOptions(JwtOptions jwtOptions)
+    {
+        if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
+        {
+            throw new InvalidOperationException("Jwt:Issuer is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
+        {
+            throw new InvalidOperationException("Jwt:Audience is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey))
+        {
+            throw new InvalidOperationException("Jwt:SecretKey is required.");
+        }
+
+        if (jwtOptions.SecretKey.Length < 32)
+        {
+            throw new InvalidOperationException("Jwt:SecretKey must be at least 32 characters.");
+        }
     }
 }

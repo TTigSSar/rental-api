@@ -66,7 +66,7 @@ public sealed class BookingsStore : IBookingsStore
         CancellationToken cancellationToken = default) =>
         await _dbContext.Bookings
             .AsNoTracking()
-            .Where(booking => booking.Listing.OwnerId == ownerId)
+            .Where(booking => booking.Listing.OwnerId == ownerId && booking.Status == BookingStatus.Pending)
             .Include(booking => booking.Listing)
             .Include(booking => booking.Renter)
             .ToListAsync(cancellationToken);

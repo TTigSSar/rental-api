@@ -76,7 +76,7 @@ public sealed class FavoritesService : IFavoritesService
             return ServiceResult<bool>.Success(false);
         }
 
-        await _favoritesStore.AddAsync(new Favorite
+        var added = await _favoritesStore.TryAddAsync(new Favorite
         {
             Id = Guid.NewGuid(),
             UserId = userResult.Value.Id,
@@ -84,8 +84,7 @@ public sealed class FavoritesService : IFavoritesService
             CreatedAt = DateTime.UtcNow
         }, cancellationToken);
 
-        await _favoritesStore.SaveChangesAsync(cancellationToken);
-        return ServiceResult<bool>.Success(true);
+        return ServiceResult<bool>.Success(added);
     }
 
     public async Task<ServiceResult<bool>> RemoveAsync(Guid listingId, CancellationToken cancellationToken = default)

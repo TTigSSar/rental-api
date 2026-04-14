@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
 
@@ -34,11 +35,34 @@ public sealed class FavoritesStore : IFavoritesStore
                 .ThenInclude(listing => listing.Images)
             .ToListAsync(cancellationToken);
 
-    public async Task AddAsync(Favorite favorite, CancellationToken cancellationToken = default) =>
+    public async Task<bool> TryAddAsync(Favorite favorite, CancellationToken cancellationToken = default)
+    {
         await _dbContext.Favorites.AddAsync(favorite, cancellationToken);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+        {
+            _dbContext.Entry(favorite).State = EntityState.Detached;
+            return false;
+        }
+    }
 
     public void Remove(Favorite favorite) => _dbContext.Favorites.Remove(favorite);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _dbContext.SaveChangesAsync(cancellationToken);
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+    {
+        if (exception.InnerException is not SqlException sqlException)
+        {
+            return false;
+        }
+
+        return sqlException.Number is 2601 or 2627;
+    }
 }

@@ -23,4 +23,5 @@ public sealed class Listing
     public User Owner { get; set; } = null!;
     public Category Category { get; set; } = null!;
     public ICollection<ListingImage> Images { get; set; } = new List<ListingImage>();
+    public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 }

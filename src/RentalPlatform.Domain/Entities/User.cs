@@ -13,4 +13,5 @@ public sealed class User
     public bool IsBlocked { get; set; }
 
     public ICollection<Listing> Listings { get; set; } = new List<Listing>();
+    public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
 }

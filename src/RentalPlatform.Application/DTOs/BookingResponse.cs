@@ -1,0 +1,16 @@
+using RentalPlatform.Domain.Enums;
+
+namespace RentalPlatform.Application.DTOs;
+
+public sealed class BookingResponse
+{
+    public Guid Id { get; init; }
+    public Guid ListingId { get; init; }
+    public DateOnly StartDate { get; init; }
+    public DateOnly EndDate { get; init; }
+    public decimal TotalPrice { get; init; }
+    public BookingStatus Status { get; init; }
+    public DateTime ExpiresAt { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public DateTime UpdatedAt { get; init; }
+}

@@ -19,4 +19,5 @@ public sealed class ListingDetailsResponse
     public DateTime UpdatedAt { get; init; }
     public ListingOwnerResponse Owner { get; init; } = new();
     public IReadOnlyCollection<ListingImageResponse> Images { get; init; } = Array.Empty<ListingImageResponse>();
+    public IReadOnlyCollection<ListingBookedDateRangeResponse> BookedDateRanges { get; init; } = Array.Empty<ListingBookedDateRangeResponse>();
 }

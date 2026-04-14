@@ -81,6 +81,7 @@ public sealed class ListingsQueryService : IListingsQueryService
             Page = page,
             PageSize = pageSize,
             TotalCount = totalCount,
+            HasMore = (page * pageSize) < totalCount,
             Items = items
         };
     }
@@ -124,6 +125,15 @@ public sealed class ListingsQueryService : IListingsQueryService
                         Url = image.Url,
                         IsPrimary = image.IsPrimary,
                         SortOrder = image.SortOrder
+                    })
+                    .ToList(),
+                BookedDateRanges = listing.Bookings
+                    .Where(booking => booking.Status == BookingStatus.Approved)
+                    .OrderBy(booking => booking.StartDate)
+                    .Select(booking => new ListingBookedDateRangeResponse
+                    {
+                        StartDate = booking.StartDate,
+                        EndDate = booking.EndDate
                     })
                     .ToList()
             })

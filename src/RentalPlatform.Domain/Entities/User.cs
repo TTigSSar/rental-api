@@ -1,3 +1,5 @@
+using RentalPlatform.Domain.Enums;
+
 namespace RentalPlatform.Domain.Entities;
 
 public sealed class User
@@ -11,6 +13,7 @@ public sealed class User
     public string? PreferredLanguage { get; set; }
     public DateTime CreatedAt { get; set; }
     public bool IsBlocked { get; set; }
+    public UserRole Role { get; set; }
 
     public ICollection<Listing> Listings { get; set; } = new List<Listing>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();

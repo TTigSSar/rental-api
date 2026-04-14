@@ -2,6 +2,7 @@ using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Entities;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Services;
 
@@ -55,7 +56,8 @@ public sealed class AuthService : IAuthService
             PhoneNumber = NormalizeOptional(request.PhoneNumber),
             PreferredLanguage = NormalizeOptional(request.PreferredLanguage),
             CreatedAt = DateTime.UtcNow,
-            IsBlocked = false
+            IsBlocked = false,
+            Role = UserRole.User
         };
 
         await _userAuthStore.AddAsync(user, cancellationToken);
@@ -148,6 +150,7 @@ public sealed class AuthService : IAuthService
         PhoneNumber = user.PhoneNumber,
         PreferredLanguage = user.PreferredLanguage,
         CreatedAt = user.CreatedAt,
-        IsBlocked = user.IsBlocked
+        IsBlocked = user.IsBlocked,
+        Role = user.Role
     };
 }

@@ -1,3 +1,5 @@
+using RentalPlatform.Domain.Enums;
+
 namespace RentalPlatform.Application.DTOs;
 
 public sealed class CurrentUserResponse
@@ -10,4 +12,5 @@ public sealed class CurrentUserResponse
     public string? PreferredLanguage { get; init; }
     public DateTime CreatedAt { get; init; }
     public bool IsBlocked { get; init; }
+    public UserRole Role { get; init; }
 }

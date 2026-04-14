@@ -42,5 +42,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(user => user.IsBlocked)
             .IsRequired();
+
+        builder.Property(user => user.Role)
+            .IsRequired();
     }
 }

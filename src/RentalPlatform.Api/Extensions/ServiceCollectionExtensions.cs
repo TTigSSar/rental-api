@@ -12,6 +12,8 @@ namespace RentalPlatform.Api.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    public const string FrontendCorsPolicy = "FrontendCorsPolicy";
+
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
         var jwtSettings = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
@@ -20,6 +22,31 @@ public static class ServiceCollectionExtensions
 
         services.AddControllers();
         services.AddEndpointsApiExplorer();
+        services.AddCors(options =>
+        {
+            var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+
+            options.AddPolicy(FrontendCorsPolicy, policyBuilder =>
+            {
+                if (allowedOrigins.Length > 0)
+                {
+                    policyBuilder
+                        .WithOrigins(allowedOrigins)
+                        .AllowAnyHeader()
+                        .AllowAnyMethod();
+                    return;
+                }
+
+                // Safe development fallback for local frontends if no explicit config exists.
+                policyBuilder
+                    .WithOrigins(
+                        "http://localhost:4200",
+                        "https://localhost:4200")
+                    .AllowAnyHeader()
+                    .AllowAnyMethod();
+            });
+        });
+
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {

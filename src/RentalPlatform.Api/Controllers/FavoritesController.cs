@@ -22,7 +22,7 @@ public sealed class FavoritesController : ControllerBase
     [ProducesResponseType(typeof(IReadOnlyCollection<ListingPreviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<IReadOnlyCollection<ListingPreviewResponse>>> GetMine(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {
         var result = await _favoritesService.GetMineAsync(cancellationToken);
         if (result.IsSuccess && result.Value is not null)
@@ -38,7 +38,7 @@ public sealed class FavoritesController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<bool>> Add(Guid listingId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Add(Guid listingId, CancellationToken cancellationToken)
     {
         var result = await _favoritesService.AddAsync(listingId, cancellationToken);
         if (result.IsSuccess)

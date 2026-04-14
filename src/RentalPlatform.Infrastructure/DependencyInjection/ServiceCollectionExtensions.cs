@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
+        services.AddScoped<IListingsQueryService, ListingsQueryService>();
 
         return services;
     }

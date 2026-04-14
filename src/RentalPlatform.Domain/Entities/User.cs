@@ -11,4 +11,6 @@ public sealed class User
     public string? PreferredLanguage { get; set; }
     public DateTime CreatedAt { get; set; }
     public bool IsBlocked { get; set; }
+
+    public ICollection<Listing> Listings { get; set; } = new List<Listing>();
 }

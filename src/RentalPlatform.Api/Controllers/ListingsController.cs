@@ -1,23 +1,32 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RentalPlatform.Api.Controllers.Requests;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 
 namespace RentalPlatform.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[AllowAnonymous]
 public sealed class ListingsController : ControllerBase
 {
     private readonly IListingsQueryService _listingsQueryService;
+    private readonly IListingsOwnerService _listingsOwnerService;
+    private readonly IListingImagesOwnerService _listingImagesOwnerService;
 
-    public ListingsController(IListingsQueryService listingsQueryService)
+    public ListingsController(
+        IListingsQueryService listingsQueryService,
+        IListingsOwnerService listingsOwnerService,
+        IListingImagesOwnerService listingImagesOwnerService)
     {
         _listingsQueryService = listingsQueryService;
+        _listingsOwnerService = listingsOwnerService;
+        _listingImagesOwnerService = listingImagesOwnerService;
     }
 
     [HttpGet]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(PagedResult<ListingPreviewResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<ListingPreviewResponse>>> GetListings(
         [FromQuery] ListingsQueryFilter filter,
@@ -28,6 +37,7 @@ public sealed class ListingsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(ListingDetailsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ListingDetailsResponse>> GetListingById(Guid id, CancellationToken cancellationToken)
@@ -40,4 +50,115 @@ public sealed class ListingsController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpPost]
+    [Authorize]
+    [ProducesResponseType(typeof(CreateListingResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<CreateListingResponse>> Create(
+        [FromBody] CreateListingRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.CreateAsync(request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return CreatedAtAction(nameof(GetListingById), new { id = result.Value.Id }, result.Value);
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
+    [HttpGet("mine")]
+    [Authorize]
+    [ProducesResponseType(typeof(IReadOnlyCollection<MyListingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<IReadOnlyCollection<MyListingResponse>>> GetMine(CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.GetMineAsync(cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
+    [HttpPost("{listingId:guid}/images")]
+    [Authorize]
+    [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyCollection<ListingImageResponse>>> UploadImages(
+        Guid listingId,
+        [FromForm] UploadListingImagesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var openStreams = new List<Stream>();
+
+        try
+        {
+            var uploadFiles = request.Files
+                .Select(file =>
+                {
+                    var stream = file.OpenReadStream();
+                    openStreams.Add(stream);
+
+                    return new UploadListingImageRequest
+                    {
+                        FileName = file.FileName,
+                        ContentType = file.ContentType,
+                        Length = file.Length,
+                        Content = stream
+                    };
+                })
+                .ToList();
+
+            var result = await _listingImagesOwnerService.UploadAsync(listingId, uploadFiles, cancellationToken);
+            if (result.IsSuccess && result.Value is not null)
+            {
+                return Ok(result.Value);
+            }
+
+            return FromOwnerError(result.Error);
+        }
+        finally
+        {
+            foreach (var stream in openStreams)
+            {
+                await stream.DisposeAsync();
+            }
+        }
+    }
+
+    private ActionResult FromOwnerError(ServiceError? error)
+    {
+        if (error is null)
+        {
+            return Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Unexpected error.");
+        }
+
+        return error.Code switch
+        {
+            "listing.unauthenticated" => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
+            "listing.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
+            "listing.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
+            "listing.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
+            "listing.category_not_found" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+        };
+    }
+
+    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
+    {
+        Status = statusCode,
+        Title = error.Message,
+        Type = error.Code
+    };
 }

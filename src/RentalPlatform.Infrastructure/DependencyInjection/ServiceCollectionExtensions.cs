@@ -26,6 +26,8 @@ public static class ServiceCollectionExtensions
 
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidation>();
+        services.Configure<LocalFileStorageOptions>(configuration.GetSection(LocalFileStorageOptions.SectionName));
+        services.AddSingleton<IValidateOptions<LocalFileStorageOptions>, LocalFileStorageOptionsValidation>();
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
@@ -33,8 +35,26 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IListingsQueryService, ListingsQueryService>();
+        services.AddScoped<IListingsOwnerService, ListingsOwnerService>();
+        services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
+        services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();
+        services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();
+        services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
         return services;
+    }
+}
+
+internal sealed class LocalFileStorageOptionsValidation : IValidateOptions<LocalFileStorageOptions>
+{
+    public ValidateOptionsResult Validate(string? name, LocalFileStorageOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.ListingsImagesPath))
+        {
+            return ValidateOptionsResult.Fail("FileStorage:ListingsImagesPath is required.");
+        }
+
+        return ValidateOptionsResult.Success;
     }
 }
 

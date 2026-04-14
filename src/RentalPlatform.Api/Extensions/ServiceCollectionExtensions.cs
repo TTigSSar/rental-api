@@ -94,5 +94,10 @@ public static class ServiceCollectionExtensions
         {
             throw new InvalidOperationException("Jwt:SecretKey must be at least 32 characters.");
         }
+
+        if (jwtOptions.AccessTokenExpirationMinutes <= 0)
+        {
+            throw new InvalidOperationException("Jwt:AccessTokenExpirationMinutes must be greater than zero.");
+        }
     }
 }

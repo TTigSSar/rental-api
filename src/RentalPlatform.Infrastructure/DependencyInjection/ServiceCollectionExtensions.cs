@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Infrastructure.Persistence;
@@ -24,10 +23,19 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpContextAccessor();
 
-        services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
-        services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidation>();
-        services.Configure<LocalFileStorageOptions>(configuration.GetSection(LocalFileStorageOptions.SectionName));
-        services.AddSingleton<IValidateOptions<LocalFileStorageOptions>, LocalFileStorageOptionsValidation>();
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .Validate(static options => !string.IsNullOrWhiteSpace(options.Issuer), "Jwt:Issuer is required.")
+            .Validate(static options => !string.IsNullOrWhiteSpace(options.Audience), "Jwt:Audience is required.")
+            .Validate(static options => !string.IsNullOrWhiteSpace(options.SecretKey), "Jwt:SecretKey is required.")
+            .Validate(static options => options.SecretKey.Length >= 32, "Jwt:SecretKey must be at least 32 characters.")
+            .Validate(static options => options.AccessTokenExpirationMinutes > 0, "Jwt:AccessTokenExpirationMinutes must be greater than zero.")
+            .ValidateOnStart();
+
+        services.AddOptions<LocalFileStorageOptions>()
+            .Bind(configuration.GetSection(LocalFileStorageOptions.SectionName))
+            .Validate(static options => !string.IsNullOrWhiteSpace(options.ListingsImagesPath), "FileStorage:ListingsImagesPath is required.")
+            .ValidateOnStart();
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
@@ -48,51 +56,5 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
         return services;
-    }
-}
-
-internal sealed class LocalFileStorageOptionsValidation : IValidateOptions<LocalFileStorageOptions>
-{
-    public ValidateOptionsResult Validate(string? name, LocalFileStorageOptions options)
-    {
-        if (string.IsNullOrWhiteSpace(options.ListingsImagesPath))
-        {
-            return ValidateOptionsResult.Fail("FileStorage:ListingsImagesPath is required.");
-        }
-
-        return ValidateOptionsResult.Success;
-    }
-}
-
-internal sealed class JwtOptionsValidation : IValidateOptions<JwtOptions>
-{
-    public ValidateOptionsResult Validate(string? name, JwtOptions options)
-    {
-        if (string.IsNullOrWhiteSpace(options.Issuer))
-        {
-            return ValidateOptionsResult.Fail("Jwt:Issuer is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.Audience))
-        {
-            return ValidateOptionsResult.Fail("Jwt:Audience is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.SecretKey))
-        {
-            return ValidateOptionsResult.Fail("Jwt:SecretKey is required.");
-        }
-
-        if (options.SecretKey.Length < 32)
-        {
-            return ValidateOptionsResult.Fail("Jwt:SecretKey must be at least 32 characters.");
-        }
-
-        if (options.AccessTokenExpirationMinutes <= 0)
-        {
-            return ValidateOptionsResult.Fail("Jwt:AccessTokenExpirationMinutes must be greater than zero.");
-        }
-
-        return ValidateOptionsResult.Success;
     }
 }

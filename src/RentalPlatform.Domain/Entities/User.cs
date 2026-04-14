@@ -14,4 +14,5 @@ public sealed class User
 
     public ICollection<Listing> Listings { get; set; } = new List<Listing>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
+    public ICollection<Favorite> Favorites { get; set; } = new List<Favorite>();
 }

@@ -24,4 +24,5 @@ public sealed class Listing
     public Category Category { get; set; } = null!;
     public ICollection<ListingImage> Images { get; set; } = new List<ListingImage>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
+    public ICollection<Favorite> Favorites { get; set; } = new List<Favorite>();
 }

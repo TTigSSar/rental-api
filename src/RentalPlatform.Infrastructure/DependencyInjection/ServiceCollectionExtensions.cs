@@ -39,8 +39,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();
         services.AddScoped<IBookingsService, BookingsService>();
+        services.AddScoped<IFavoritesService, FavoritesService>();
         services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();
         services.AddScoped<IBookingsStore, BookingsStore>();
+        services.AddScoped<IFavoritesStore, FavoritesStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
         return services;

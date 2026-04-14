@@ -19,7 +19,7 @@ public sealed class BookingsController : ControllerBase
     }
 
     [HttpPost]
-    [ProducesResponseType(typeof(BookingResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(BookingResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -32,7 +32,7 @@ public sealed class BookingsController : ControllerBase
         var result = await _bookingsService.CreateAsync(request, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
-            return CreatedAtAction(nameof(GetMine), result.Value);
+            return Ok(result.Value);
         }
 
         return FromError(result.Error);

@@ -34,22 +34,16 @@ public sealed class FavoritesController : ControllerBase
     }
 
     [HttpPost("{listingId:guid}")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Add(Guid listingId, CancellationToken cancellationToken)
+    public async Task<ActionResult<bool>> Add(Guid listingId, CancellationToken cancellationToken)
     {
         var result = await _favoritesService.AddAsync(listingId, cancellationToken);
-        if (result.IsSuccess && result.Value)
-        {
-            return CreatedAtAction(nameof(GetMine), null);
-        }
-
         if (result.IsSuccess)
         {
-            return NoContent();
+            return Ok(result.Value);
         }
 
         return FromError(result.Error);

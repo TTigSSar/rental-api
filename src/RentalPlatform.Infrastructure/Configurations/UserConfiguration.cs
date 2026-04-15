@@ -37,6 +37,19 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.PreferredLanguage)
             .HasMaxLength(16);
 
+        builder.Property(user => user.ExternalAuthProvider)
+            .HasMaxLength(32);
+
+        builder.Property(user => user.ExternalProviderId)
+            .HasMaxLength(256);
+
+        builder.Property(user => user.AvatarUrl)
+            .HasMaxLength(1000);
+
+        builder.HasIndex(user => new { user.ExternalAuthProvider, user.ExternalProviderId })
+            .IsUnique()
+            .HasFilter("[ExternalAuthProvider] IS NOT NULL AND [ExternalProviderId] IS NOT NULL");
+
         builder.Property(user => user.CreatedAt)
             .IsRequired();
 

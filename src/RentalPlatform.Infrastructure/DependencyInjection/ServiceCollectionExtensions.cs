@@ -37,8 +37,15 @@ public static class ServiceCollectionExtensions
             .Validate(static options => !string.IsNullOrWhiteSpace(options.ListingsImagesPath), "FileStorage:ListingsImagesPath is required.")
             .ValidateOnStart();
 
+        services.AddOptions<ExternalAuthOptions>()
+            .Bind(configuration.GetSection(ExternalAuthOptions.SectionName));
+
+        services.AddHttpClient(nameof(ExternalIdentityTokenValidator));
+        services.AddSingleton(TimeProvider.System);
+
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
+        services.AddScoped<IExternalIdentityTokenValidator, ExternalIdentityTokenValidator>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

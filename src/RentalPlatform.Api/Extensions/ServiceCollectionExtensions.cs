@@ -14,7 +14,10 @@ public static class ServiceCollectionExtensions
 {
     public const string FrontendCorsPolicy = "FrontendCorsPolicy";
 
-    public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddApiServices(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IWebHostEnvironment environment)
     {
         var jwtSettings = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
             ?? throw new InvalidOperationException("JWT settings are not configured.");
@@ -24,24 +27,16 @@ public static class ServiceCollectionExtensions
         services.AddEndpointsApiExplorer();
         services.AddCors(options =>
         {
-            var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+            var configuredOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+            var allowedOrigins = configuredOrigins
+                .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                .Select(origin => origin.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             options.AddPolicy(FrontendCorsPolicy, policyBuilder =>
             {
-                if (allowedOrigins.Length > 0)
-                {
-                    policyBuilder
-                        .WithOrigins(allowedOrigins)
-                        .AllowAnyHeader()
-                        .AllowAnyMethod();
-                    return;
-                }
-
-                // Safe development fallback for local frontends if no explicit config exists.
                 policyBuilder
-                    .WithOrigins(
-                        "http://localhost:4200",
-                        "https://localhost:4200")
+                    .SetIsOriginAllowed(origin => IsAllowedOrigin(origin, allowedOrigins, environment.IsDevelopment()))
                     .AllowAnyHeader()
                     .AllowAnyMethod();
             });
@@ -126,5 +121,27 @@ public static class ServiceCollectionExtensions
         {
             throw new InvalidOperationException("Jwt:AccessTokenExpirationMinutes must be greater than zero.");
         }
+    }
+
+    private static bool IsAllowedOrigin(string origin, IReadOnlySet<string> allowedOrigins, bool isDevelopment)
+    {
+        if (allowedOrigins.Contains(origin))
+        {
+            return true;
+        }
+
+        if (!isDevelopment || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var isLoopbackHost = uri.IsLoopback ||
+                             string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+        var isHttpScheme = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+
+        return isLoopbackHost && isHttpScheme;
     }
 }

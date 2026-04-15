@@ -10,6 +10,7 @@ public sealed class CurrentUserResponse
     public string LastName { get; init; } = string.Empty;
     public string? PhoneNumber { get; init; }
     public string? PreferredLanguage { get; init; }
+    public string? AvatarUrl { get; init; }
     public DateTime CreatedAt { get; init; }
     public bool IsBlocked { get; init; }
     public UserRole Role { get; init; }

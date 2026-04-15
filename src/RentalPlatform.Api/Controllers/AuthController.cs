@@ -52,6 +52,25 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    [HttpPost("external")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AuthResponse>> External(
+        [FromBody] ExternalAuthRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.ExternalAsync(request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     [HttpGet("me")]
     [Authorize]
     [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
@@ -81,6 +100,7 @@ public sealed class AuthController : ControllerBase
             "auth.invalid_credentials" => Unauthorized(CreateProblemDetails(StatusCodes.Status401Unauthorized, error)),
             "auth.unauthenticated" => Unauthorized(CreateProblemDetails(StatusCodes.Status401Unauthorized, error)),
             "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, CreateProblemDetails(StatusCodes.Status403Forbidden, error)),
+            "auth.external_link_conflict" => Conflict(CreateProblemDetails(StatusCodes.Status409Conflict, error)),
             _ => BadRequest(CreateProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

@@ -19,6 +19,11 @@ public sealed class UserAuthStore : IUserAuthStore
     public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
 
+    public Task<User?> FindByExternalProviderAsync(string provider, string externalProviderId, CancellationToken cancellationToken = default) =>
+        _dbContext.Users.FirstOrDefaultAsync(
+            user => user.ExternalAuthProvider == provider && user.ExternalProviderId == externalProviderId,
+            cancellationToken);
+
     public Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 

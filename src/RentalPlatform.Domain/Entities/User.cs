@@ -11,6 +11,9 @@ public sealed class User
     public string LastName { get; set; } = string.Empty;
     public string? PhoneNumber { get; set; }
     public string? PreferredLanguage { get; set; }
+    public string? ExternalAuthProvider { get; set; }
+    public string? ExternalProviderId { get; set; }
+    public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public bool IsBlocked { get; set; }
     public UserRole Role { get; set; }

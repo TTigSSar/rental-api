@@ -70,6 +70,62 @@ public static class DevelopmentSeedExtensions
             44.4991m,
             ListingStatus.Approved),
         new(
+            new Guid("b7d6cf92-51a4-4d3c-9f8a-1a2f9dd5c4a3"),
+            "Cozy Mountain House",
+            "Two-bedroom wooden house with a fireplace and garden, close to hiking trails.",
+            "houses",
+            "demo.admin@local.test",
+            120m,
+            "USD",
+            "Armenia",
+            "Dilijan",
+            "8 Kamo St",
+            40.7414m,
+            44.8626m,
+            ListingStatus.Approved),
+        new(
+            new Guid("2c8f1a60-3e55-4a1b-9c2d-6b5f8a7d1e42"),
+            "Economy Sedan Rental",
+            "Reliable fuel-efficient sedan for daily commutes and short trips around the city.",
+            "cars",
+            "demo.admin@local.test",
+            45m,
+            "USD",
+            "Armenia",
+            "Yerevan",
+            "3 Mashtots Ave",
+            40.1833m,
+            44.5150m,
+            ListingStatus.Approved),
+        new(
+            new Guid("4f17b5e2-9d84-4c6f-8b71-2a3c4e5d6f78"),
+            "MacBook Pro 16\" Laptop",
+            "Apple MacBook Pro 16-inch with M-series chip, great for creative work while traveling.",
+            "electronics",
+            "demo.user@local.test",
+            25m,
+            "USD",
+            "Armenia",
+            "Yerevan",
+            "12 Komitas Ave",
+            40.2016m,
+            44.4915m,
+            ListingStatus.Approved),
+        new(
+            new Guid("9a6b3c14-7d28-4e1f-b6a5-f4e3d2c1b0a9"),
+            "Kids Ride-On Electric Car",
+            "Safe battery-powered ride-on car for kids aged 3-7. Ideal for weekend fun.",
+            "toys",
+            "demo.user@local.test",
+            12m,
+            "USD",
+            "Armenia",
+            "Gyumri",
+            "42 Garegin Nzhdeh St",
+            40.7870m,
+            43.8476m,
+            ListingStatus.Approved),
+        new(
             new Guid("03d43cf7-71aa-4994-98ac-f42a7c6e1d9f"),
             "Family SUV Rental",
             "Comfortable 7-seat SUV, ideal for weekend trips and airport transfers.",
@@ -235,7 +291,7 @@ public static class DevelopmentSeedExtensions
         }
 
         var demoUser = usersByEmail[NormalizeEmail("demo.user@local.test")];
-        var approvedListingId = DefaultListings.Single(listing => listing.Status == ListingStatus.Approved).Id;
+        var approvedListingId = DefaultListings.First(listing => listing.Status == ListingStatus.Approved).Id;
 
         var hasFavorite = await dbContext.Favorites
             .AnyAsync(favorite => favorite.UserId == demoUser.Id && favorite.ListingId == approvedListingId, cancellationToken);

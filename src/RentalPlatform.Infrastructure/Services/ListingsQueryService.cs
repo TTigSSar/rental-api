@@ -96,9 +96,6 @@ public sealed class ListingsQueryService : IListingsQueryService
             .Select(listing => new ListingDetailsResponse
             {
                 Id = listing.Id,
-                OwnerId = listing.OwnerId,
-                CategoryId = listing.CategoryId,
-                CategoryName = listing.Category.Name,
                 Title = listing.Title,
                 Description = listing.Description,
                 PricePerDay = listing.PricePerDay,
@@ -110,11 +107,18 @@ public sealed class ListingsQueryService : IListingsQueryService
                 Longitude = listing.Longitude,
                 CreatedAt = listing.CreatedAt,
                 UpdatedAt = listing.UpdatedAt,
+                Category = new ListingCategoryResponse
+                {
+                    Id = listing.Category.Id,
+                    Name = listing.Category.Name,
+                    Slug = listing.Category.Slug
+                },
                 Owner = new ListingOwnerResponse
                 {
                     Id = listing.Owner.Id,
                     FirstName = listing.Owner.FirstName,
-                    LastName = listing.Owner.LastName
+                    LastName = listing.Owner.LastName,
+                    AvatarUrl = listing.Owner.AvatarUrl
                 },
                 Images = listing.Images
                     .OrderByDescending(image => image.IsPrimary)

@@ -149,6 +149,7 @@ public sealed class ListingsController : ControllerBase
             "listing.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "listing.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "listing.category_not_found" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.invalid_age_range" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))

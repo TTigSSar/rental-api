@@ -192,6 +192,12 @@ internal sealed class DevelopmentSeedRunner
                 AddressLine = seed.AddressLine,
                 Latitude = seed.Latitude,
                 Longitude = seed.Longitude,
+                AgeFromMonths = seed.AgeFromMonths,
+                AgeToMonths = seed.AgeToMonths,
+                Condition = seed.Condition,
+                HygieneNotes = seed.HygieneNotes,
+                SafetyNotes = seed.SafetyNotes,
+                DepositAmount = seed.DepositAmount,
                 Status = seed.Status,
                 CreatedAt = now.AddDays(-seed.CreatedDaysAgo),
                 UpdatedAt = now.AddDays(-seed.UpdatedDaysAgo)

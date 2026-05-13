@@ -107,6 +107,12 @@ public sealed class ListingsQueryService : IListingsQueryService
                 Longitude = listing.Longitude,
                 CreatedAt = listing.CreatedAt,
                 UpdatedAt = listing.UpdatedAt,
+                AgeFromMonths = listing.AgeFromMonths,
+                AgeToMonths = listing.AgeToMonths,
+                Condition = listing.Condition,
+                HygieneNotes = listing.HygieneNotes,
+                SafetyNotes = listing.SafetyNotes,
+                DepositAmount = listing.DepositAmount,
                 Category = new ListingCategoryResponse
                 {
                     Id = listing.Category.Id,

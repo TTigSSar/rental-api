@@ -57,6 +57,23 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.UpdatedAt)
             .IsRequired();
 
+        // Toy-rental MVP optional fields. Nullable in DB so generic-listing rows stay valid.
+        builder.Property(listing => listing.AgeFromMonths);
+
+        builder.Property(listing => listing.AgeToMonths);
+
+        builder.Property(listing => listing.Condition)
+            .HasMaxLength(50);
+
+        builder.Property(listing => listing.HygieneNotes)
+            .HasMaxLength(1000);
+
+        builder.Property(listing => listing.SafetyNotes)
+            .HasMaxLength(1000);
+
+        builder.Property(listing => listing.DepositAmount)
+            .HasPrecision(18, 2);
+
         builder.HasOne(listing => listing.Owner)
             .WithMany(user => user.Listings)
             .HasForeignKey(listing => listing.OwnerId)

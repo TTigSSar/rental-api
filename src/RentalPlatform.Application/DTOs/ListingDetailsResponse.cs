@@ -14,6 +14,14 @@ public sealed class ListingDetailsResponse
     public decimal Longitude { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
+
+    public int? AgeFromMonths { get; init; }
+    public int? AgeToMonths { get; init; }
+    public string? Condition { get; init; }
+    public string? HygieneNotes { get; init; }
+    public string? SafetyNotes { get; init; }
+    public decimal? DepositAmount { get; init; }
+
     public ListingCategoryResponse Category { get; init; } = new();
     public ListingOwnerResponse Owner { get; init; } = new();
     public IReadOnlyCollection<ListingImageResponse> Images { get; init; } = Array.Empty<ListingImageResponse>();

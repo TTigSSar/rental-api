@@ -20,6 +20,15 @@ public sealed class Listing
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    // Toy-rental MVP: optional, additive metadata. All fields are nullable so existing
+    // generic-listing rows remain valid and the create-listing contract stays backward compatible.
+    public int? AgeFromMonths { get; set; }
+    public int? AgeToMonths { get; set; }
+    public string? Condition { get; set; }
+    public string? HygieneNotes { get; set; }
+    public string? SafetyNotes { get; set; }
+    public decimal? DepositAmount { get; set; }
+
     public User Owner { get; set; } = null!;
     public Category Category { get; set; } = null!;
     public ICollection<ListingImage> Images { get; set; } = new List<ListingImage>();

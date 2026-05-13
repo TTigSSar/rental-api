@@ -13,6 +13,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         public const string Unauthenticated = "listing.unauthenticated";
         public const string UserBlocked = "listing.user_blocked";
         public const string CategoryNotFound = "listing.category_not_found";
+        public const string InvalidAgeRange = "listing.invalid_age_range";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -66,6 +67,17 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
+        if (request.AgeFromMonths is { } from &&
+            request.AgeToMonths is { } to &&
+            to < from)
+        {
+            return ServiceResult<CreateListingResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidAgeRange,
+                Message = "Age (to) must be greater than or equal to age (from)."
+            });
+        }
+
         var now = DateTime.UtcNow;
         var listing = new Listing
         {
@@ -81,6 +93,12 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             AddressLine = request.AddressLine.Trim(),
             Latitude = request.Latitude,
             Longitude = request.Longitude,
+            AgeFromMonths = request.AgeFromMonths,
+            AgeToMonths = request.AgeToMonths,
+            Condition = NormalizeOptional(request.Condition),
+            HygieneNotes = NormalizeOptional(request.HygieneNotes),
+            SafetyNotes = NormalizeOptional(request.SafetyNotes),
+            DepositAmount = request.DepositAmount,
             Status = ListingStatus.PendingApproval,
             CreatedAt = now,
             UpdatedAt = now
@@ -149,5 +167,15 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             .ToList();
 
         return ServiceResult<IReadOnlyCollection<MyListingResponse>>.Success(response);
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
     }
 }

@@ -1,21 +1,32 @@
-# Rental Marketplace Backend
+# Child Toys Rental Backend
 
-This document describes the **current** rental marketplace backend as implemented in this repository. It is derived from the codebase only; anything not present in code is called out explicitly under **Known gaps**.
+This document describes the **current** backend as implemented in this repository. The product is a **child toys rental MVP**: parents in Armenia/Yerevan list children's toys, admins moderate them, other parents browse approved toys and request short-term rentals. This document is derived from the codebase only; anything not present in code is called out explicitly under **Known gaps**.
+
+> **MVP niche**: child toys rental. Internally the backend still uses a generic `Listing` entity and keeps `/api/listings` routes for API contract stability; the UI can present listings as "toys". The toy focus is encoded in the **categories**, the **seed data**, and a small set of **optional toy-specific fields** on each listing (age range, condition, hygiene/safety notes, deposit).
 
 ---
 
 ## A. Project Overview
 
-The backend is an **ASP.NET Core Web API** for a rental marketplace. It exposes JSON REST endpoints for:
+The backend is an **ASP.NET Core Web API** for the child toys rental MVP. It exposes JSON REST endpoints for:
 
 - User registration and login (email/password)
-- Optional sign-in with **Google** or **Apple** identity tokens (validated server-side)
+- Optional sign-in with **Google** or **Apple** identity tokens (validated server-side, non-MVP / postponed)
 - JWT-based API authentication
-- Public browsing of **approved** listings and categories
-- Authenticated owners creating listings (submitted as **pending approval**), viewing their own listings, and uploading listing images to **local disk** under `wwwroot`
-- Renters creating **booking requests** for approved listings; listing owners approving or rejecting **pending** requests (with overlap and expiry rules)
-- Users managing **favorites**
-- **Admin** users moderating **pending** listings (approve/reject)
+- Public browsing of **approved** toy listings and toy categories
+- Authenticated owners creating toy listings (submitted as **pending approval**), viewing their own listings, and uploading listing images to **local disk** under `wwwroot`
+- Renters (parents) creating **booking requests** for approved listings; listing owners approving or rejecting **pending** requests (with overlap and 24-hour expiry rules)
+- **Admin** users moderating **pending** listings (approve/reject) — required for trust because child toys involve parents and safety
+- Users managing **favorites** (non-MVP, kept stable, not expanded)
+
+### Core MVP business loop
+
+1. A user registers / logs in.
+2. The user creates a toy listing (status starts as `PendingApproval`).
+3. An admin approves the listing (or rejects it).
+4. Public users browse approved toys (filterable by city, category, price).
+5. A renter requests a booking for an approved toy (status starts as `Pending`, expires in 24 hours).
+6. The owner approves or rejects the booking; approval is rejected if any overlap with another approved booking exists.
 
 There is **no** separate BFF, GraphQL, or SignalR layer in this solution.
 
@@ -90,20 +101,29 @@ There is **no** separate BFF, GraphQL, or SignalR layer in this solution.
 - `ExternalAuthOptions` is bound from configuration but **not** validated with `ValidateOnStart` in Infrastructure (invalid config surfaces at token validation time).
 - New external-only users get `PasswordHash = string.Empty` in code; password login for such users is not separately guarded in `LoginAsync` (BCrypt verify on empty hash is effectively invalid login, not a dedicated error).
 
-### Listings
+### Listings (toy listings)
 
 **Implemented**
 
 - Public **approved** listing list + detail (`GET /api/listings`, `GET /api/listings/{id}`) with filters and pagination; detail includes **approved** booking date ranges for availability-style display.
 - Owner: `POST /api/listings` creates listing in **`PendingApproval`**; `GET /api/listings/mine` returns all statuses for the owner.
 - Owner images: `POST /api/listings/{listingId}/images` multipart upload; content-type/extension allowlist; stored under `wwwroot` + configured relative path.
+- Toy-specific optional metadata on every listing (all nullable, all additive):
+  - `ageFromMonths`, `ageToMonths` — recommended age range in months (cross-validated: `to >= from`)
+  - `condition` — short condition tag (e.g. "Excellent", "Like new", "Good", "Used")
+  - `hygieneNotes` — how the toy is cleaned between rentals
+  - `safetyNotes` — safety considerations parents should know
+  - `depositAmount` — optional refundable deposit
+
+  These fields are accepted on `POST /api/listings`, returned by `GET /api/listings/{id}` and populated for seed data. They are intentionally **optional** so the generic `Listing` entity stays compatible and the create-listing contract stays backward compatible.
 
 **Partial / notes**
 
 - No owner endpoints for **edit**, **delete**, or **withdraw** listings in controllers.
 - Public endpoints never expose non-approved listings.
+- The route stays `/api/listings`, not `/api/toys`, to avoid breaking existing frontend integrations. The toy domain is expressed through categories, seed data and the optional fields above.
 
-### Categories
+### Categories (toy categories)
 
 **Implemented**
 
@@ -112,6 +132,7 @@ There is **no** separate BFF, GraphQL, or SignalR layer in this solution.
 **Partial / notes**
 
 - Read-only API; **no** admin CRUD for categories.
+- The seeded category set is toy-focused: Educational Toys, Building Blocks, Outdoor Toys, Baby Toys, Board Games, Pretend Play, Ride-On Toys, Puzzles, Montessori Toys, Party Toys.
 
 ### Bookings
 
@@ -357,17 +378,35 @@ Class **`[Authorize]`**.
 ### Development seed
 
 - **When**: `Program.cs` calls `await app.Services.SeedDevelopmentDataAsync()` **only if** `app.Environment.IsDevelopment()` **before** the rest of the pipeline runs.
-- **Where**: `Infrastructure/DependencyInjection/DevelopmentSeedExtensions.cs`.
+- **Where**: `Infrastructure/DependencyInjection/DevelopmentSeed/`.
 - **What** (idempotent, keyed by slugs / seed emails / fixed listing ids):
-  - Categories: Apartments, Houses, Cars, Electronics, Toys, Tools (with fixed GUIDs for categories used by listings).
-  - Users (if missing): `demo.user@local.test` (**User**) and `demo.admin@local.test` (**Admin**), BCrypt-hashed password.
-  - Listings (if missing fixed ids): one **Approved**, one **PendingApproval**, one **Rejected**.
-  - One **ListingImage** per seeded listing with placeholder URL `/uploads/listings/dev-{listingGuid}.jpg` (file may not exist on disk).
-  - Optional: one **Favorite** (demo user → approved listing) and one **Pending** **Booking** on the approved listing, if not already present.
+  - **Categories** (10, toy-focused): Educational Toys, Building Blocks, Outdoor Toys, Baby Toys, Board Games, Pretend Play, Ride-On Toys, Puzzles, Montessori Toys, Party Toys.
+  - **Users** (5 demo accounts, all with password `LocalDemo123!`):
+    | Email | Role | Notes |
+    |-------|------|-------|
+    | `admin@rental.local`    | Admin | Moderates pending listings |
+    | `owner@rental.local`    | User  | Owns every seeded toy listing |
+    | `renter@rental.local`   | User  | Books toys and uses favorites |
+    | `user2@rental.local`    | User  | Secondary user for ownership/favorites checks |
+    | `blocked@rental.local`  | User  | `IsBlocked = true`, for auth-rejection testing |
+  - **Listings** (10 toy listings): 7 **Approved**, 2 **PendingApproval**, 1 **Rejected**. Yerevan/Gyumri addresses, USD pricing, realistic toy data (LEGO Duplo, Montessori wooden set, baby activity gym, balance bike, backyard slide, puzzle bundle, toy kitchen, board game bundle, birthday party pack, soft-play foam set). Each listing populates the toy-specific optional fields (age range, condition, hygiene/safety notes, deposit).
+  - **Listing images** (14): real placeholder URLs from `picsum.photos`, so dev demos render without any local file setup.
+  - **Favorites** (4): renter and second user have a few favorited toys.
+  - **Bookings** (5): one per non-overlapping state — Pending, Approved, Rejected, Expired, Completed — by the demo renter against different approved listings (so no Approved overlap).
 
 ### Demo password (development)
 
 - Constant in code: **`LocalDemo123!`** (also logged at **Information** level when seed runs — acceptable for local dev only; do not rely on this for production).
+
+### Resetting the dev database after the toy refocus
+
+The seed is **idempotent and additive**: it only inserts rows that are missing, never deletes. If your local dev database was populated by an earlier (non-toy) seed run, you will see both old generic categories/listings and the new toy ones side-by-side. For a clean toy MVP demo, drop the database before starting the API:
+
+```bash
+dotnet ef database drop --force --project src/RentalPlatform.Infrastructure/RentalPlatform.Infrastructure.csproj --startup-project src/RentalPlatform.Api/RentalPlatform.Api.csproj
+```
+
+The next startup will recreate the schema (migrations) and seed the toy data.
 
 ### Production / non-Development
 
@@ -375,7 +414,7 @@ Class **`[Authorize]`**.
 
 ---
 
-## L. Known gaps / TODO
+## L. Known gaps / TODO (non-MVP / postponed)
 
 Verified from code structure and behavior described above:
 
@@ -384,14 +423,14 @@ Verified from code structure and behavior described above:
 - **No** category management (create/update) for admins.
 - **No** user profile update, email change, or password reset.
 - **No** refresh tokens or token revocation.
-- **Favorites**: no restriction to **approved** listings only; can favorite non-public listings by id.
-- **Favorites** `DELETE`: HTTP **204** even when the favorite did not exist (service returns success with `false`).
-- **External users** use empty `PasswordHash`; no explicit “external only” branch in password login (fails as invalid credentials).
+- **Favorites** are kept stable but **not** an MVP focus: no restriction to approved listings, `DELETE` returns **204** even when nothing was removed, and the module is intentionally not expanded.
+- **External auth** (Google/Apple) is implemented but **postponed** for the toy MVP; external-only users have empty `PasswordHash` and password login fails for them as invalid credentials.
 - **Admin users** cannot be created through the public register endpoint (always `User`); must be seeded or updated in DB.
 - **Apple** token may omit email on later logins; linking path requires email when no existing external mapping — operational limitation documented in `AuthService` (`auth.external_email_missing`).
-- **Seed images** are DB URLs only; static files may not exist unless `wwwroot` is populated or images uploaded.
+- **Seed images** are remote URLs (`picsum.photos`); no static files are written to disk by the seed.
 - **Background job** for booking expiry not present; expiry runs opportunistically when booking code paths execute.
 - **Production** `appsettings.json` ships with empty JWT secret and placeholder external auth audiences — hosting **must** override via environment/secrets or the app will fail JWT validation at startup (by design).
+- **Toy-specific fields** (`ageFromMonths`, `ageToMonths`, `condition`, `hygieneNotes`, `safetyNotes`, `depositAmount`) are optional and exposed only on listing **detail**, **create** and seed data. They are intentionally **not** added to list / preview / "my listings" / admin queue responses to keep those payloads small and avoid frontend ripple — they can be added later when there is concrete UI demand.
 
 ---
 

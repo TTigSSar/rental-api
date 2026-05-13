@@ -1,0 +1,203 @@
+[33mcommit b665942f00ea33226197f22d74c7dd4b82372d78[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Tigran <t_sargsyan@bk.ru>
+Date:   Wed May 13 13:28:52 2026 +0400
+
+    refactor(api): focus backend MVP on child toys rental
+
+[1mdiff --git a/README.md b/README.md[m
+[1mindex d5673b9..1ff12c7 100644[m
+[1m--- a/README.md[m
+[1m+++ b/README.md[m
+[36m@@ -1,21 +1,32 @@[m
+[31m-# Rental Marketplace Backend[m
+[32m+[m[32m# Child Toys Rental Backend[m
+ [m
+[31m-This document describes the **current** rental marketplace backend as implemented in this repository. It is derived from the codebase only; anything not present in code is called out explicitly under **Known gaps**.[m
+[32m+[m[32mThis document describes the **current** backend as implemented in this repository. The product is a **child toys rental MVP**: parents in Armenia/Yerevan list children's toys, admins moderate them, other parents browse approved toys and request short-term rentals. This document is derived from the codebase only; anything not present in code is called out explicitly under **Known gaps**.[m
+[32m+[m
+[32m+[m[32m> **MVP niche**: child toys rental. Internally the backend still uses a generic `Listing` entity and keeps `/api/listings` routes for API contract stability; the UI can present listings as "toys". The toy focus is encoded in the **categories**, the **seed data**, and a small set of **optional toy-specific fields** on each listing (age range, condition, hygiene/safety notes, deposit).[m
+ [m
+ ---[m
+ [m
+ ## A. Project Overview[m
+ [m
+[31m-The backend is an **ASP.NET Core Web API** for a rental marketplace. It exposes JSON REST endpoints for:[m
+[32m+[m[32mThe backend is an **ASP.NET Core Web API** for the child toys rental MVP. It exposes JSON REST endpoints for:[m
+ [m
+ - User registration and login (email/password)[m
+[31m-- Optional sign-in with **Google** or **Apple** identity tokens (validated server-side)[m
+[32m+[m[32m- Optional sign-in with **Google** or **Apple** identity tokens (validated server-side, non-MVP / postponed)[m
+ - JWT-based API authentication[m
+[31m-- Public browsing of **approved** listings and categories[m
+[31m-- Authenticated owners creating listings (submitted as **pending approval**), viewing their own listings, and uploading listing images to **local disk** under `wwwroot`[m
+[31m-- Renters creating **booking requests** for approved listings; listing owners approving or rejecting **pending** requests (with overlap and expiry rules)[m
+[31m-- Users managing **favorites**[m
+[31m-- **Admin** users moderating **pending** listings (approve/reject)[m
+[32m+[m[32m- Public browsing of **approved** toy listings and toy categories[m
+[32m+[m[32m- Authenticated owners creating toy listings (submitted as **pending approval**), viewing their own listings, and uploading listing images to **local disk** under `wwwroot`[m
+[32m+[m[32m- Renters (parents) creating **booking requests** for approved listings; listing owners approving or rejecting **pending** requests (with overlap and 24-hour expiry rules)[m
+[32m+[m[32m- **Admin** users moderating **pending** listings (approve/reject) — required for trust because child toys involve parents and safety[m
+[32m+[m[32m- Users managing **favorites** (non-MVP, kept stable, not expanded)[m
+[32m+[m
+[32m+[m[32m### Core MVP business loop[m
+[32m+[m
+[32m+[m[32m1. A user registers / logs in.[m
+[32m+[m[32m2. The user creates a toy listing (status starts as `PendingApproval`).[m
+[32m+[m[32m3. An admin approves the listing (or rejects it).[m
+[32m+[m[32m4. Public users browse approved toys (filterable by city, category, price).[m
+[32m+[m[32m5. A renter requests a booking for an approved toy (status starts as `Pending`, expires in 24 hours).[m
+[32m+[m[32m6. The owner approves or rejects the booking; approval is rejected if any overlap with another approved booking exists.[m
+ [m
+ There is **no** separate BFF, GraphQL, or SignalR layer in this solution.[m
+ [m
+[36m@@ -90,20 +101,29 @@[m [mThere is **no** separate BFF, GraphQL, or SignalR layer in this solution.[m
+ - `ExternalAuthOptions` is bound from configuration but **not** validated with `ValidateOnStart` in Infrastructure (invalid config surfaces at token validation time).[m
+ - New external-only users get `PasswordHash = string.Empty` in code; password login for such users is not separately guarded in `LoginAsync` (BCrypt verify on empty hash is effectively invalid login, not a dedicated error).[m
+ [m
+[31m-### Listings[m
+[32m+[m[32m### Listings (toy listings)[m
+ [m
+ **Implemented**[m
+ [m
+ - Public **approved** listing list + detail (`GET /api/listings`, `GET /api/listings/{id}`) with filters and pagination; detail includes **approved** booking date ranges for availability-style display.[m
+ - Owner: `POST /api/listings` creates listing in **`PendingApproval`**; `GET /api/listings/mine` returns all statuses for the owner.[m
+ - Owner images: `POST /api/listings/{listingId}/images` multipart upload; content-type/extension allowlist; stored under `wwwroot` + configured relative path.[m
+[32m+[m[32m- Toy-specific optional metadata on every listing (all nullable, all additive):[m
+[32m+[m[32m  - `ageFromMonths`, `ageToMonths` — recommended age range in months (cross-validated: `to >= from`)[m
+[32m+[m[32m  - `condition` — short condition tag (e.g. "Excellent", "Like new", "Good", "Used")[m
+[32m+[m[32m  - `hygieneNotes` — how the toy is cleaned between rentals[m
+[32m+[m[32m  - `safetyNotes` — safety considerations parents should know[m
+[32m+[m[32m  - `depositAmount` — optional refundable deposit[m
+[32m+[m
+[32m+[m[32m  These fields are accepted on `POST /api/listings`, returned by `GET /api/listings/{id}` and populated for seed data. They are intentionally **optional** so the generic `Listing` entity stays compatible and the create-listing contract stays backward compatible.[m
+ [m
+ **Partial / notes**[m
+ [m
+ - No owner endpoints for **edit**, **delete**, or **withdraw** listings in controllers.[m
+ - Public endpoints never expose non-approved listings.[m
+[32m+[m[32m- The route stays `/api/listings`, not `/api/toys`, to avoid breaking existing frontend integrations. The toy domain is expressed through categories, seed data and the optional fields above.[m
+ [m
+[31m-### Categories[m
+[32m+[m[32m### Categories (toy categories)[m
+ [m
+ **Implemented**[m
+ [m
+[36m@@ -112,6 +132,7 @@[m [mThere is **no** separate BFF, GraphQL, or SignalR layer in this solution.[m
+ **Partial / notes**[m
+ [m
+ - Read-only API; **no** admin CRUD for categories.[m
+[32m+[m[32m- The seeded category set is toy-focused: Educational Toys, Building Blocks, Outdoor Toys, Baby Toys, Board Games, Pretend Play, Ride-On Toys, Puzzles, Montessori Toys, Party Toys.[m
+ [m
+ ### Bookings[m
+ [m
+[36m@@ -357,25 +378,43 @@[m [mClass **`[Authorize]`**.[m
+ ### Development seed[m
+ [m
+ - **When**: `Program.cs` calls `await app.Services.SeedDevelopmentDataAsync()` **only if** `app.Environment.IsDevelopment()` **before** the rest of the pipeline runs.[m
+[31m-- **Where**: `Infrastructure/DependencyInjection/DevelopmentSeedExtensions.cs`.[m
+[32m+[m[32m- **Where**: `Infrastructure/DependencyInjection/DevelopmentSeed/`.[m
+ - **What** (idempotent, keyed by slugs / seed emails / fixed listing ids):[m
+[31m-  - Categories: Apartments, Houses, Cars, Electronics, Toys, Tools (with fixed GUIDs for categories used by listings).[m
+[31m-  - Users (if missing): `demo.user@local.test` (**User**) and `demo.admin@local.test` (**Admin**), BCrypt-hashed password.[m
+[31m-  - Listings (if missing fixed ids): one **Approved**, one **PendingApproval**, one **Rejected**.[m
+[31m-  - One **ListingImage** per seeded listing with placeholder URL `/uploads/listings/dev-{listingGuid}.jpg` (file may not exist on disk).[m
+[31m-  - Optional: one **Favorite** (demo user → approved listing) and one **Pending** **Booking** on the approved listing, if not already present.[m
+[32m+[m[32m  - **Categories** (10, toy-focused): Educational Toys, Building Blocks, Outdoor Toys, Baby Toys, Board Games, Pretend Play, Ride-On Toys, Puzzles, Montessori Toys, Party Toys.[m
+[32m+[m[32m  - **Users** (5 demo accounts, all with password `LocalDemo123!`):[m
+[32m+[m[32m    | Email | Role | Notes |[m
+[32m+[m[32m    |-------|------|-------|[m
+[32m+[m[32m    | `admin@rental.local`    | Admin | Moderates pending listings |[m
+[32m+[m[32m    | `owner@rental.local`    | User  | Owns every seeded toy listing |[m
+[32m+[m[32m    | `renter@rental.local`   | User  | Books toys and uses favorites |[m
+[32m+[m[32m    | `user2@rental.local`    | User  | Secondary user for ownership/favorites checks |[m
+[32m+[m[32m    | `blocked@rental.local`  | User  | `IsBlocked = true`, for auth-rejection testing |[m
+[32m+[m[32m  - **Listings** (10 toy listings): 7 **Approved**, 2 **PendingApproval**, 1 **Rejected**. Yerevan/Gyumri addresses, USD pricing, realistic toy data (LEGO Duplo, Montessori wooden set, baby activity gym, balance bike, backyard slide, puzzle bundle, toy kitchen, board game bundle, birthday party pack, soft-play foam set). Each listing populates the toy-specific optional fields (age range, condition, hygiene/safety notes, deposit).[m
+[32m+[m[32m  - **Listing images** (14): real placeholder URLs from `picsum.photos`, so dev demos render without any local file setup.[m
+[32m+[m[32m  - **Favorites** (4): renter and second user have a few favorited toys.[m
+[32m+[m[32m  - **Bookings** (5): one per non-overlapping state — Pending, Approved, Rejected, Expired, Completed — by the demo renter against different approved listings (so no Approved overlap).[m
+ [m
+ ### Demo password (development)[m
+ [m
+ - Constant in code: **`LocalDemo123!`** (also logged at **Information** level when seed runs — acceptable for local dev only; do not rely on this for production).[m
+ [m
+[32m+[m[32m### Resetting the dev database after the toy refocus[m
+[32m+[m
+[32m+[m[32mThe seed is **idempotent and additive**: it only inserts rows that are missing, never deletes. If your local dev database was populated by an earlier (non-toy) seed run, you will see both old generic categories/listings and the new toy ones side-by-side. For a clean toy MVP demo, drop the database before starting the API:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mdotnet ef database drop --force --project src/RentalPlatform.Infrastructure/RentalPlatform.Infrastructure.csproj --startup-project src/RentalPlatform.Api/RentalPlatform.Api.csproj[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32mThe next startup will recreate the schema (migrations) and seed the toy data.[m
+[32m+[m
+ ### Production / non-Development[m
+ [m
+ - **No** automatic seeding in `Program.cs` outside Development.[m
+ [m
+ ---[m
+ [m
+[31m-## L. Known gaps / TODO[m
+[32m+[m[32m## L. Known gaps / TODO (non-MVP / postponed)[m
+ [m
+ Verified from code structure and behavior described above:[m
+ [m
+[36m@@ -384,14 +423,14 @@[m [mVerified from code structure and behavior described above:[m
+ - **No** category management (create/update) for admins.[m
+ - **No** user profile update, email change, or password reset.[m
+ - **No** refresh tokens or token revocation.[m
+[31m-- **Favorites**: no restriction to **approved** listings only; can favorite non-public listings by id.[m
+[31m-- **Favorites** `DELETE`: HTTP **204** even when the favorite did not exist (service returns success with `false`).[m
+[31m-- **External users** use empty `PasswordHash`; no explicit “external only” branch in password login (fails as invalid credentials).[m
+[32m+[m[32m- **Favorites** are kept stable but **not** an MVP focus: no restriction to approved listings, `DELETE` returns **204** even when nothing was removed, and the module is intentionally not expanded.[m
+[32m+[m[32m- **External auth** (Google/Apple) is implemented but **postponed** for the toy MVP; external-only users have empty `PasswordHash` and password login fails for them as invalid credentials.[m
+ - **Admin users** cannot be created through the public register endpoint (always `User`); must be seeded or updated in DB.[m
+ - **Apple** token may omit email on later logins; linking path requires email when no existing external mapping — operational limitation documented in `AuthService` (`auth.external_email_missing`).[m
+[31m-- **Seed images** are DB URLs only; static files may not exist unless `wwwroot` is populated or images uploaded.[m
+[32m+[m[32m- **Seed images** are remote URLs (`picsum.photos`); no static files are written to disk by the seed.[m
+ - **Background job** for booking expiry not present; expiry runs opportunistically when booking code paths execute.[m
+ - **Production** `appsettings.json` ships with empty JWT secret and placeholder external auth audiences — hosting **must** override via environment/secrets or the app will fail JWT validation at startup (by design).[m
+[32m+[m[32m- **Toy-specific fields** (`ageFromMonths`, `ageToMonths`, `condition`, `hygieneNotes`, `safetyNotes`, `depositAmount`) are optional and exposed only on listing **detail**, **create** and seed data. They are intentionally **not** added to list / preview / "my listings" / admin queue responses to keep those payloads small and avoid frontend ripple — they can be added later when there is concrete UI demand.[m
+ [m
+ ---[m
+ [m
+[1mdiff --git a/src/RentalPlatform.Api/Controllers/ListingsController.cs b/src/RentalPlatform.Api/Controllers/ListingsController.cs[m
+[1mindex 84ddc55..f74c1e2 100644[m
+[1m--- a/src/RentalPlatform.Api/Controllers/ListingsController.cs[m
+[1m+++ b/src/RentalPlatform.Api/Controllers/ListingsController.cs[m
+[36m@@ -149,6 +149,7 @@[m [mpublic sealed class ListingsController : ControllerBase[m
+             "listing.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),[m
+             "listing.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),[m
+             "listing.category_not_found" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),[m
+[32m+[m[32m            "listing.invalid_age_range" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),[m
+             "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),[m
+             "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),[m
+             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))[m
+[1mdiff --git a/src/RentalPlatform.Application/DTOs/CreateListingRequest.cs b/src/RentalPlatform.Application/DTOs/CreateListingRequest.cs[m
+[1mindex 4039fc9..8abd2e2 100644[m
+[1m--- a/src/RentalPlatform.Application/DTOs/CreateListingRequest.cs[m
+[1m+++ b/src/RentalPlatform.Application/DTOs/CreateListingRequest.cs[m
+[36m@@ -4,39 +4,59 @@[m [mnamespace RentalPlatform.Application.DTOs;[m
+ [m
+ public sealed class CreateListingRequest[m
+ {[m
+[31m-    [Required][m
+[32m+[m[32m    [Required(ErrorMessage = "Category is required.")][m
+     public Guid CategoryId { get; init; }[m
+ [m
+[31m-    [Required][m
+[31m-    [MaxLength(200)][m
+[32m+[m[32m    [Required(ErrorMessage = "Title is required.")][m
+[32m+[m[32m    [StringLength(200, MinimumLength = 3, ErrorMessage = "Title must be between 3 and 200 characters.")][m
+     public string Title { get; init; } = string.Empty;[m
+ [m
+[31m-    [Required][m
+[31m-    [MaxLength(4000)][m
+[32m+[m[32m    [Required(ErrorMessage = "Description is required.")][m
+[32m+[m[32m    [StringLength(4000, MinimumLength = 20, ErrorMessage = "Description must be between 20 and 4000 characters.")][m
+     public string Description { get; init; } = string.Empty;[m
+ [m
+[31m-    [Range(typeof(decimal), "0.01", "999999999999.99")][m
+[32m+[m[32m    [Range(typeof(decimal), "0.01", "999999999999.99", ErrorMessage = "Price per day must be greater than zero.")][m
+     public decimal PricePerDay { get; init; }[m
+ [m
+[31m-    [Requ

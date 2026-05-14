@@ -87,10 +87,10 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             Title = request.Title.Trim(),
             Description = request.Description.Trim(),
             PricePerDay = request.PricePerDay,
-            Currency = request.Currency.Trim().ToUpperInvariant(),
+            Currency = string.IsNullOrWhiteSpace(request.Currency) ? "USD" : request.Currency.Trim().ToUpperInvariant(),
             Country = request.Country.Trim(),
             City = request.City.Trim(),
-            AddressLine = request.AddressLine.Trim(),
+            AddressLine = NormalizeOptional(request.AddressLine),
             Latitude = request.Latitude,
             Longitude = request.Longitude,
             AgeFromMonths = request.AgeFromMonths,
@@ -111,7 +111,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         {
             Id = listing.Id,
             Status = listing.Status,
-            CreatedAt = listing.CreatedAt
+            CreatedAt = listing.CreatedAt,
+            Message = "Toy listing submitted for review."
         });
     }
 

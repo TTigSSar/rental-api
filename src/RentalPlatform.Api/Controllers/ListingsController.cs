@@ -53,7 +53,7 @@ public sealed class ListingsController : ControllerBase
 
     [HttpPost]
     [Authorize]
-    [ProducesResponseType(typeof(CreateListingResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CreateListingResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -64,7 +64,7 @@ public sealed class ListingsController : ControllerBase
         var result = await _listingsOwnerService.CreateAsync(request, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
-            return Ok(result.Value);
+            return StatusCode(StatusCodes.Status201Created, result.Value);
         }
 
         return FromOwnerError(result.Error);

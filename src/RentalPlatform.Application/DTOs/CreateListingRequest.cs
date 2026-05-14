@@ -18,30 +18,28 @@ public sealed class CreateListingRequest
     [Range(typeof(decimal), "0.01", "999999999999.99", ErrorMessage = "Price per day must be greater than zero.")]
     public decimal PricePerDay { get; init; }
 
-    [Required(ErrorMessage = "Currency is required.")]
+    // Optional: 3-letter ISO code. Defaults to USD when omitted.
     [StringLength(3, MinimumLength = 3, ErrorMessage = "Currency must be a 3-letter ISO code (e.g. USD, AMD).")]
-    public string Currency { get; init; } = string.Empty;
+    public string? Currency { get; init; }
 
     [Required(ErrorMessage = "Country is required.")]
-    [MaxLength(100)]
+    [MaxLength(100, ErrorMessage = "Country must be at most 100 characters.")]
     public string Country { get; init; } = string.Empty;
 
     [Required(ErrorMessage = "City is required.")]
-    [MaxLength(120)]
+    [MaxLength(120, ErrorMessage = "City must be at most 120 characters.")]
     public string City { get; init; } = string.Empty;
 
-    [Required(ErrorMessage = "Address is required.")]
-    [MaxLength(250)]
-    public string AddressLine { get; init; } = string.Empty;
+    [MaxLength(250, ErrorMessage = "Address must be at most 250 characters.")]
+    public string? AddressLine { get; init; }
 
     [Range(typeof(decimal), "-90", "90", ErrorMessage = "Latitude must be between -90 and 90.")]
-    public decimal Latitude { get; init; }
+    public decimal? Latitude { get; init; }
 
     [Range(typeof(decimal), "-180", "180", ErrorMessage = "Longitude must be between -180 and 180.")]
-    public decimal Longitude { get; init; }
+    public decimal? Longitude { get; init; }
 
-    // ---- Toy-rental MVP: optional toy-specific metadata (additive) ----
-    // 600 months ≈ 50 years; bounded only to catch obvious data-entry errors.
+    // ---- Toy-rental MVP: optional toy-specific metadata ----
     [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]
     public int? AgeFromMonths { get; init; }
 

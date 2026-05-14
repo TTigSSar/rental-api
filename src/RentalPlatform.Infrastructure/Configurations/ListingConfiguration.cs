@@ -37,16 +37,13 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
             .HasMaxLength(120);
 
         builder.Property(listing => listing.AddressLine)
-            .IsRequired()
             .HasMaxLength(250);
 
         builder.Property(listing => listing.Latitude)
-            .HasPrecision(9, 6)
-            .IsRequired();
+            .HasPrecision(9, 6);
 
         builder.Property(listing => listing.Longitude)
-            .HasPrecision(9, 6)
-            .IsRequired();
+            .HasPrecision(9, 6);
 
         builder.Property(listing => listing.Status)
             .IsRequired();

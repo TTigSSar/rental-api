@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IListingsQueryService, ListingsQueryService>();
         services.AddScoped<IHomeSectionsService, HomeSectionsQueryService>();
+        services.AddScoped<IEmailService, DevelopmentEmailService>();
         services.AddScoped<IListingsOwnerService, ListingsOwnerService>();
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();

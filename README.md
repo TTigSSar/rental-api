@@ -1,4 +1,4 @@
-# Child Toys Rental Backend
+﻿# Child Toys Rental Backend
 
 This document describes the **current** backend as implemented in this repository. The product is a **child toys rental MVP**: parents in Armenia/Yerevan list children's toys, admins moderate them, other parents browse approved toys and request short-term rentals. This document is derived from the codebase only; anything not present in code is called out explicitly under **Known gaps**.
 
@@ -165,12 +165,31 @@ There is **no** separate BFF, GraphQL, or SignalR layer in this solution.
 
 **Implemented**
 
-- `GET /api/admin/listings/pending` — `[Authorize(Roles = "Admin")]`.
-- `POST /api/admin/listings/{id}/approve` and `…/reject` — only if listing status is **`PendingApproval`**; service also verifies `UserRole.Admin` and not blocked.
+- `GET /api/admin/listings/pending` — returns `PendingListingForReviewResponse[]`; includes full listing detail (description, toy-specific fields, images, owner info) so the admin has everything needed to decide.
+- `POST /api/admin/listings/{id}/approve` — sets status `Approved`, records `moderatedAt` + `moderatedByUserId`, clears any prior `rejectionReason`, saves, then fires an approval email to the owner.
+- `POST /api/admin/listings/{id}/reject` — request body `{ "reason": "string" }` (required, 1–1000 chars); sets status `Rejected`, stores `rejectionReason`, records `moderatedAt` + `moderatedByUserId`, saves, then fires a rejection email to the owner.
+
+Both moderation endpoints return `ModerateListingResponse` (`id`, `status`, `rejectionReason`, `moderatedAt`, `message`).
+
+**Moderation entity fields** (added via migration `20260515061307_AddListingModerationFields`):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `RejectionReason` | `nvarchar(1000) NULL` | Set on reject, cleared on approve. |
+| `ModeratedAt` | `datetime2 NULL` | UTC timestamp of the last moderation action. |
+| `ModeratedByUserId` | `uniqueidentifier NULL` | Admin user id; stored for audit, no FK constraint. |
+
+**Email notification behavior**
+
+- Abstraction: `IEmailService` in `Application/Abstractions`. Contract: **never throws** — implementations handle and log all failures internally.
+- Development implementation: `DevelopmentEmailService` (`Infrastructure/Services`). Writes full email content (recipient, subject, body) to the application log at `Information` level using `ILogger<DevelopmentEmailService>`. No SMTP required locally.
+- Production replacement: swap `DevelopmentEmailService` for an SMTP/SES/SendGrid implementation in DI — the application layer requires no changes.
+- **Email failure policy (MVP)**: moderation action (approve/reject) is committed to the database first; the email is fired after. If the email service implementation throws despite the contract, the moderation result is still returned to the caller. Production implementations should catch their own exceptions.
 
 **Partial / notes**
 
-- Admin authorization is both **policy attribute** and **service-layer** role check (defense in depth, not a gap).
+- Admin authorization is both `[Authorize(Roles = "Admin")]` policy attribute and explicit `UserRole` check in the service (defense in depth).
+- Only `PendingApproval` listings can be moderated; re-moderating an already-approved or rejected listing returns `409 Conflict`.
 
 ### File storage
 
@@ -234,7 +253,11 @@ There is **no** separate BFF, GraphQL, or SignalR layer in this solution.
 ### Admin rules (`AdminListingsService`)
 
 - Must be authenticated, `UserRole.Admin`, not blocked.
-- Approve/reject only when listing is **`PendingApproval`**.
+- Approve/reject only when listing is **`PendingApproval`**; otherwise `409 Conflict`.
+- **Reject** requires a non-empty `reason` (1–1000 chars, trimmed); validated by `RejectListingRequest` DTO and enforced in service.
+- Approve sets `Status = Approved`, clears `RejectionReason`, records `ModeratedAt` + `ModeratedByUserId`.
+- Reject sets `Status = Rejected`, stores `RejectionReason`, records `ModeratedAt` + `ModeratedByUserId`.
+- Owner email notification is fired after saving; if the notification fails (in a production SMTP scenario), the moderation result is still returned — email failures never roll back moderation.
 
 ---
 
@@ -271,33 +294,11 @@ Base route pattern: **`/api/{controller}`** except admin listings (**`/api/admin
 
 Controller has **`[Authorize]`** on the class — all actions require JWT.
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/api/bookings` | Create booking request. |
-| GET | `/api/bookings/mine` | Renter’s bookings. |
-| GET | `/api/bookings/requests` | Owner’s **pending** requests. |
-| POST | `/api/bookings/{id}/approve` | Owner approves. |
-| POST | `/api/bookings/{id}/reject` | Owner rejects. |
-
-### Favorites — `FavoritesController` → `/api/favorites`
-
-Class **`[Authorize]`**.
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/api/favorites` | My favorites (listing previews). |
-| POST | `/api/favorites/{listingId}` | Add favorite; returns `bool`. |
-| DELETE | `/api/favorites/{listingId}` | Remove favorite (204 on success). |
-
-### Admin — `AdminListingsController` → `/api/admin/listings`
-
-**`[Authorize(Roles = "Admin")]`** on controller.
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/api/admin/listings/pending` | Pending listings queue. |
-| POST | `/api/admin/listings/{id}/approve` | Approve listing. |
-| POST | `/api/admin/listings/{id}/reject` | Reject listing. |
+| Method | Route | Request body | Description |
+|--------|-------|--------------|-------------|
+| GET | `/api/admin/listings/pending` | — | Full pending queue (`PendingListingForReviewResponse[]`). |
+| POST | `/api/admin/listings/{id}/approve` | — | Approve; fires owner email. Returns `ModerateListingResponse`. |
+| POST | `/api/admin/listings/{id}/reject` | `{ "reason": "..." }` | Reject with required reason; fires owner email. Returns `ModerateListingResponse`. |
 
 ---
 

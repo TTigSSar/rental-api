@@ -20,10 +20,11 @@ public sealed class AdminListingsController : ControllerBase
     }
 
     [HttpGet("pending")]
-    [ProducesResponseType(typeof(IReadOnlyCollection<AdminPendingListingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyCollection<PendingListingForReviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<IReadOnlyCollection<AdminPendingListingResponse>>> GetPending(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyCollection<PendingListingForReviewResponse>>> GetPending(
+        CancellationToken cancellationToken)
     {
         var result = await _adminListingsService.GetPendingAsync(cancellationToken);
         if (result.IsSuccess && result.Value is not null)
@@ -35,12 +36,14 @@ public sealed class AdminListingsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/approve")]
-    [ProducesResponseType(typeof(AdminPendingListingResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ModerateListingResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<AdminPendingListingResponse>> Approve(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<ModerateListingResponse>> Approve(
+        Guid id,
+        CancellationToken cancellationToken)
     {
         var result = await _adminListingsService.ApproveAsync(id, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
@@ -52,14 +55,18 @@ public sealed class AdminListingsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/reject")]
-    [ProducesResponseType(typeof(AdminPendingListingResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ModerateListingResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<AdminPendingListingResponse>> Reject(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<ModerateListingResponse>> Reject(
+        Guid id,
+        [FromBody] RejectListingRequest request,
+        CancellationToken cancellationToken)
     {
-        var result = await _adminListingsService.RejectAsync(id, cancellationToken);
+        var result = await _adminListingsService.RejectAsync(id, request.Reason, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);

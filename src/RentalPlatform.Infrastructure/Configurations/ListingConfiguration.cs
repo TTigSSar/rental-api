@@ -54,6 +54,14 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.UpdatedAt)
             .IsRequired();
 
+        // Moderation fields — all nullable; populated only when an admin acts on the listing.
+        builder.Property(listing => listing.RejectionReason)
+            .HasMaxLength(1000);
+
+        builder.Property(listing => listing.ModeratedAt);
+
+        builder.Property(listing => listing.ModeratedByUserId);
+
         // Toy-rental MVP optional fields. Nullable in DB so generic-listing rows stay valid.
         builder.Property(listing => listing.AgeFromMonths);
 

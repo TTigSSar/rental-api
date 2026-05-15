@@ -23,6 +23,9 @@ public sealed class AdminListingsStore : IAdminListingsStore
             .Where(listing => listing.Status == ListingStatus.PendingApproval)
             .Include(listing => listing.Owner)
             .Include(listing => listing.Category)
+            .Include(listing => listing.Images.OrderByDescending(i => i.IsPrimary).ThenBy(i => i.SortOrder))
+            .AsSplitQuery()
+            .OrderBy(listing => listing.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>

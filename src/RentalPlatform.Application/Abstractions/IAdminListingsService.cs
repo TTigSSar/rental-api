@@ -5,7 +5,15 @@ namespace RentalPlatform.Application.Abstractions;
 
 public interface IAdminListingsService
 {
-    Task<ServiceResult<IReadOnlyCollection<AdminPendingListingResponse>>> GetPendingAsync(CancellationToken cancellationToken = default);
-    Task<ServiceResult<AdminPendingListingResponse>> ApproveAsync(Guid listingId, CancellationToken cancellationToken = default);
-    Task<ServiceResult<AdminPendingListingResponse>> RejectAsync(Guid listingId, CancellationToken cancellationToken = default);
+    Task<ServiceResult<IReadOnlyCollection<PendingListingForReviewResponse>>> GetPendingAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<ModerateListingResponse>> ApproveAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<ModerateListingResponse>> RejectAsync(
+        Guid listingId,
+        string reason,
+        CancellationToken cancellationToken = default);
 }

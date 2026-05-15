@@ -20,6 +20,11 @@ public sealed class Listing
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    // Moderation fields — populated by admin actions (approve / reject).
+    public string? RejectionReason { get; set; }
+    public DateTime? ModeratedAt { get; set; }
+    public Guid? ModeratedByUserId { get; set; }
+
     // Toy-rental MVP: optional, additive metadata. All fields are nullable so existing
     // generic-listing rows remain valid and the create-listing contract stays backward compatible.
     public int? AgeFromMonths { get; set; }

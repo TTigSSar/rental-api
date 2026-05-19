@@ -1,6 +1,7 @@
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -20,6 +21,7 @@ public sealed class BookingsService : IBookingsService
         public const string BookingNotFound = "booking.not_found";
         public const string BookingForbidden = "booking.forbidden";
         public const string BookingNotPending = "booking.not_pending";
+        public const string NotCancellable = "booking.not_cancellable";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -67,18 +69,6 @@ public sealed class BookingsService : IBookingsService
             return Failure<BookingResponse>(ErrorCodes.InvalidDates, dateValidation);
         }
 
-        var hasOverlap = await _bookingsStore.HasApprovedOverlapAsync(
-            listing.Id,
-            request.StartDate,
-            request.EndDate,
-            excludedBookingId: null,
-            cancellationToken);
-
-        if (hasOverlap)
-        {
-            return Failure<BookingResponse>(ErrorCodes.Overlap, "The selected dates overlap with an approved booking.");
-        }
-
         var inclusiveDays = request.EndDate.DayNumber - request.StartDate.DayNumber + 1;
         var booking = new Booking
         {
@@ -94,8 +84,13 @@ public sealed class BookingsService : IBookingsService
             UpdatedAt = now
         };
 
-        await _bookingsStore.AddBookingAsync(booking, cancellationToken);
-        await _bookingsStore.SaveChangesAsync(cancellationToken);
+        // Atomic overlap-then-insert. Blocks if any Pending OR Approved booking covers the
+        // requested range — preventing both duplicate-request and racing concurrent creates.
+        var added = await _bookingsStore.TryCreateBookingAsync(booking, cancellationToken);
+        if (!added)
+        {
+            return Failure<BookingResponse>(ErrorCodes.Overlap, "The selected dates overlap with an existing booking request.");
+        }
 
         // Attach the already-loaded listing so MapBooking can read listing fields without a second DB query.
         // listing.Images is an empty collection here (not included), so PrimaryImageUrl will be null.
@@ -150,6 +145,56 @@ public sealed class BookingsService : IBookingsService
     public Task<ServiceResult<BookingRequestResponse>> RejectAsync(Guid id, CancellationToken cancellationToken = default) =>
         UpdateOwnerDecisionAsync(id, BookingStatus.Rejected, cancellationToken);
 
+    public async Task<ServiceResult<BookingResponse>> CancelAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+
+        var userResult = await GetCurrentUserAsync(cancellationToken);
+        if (!userResult.IsSuccess || userResult.Value is null)
+        {
+            return ServiceResult<BookingResponse>.Failure(userResult.Error!);
+        }
+
+        var renter = userResult.Value;
+        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
+        if (booking is null)
+        {
+            return Failure<BookingResponse>(ErrorCodes.BookingNotFound, "Booking was not found.");
+        }
+
+        if (booking.RenterId != renter.Id)
+        {
+            return Failure<BookingResponse>(ErrorCodes.BookingForbidden, "Only the renter can cancel this booking.");
+        }
+
+        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Cancelled))
+        {
+            return Failure<BookingResponse>(
+                ErrorCodes.NotCancellable,
+                $"Bookings in status '{booking.Status}' cannot be cancelled.");
+        }
+
+        // Approved bookings can only be cancelled before the rental start date.
+        // (No refund/payment logic; cancellation after start is intentionally blocked here.)
+        if (booking.Status == BookingStatus.Approved)
+        {
+            var today = DateOnly.FromDateTime(now);
+            if (booking.StartDate <= today)
+            {
+                return Failure<BookingResponse>(
+                    ErrorCodes.NotCancellable,
+                    "Approved bookings cannot be cancelled on or after the rental start date.");
+            }
+        }
+
+        booking.Status = BookingStatus.Cancelled;
+        booking.UpdatedAt = now;
+        await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<BookingResponse>.Success(MapBooking(booking));
+    }
+
     private async Task<ServiceResult<BookingRequestResponse>> UpdateOwnerDecisionAsync(
         Guid bookingId,
         BookingStatus decision,
@@ -176,7 +221,9 @@ public sealed class BookingsService : IBookingsService
             return Failure<BookingRequestResponse>(ErrorCodes.BookingForbidden, "Only listing owner can manage this booking request.");
         }
 
-        if (booking.Status != BookingStatus.Pending || booking.ExpiresAt <= now)
+        // Defensive: ExpirePendingAsync already promoted any past-expiry rows to Expired, but
+        // guard against a race where ExpiresAt slipped past 'now' between the sweep and the read.
+        if (!BookingStatusTransitions.CanTransition(booking.Status, decision) || booking.ExpiresAt <= now)
         {
             return Failure<BookingRequestResponse>(ErrorCodes.BookingNotPending, "Only valid pending booking requests can be managed.");
         }

@@ -332,6 +332,14 @@ internal static class DevelopmentSeedData
             DevelopmentSeedCredentials.RenterEmail,
             StartDaysFromToday: -10, DurationDays: 4,
             BookingStatus.Completed,
-            ExpiresAtHoursFromNow: -240, CreatedDaysAgo: 14)
+            ExpiresAtHoursFromNow: -240, CreatedDaysAgo: 14),
+        // Renter-cancelled booking — exercises the new cancellation flow in the UI.
+        new(
+            new Guid("55555555-0006-4000-9000-000000000006"),
+            ListingIds.ChildrensPuzzleBundle,
+            DevelopmentSeedCredentials.RenterEmail,
+            StartDaysFromToday: 25, DurationDays: 3,
+            BookingStatus.Cancelled,
+            ExpiresAtHoursFromNow: -48, CreatedDaysAgo: 4)
     ];
 }

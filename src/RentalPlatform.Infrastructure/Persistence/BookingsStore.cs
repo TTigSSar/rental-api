@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
@@ -52,6 +53,33 @@ public sealed class BookingsStore : IBookingsStore
 
     public async Task AddBookingAsync(Booking booking, CancellationToken cancellationToken = default) =>
         await _dbContext.Bookings.AddAsync(booking, cancellationToken);
+
+    public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        // SERIALIZABLE prevents two concurrent transactions from both passing the overlap
+        // check and inserting overlapping bookings: SQL Server holds a key-range lock during
+        // the AnyAsync read, so the second transaction blocks until the first commits/rolls back.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
+
+        var hasBlockingOverlap = await _dbContext.Bookings.AnyAsync(other =>
+            other.ListingId == booking.ListingId &&
+            (other.Status == BookingStatus.Pending || other.Status == BookingStatus.Approved) &&
+            other.StartDate <= booking.EndDate &&
+            other.EndDate >= booking.StartDate,
+            cancellationToken);
+
+        if (hasBlockingOverlap)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return false;
+        }
+
+        await _dbContext.Bookings.AddAsync(booking, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
 
     public async Task<IReadOnlyCollection<Booking>> GetRenterBookingsAsync(
         Guid renterId,

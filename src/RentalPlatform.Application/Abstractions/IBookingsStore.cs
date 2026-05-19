@@ -14,6 +14,11 @@ public interface IBookingsStore
         Guid? excludedBookingId,
         CancellationToken cancellationToken = default);
 
+    // Atomically checks for Pending+Approved overlap and, if absent, persists the booking.
+    // Returns true when the booking was added; false when a blocking overlap was detected.
+    // Implemented under a SERIALIZABLE transaction so concurrent creates cannot both succeed.
+    Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default);
+
     Task AddBookingAsync(Booking booking, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Booking>> GetRenterBookingsAsync(Guid renterId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Booking>> GetOwnerBookingRequestsAsync(Guid ownerId, CancellationToken cancellationToken = default);

@@ -1,0 +1,16 @@
+using Microsoft.EntityFrameworkCore;
+using RentalPlatform.Infrastructure.Persistence;
+
+namespace RentalPlatform.Api.Extensions;
+
+public static class MigrationExtensions
+{
+    // Applies pending EF Core migrations on startup. Runs in all environments so the
+    // schema is current before any traffic is served and before the dev seed runs.
+    public static async Task ApplyMigrationsAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await dbContext.Database.MigrateAsync(cancellationToken);
+    }
+}

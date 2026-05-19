@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -19,12 +21,14 @@ public sealed class BookingsController : ControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting(RateLimiterExtensions.BookingCreatePolicy)]
     [ProducesResponseType(typeof(BookingResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<BookingResponse>> Create(
         [FromBody] CreateBookingRequest request,
         CancellationToken cancellationToken)

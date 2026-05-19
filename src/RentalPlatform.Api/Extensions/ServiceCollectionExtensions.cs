@@ -21,7 +21,7 @@ public static class ServiceCollectionExtensions
     {
         var jwtSettings = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
             ?? throw new InvalidOperationException("JWT settings are not configured.");
-        ValidateJwtOptions(jwtSettings);
+        ValidateJwtOptions(jwtSettings, environment);
 
         services.AddControllers();
         services.AddEndpointsApiExplorer();
@@ -90,12 +90,13 @@ public static class ServiceCollectionExtensions
             });
         });
 
+        services.AddApiRateLimiting();
         services.AddInfrastructure(configuration);
 
         return services;
     }
 
-    private static void ValidateJwtOptions(JwtOptions jwtOptions)
+    private static void ValidateJwtOptions(JwtOptions jwtOptions, IWebHostEnvironment environment)
     {
         if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
         {
@@ -109,7 +110,8 @@ public static class ServiceCollectionExtensions
 
         if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey))
         {
-            throw new InvalidOperationException("Jwt:SecretKey is required.");
+            throw new InvalidOperationException(
+                "Jwt:SecretKey is required. Provide a strong value via environment variable Jwt__SecretKey or user secrets (never commit it).");
         }
 
         if (jwtOptions.SecretKey.Length < 32)
@@ -121,7 +123,23 @@ public static class ServiceCollectionExtensions
         {
             throw new InvalidOperationException("Jwt:AccessTokenExpirationMinutes must be greater than zero.");
         }
+
+        // Non-Development environments must never boot with a bundled placeholder/dev secret.
+        // The Development appsettings ships a long-but-known string for demos; in any other
+        // environment we require an operator-supplied value.
+        if (!environment.IsDevelopment() && LooksLikePlaceholderSecret(jwtOptions.SecretKey))
+        {
+            throw new InvalidOperationException(
+                "Jwt:SecretKey looks like a development placeholder. Set a strong, unique value via environment variable Jwt__SecretKey or user secrets before running outside Development.");
+        }
     }
+
+    private static bool LooksLikePlaceholderSecret(string secret) =>
+        secret.Contains("development-only", StringComparison.OrdinalIgnoreCase)
+        || secret.Contains("change-before", StringComparison.OrdinalIgnoreCase)
+        || secret.Contains("placeholder", StringComparison.OrdinalIgnoreCase)
+        || secret.Contains("changeme", StringComparison.OrdinalIgnoreCase)
+        || secret.Contains("example", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsAllowedOrigin(string origin, IReadOnlySet<string> allowedOrigins, bool isDevelopment)
     {

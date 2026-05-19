@@ -7,6 +7,10 @@ namespace RentalPlatform.Application.Services;
 
 public sealed class ListingImagesOwnerService : IListingImagesOwnerService
 {
+    // Per-upload count cap. The HTTP layer also enforces a multipart body size
+    // limit; this cap protects against many small files in one multipart batch.
+    public const int MaxImagesPerUpload = 10;
+
     private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/jpeg",
@@ -32,6 +36,7 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         public const string ListingForbidden = "listing.forbidden";
         public const string EmptyFile = "listing.image_empty";
         public const string InvalidFileType = "listing.image_invalid_type";
+        public const string TooManyImages = "listing.image_too_many";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -106,6 +111,15 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
             {
                 Code = ErrorCodes.EmptyFile,
                 Message = "At least one file must be provided."
+            });
+        }
+
+        if (files.Count > MaxImagesPerUpload)
+        {
+            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.TooManyImages,
+                Message = $"Up to {MaxImagesPerUpload} images can be uploaded per request."
             });
         }
 

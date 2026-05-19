@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RentalPlatform.Api.Controllers.Requests;
+using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -11,6 +13,10 @@ namespace RentalPlatform.Api.Controllers;
 [Route("api/[controller]")]
 public sealed class ListingsController : ControllerBase
 {
+    // 25 MB cap on the multipart upload body. Sized for ~10 images x ~2.5 MB each
+    // with room for multipart boundaries; coordinated with MaxImagesPerUpload in the service layer.
+    private const long MaxUploadBytes = 25L * 1024 * 1024;
+
     private readonly IListingsQueryService _listingsQueryService;
     private readonly IListingsOwnerService _listingsOwnerService;
     private readonly IListingImagesOwnerService _listingImagesOwnerService;
@@ -88,11 +94,15 @@ public sealed class ListingsController : ControllerBase
 
     [HttpPost("{listingId:guid}/images")]
     [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.ImageUploadPolicy)]
+    [RequestSizeLimit(MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadBytes)]
     [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<IReadOnlyCollection<ListingImageResponse>>> UploadImages(
         Guid listingId,
         [FromForm] UploadListingImagesRequest request,
@@ -152,6 +162,7 @@ public sealed class ListingsController : ControllerBase
             "listing.invalid_age_range" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_too_many" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

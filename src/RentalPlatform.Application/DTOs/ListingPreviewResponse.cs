@@ -11,5 +11,8 @@ public sealed class ListingPreviewResponse
     public string Country { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;
     public string? PrimaryImageUrl { get; init; }
+    public int? AgeFromMonths { get; init; }
+    public int? AgeToMonths { get; init; }
+    public string? Condition { get; init; }
     public DateTime CreatedAt { get; init; }
 }

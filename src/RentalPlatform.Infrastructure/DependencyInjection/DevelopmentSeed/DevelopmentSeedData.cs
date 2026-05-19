@@ -40,7 +40,8 @@ internal static class DevelopmentSeedData
         string? Condition,
         string? HygieneNotes,
         string? SafetyNotes,
-        decimal? DepositAmount);
+        decimal? DepositAmount,
+        string? RejectionReason = null);
 
     public sealed record SeedListingImage(
         Guid Id,
@@ -260,7 +261,8 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: null,
             SafetyNotes: null,
-            DepositAmount: 25m)
+            DepositAmount: 25m,
+            RejectionReason: "Hygiene notes are required. Please describe how the item is cleaned between rentals.")
     ];
 
     // Every listing gets at least one primary image; several have a multi-image gallery.

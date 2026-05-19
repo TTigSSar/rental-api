@@ -162,6 +162,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 Country = listing.Country,
                 City = listing.City,
                 Status = listing.Status,
+                RejectionReason = listing.RejectionReason,
+                PrimaryImageUrl = listing.Images
+                    .OrderByDescending(image => image.IsPrimary)
+                    .ThenBy(image => image.SortOrder)
+                    .Select(image => image.Url)
+                    .FirstOrDefault(),
+                ModeratedAt = listing.ModeratedAt,
                 CreatedAt = listing.CreatedAt,
                 UpdatedAt = listing.UpdatedAt
             })

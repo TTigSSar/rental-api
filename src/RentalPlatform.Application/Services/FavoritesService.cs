@@ -49,6 +49,9 @@ public sealed class FavoritesService : IFavoritesService
                     .ThenBy(image => image.SortOrder)
                     .Select(image => image.Url)
                     .FirstOrDefault(),
+                AgeFromMonths = favorite.Listing.AgeFromMonths,
+                AgeToMonths = favorite.Listing.AgeToMonths,
+                Condition = favorite.Listing.Condition,
                 CreatedAt = favorite.Listing.CreatedAt
             })
             .ToList();

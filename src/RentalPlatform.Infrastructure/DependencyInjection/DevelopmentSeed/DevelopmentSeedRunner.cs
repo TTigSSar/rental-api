@@ -198,6 +198,7 @@ internal sealed class DevelopmentSeedRunner
                 HygieneNotes = seed.HygieneNotes,
                 SafetyNotes = seed.SafetyNotes,
                 DepositAmount = seed.DepositAmount,
+                RejectionReason = seed.RejectionReason,
                 Status = seed.Status,
                 CreatedAt = now.AddDays(-seed.CreatedDaysAgo),
                 UpdatedAt = now.AddDays(-seed.UpdatedDaysAgo)

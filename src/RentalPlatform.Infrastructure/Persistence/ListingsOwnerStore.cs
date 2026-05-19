@@ -29,6 +29,7 @@ public sealed class ListingsOwnerStore : IListingsOwnerStore
             .AsNoTracking()
             .Where(listing => listing.OwnerId == ownerId)
             .Include(listing => listing.Category)
+            .Include(listing => listing.Images)
             .ToListAsync(cancellationToken);
 
     public Task<Listing?> FindListingByIdWithImagesAsync(Guid listingId, CancellationToken cancellationToken = default) =>

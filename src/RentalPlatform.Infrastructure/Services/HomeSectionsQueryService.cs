@@ -99,6 +99,9 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
                 .ThenBy(image => image.SortOrder)
                 .Select(image => image.Url)
                 .FirstOrDefault(),
+            AgeFromMonths = listing.AgeFromMonths,
+            AgeToMonths = listing.AgeToMonths,
+            Condition = listing.Condition,
             CreatedAt = listing.CreatedAt
         };
 }

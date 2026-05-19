@@ -59,6 +59,8 @@ public sealed class BookingsStore : IBookingsStore
         await _dbContext.Bookings
             .AsNoTracking()
             .Where(booking => booking.RenterId == renterId)
+            .Include(booking => booking.Listing)
+                .ThenInclude(listing => listing.Images)
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyCollection<Booking>> GetOwnerBookingRequestsAsync(
@@ -68,12 +70,14 @@ public sealed class BookingsStore : IBookingsStore
             .AsNoTracking()
             .Where(booking => booking.Listing.OwnerId == ownerId && booking.Status == BookingStatus.Pending)
             .Include(booking => booking.Listing)
+                .ThenInclude(listing => listing.Images)
             .Include(booking => booking.Renter)
             .ToListAsync(cancellationToken);
 
     public Task<Booking?> FindBookingWithRelationsByIdAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
         _dbContext.Bookings
             .Include(booking => booking.Listing)
+                .ThenInclude(listing => listing.Images)
             .Include(booking => booking.Renter)
             .FirstOrDefaultAsync(booking => booking.Id == bookingId, cancellationToken);
 

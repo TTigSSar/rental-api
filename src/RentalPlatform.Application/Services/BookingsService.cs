@@ -97,6 +97,9 @@ public sealed class BookingsService : IBookingsService
         await _bookingsStore.AddBookingAsync(booking, cancellationToken);
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
+        // Attach the already-loaded listing so MapBooking can read listing fields without a second DB query.
+        // listing.Images is an empty collection here (not included), so PrimaryImageUrl will be null.
+        booking.Listing = listing;
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
 
@@ -241,6 +244,15 @@ public sealed class BookingsService : IBookingsService
     {
         Id = booking.Id,
         ListingId = booking.ListingId,
+        ListingTitle = booking.Listing.Title,
+        ListingPrimaryImageUrl = booking.Listing.Images
+            .OrderByDescending(image => image.IsPrimary)
+            .ThenBy(image => image.SortOrder)
+            .Select(image => image.Url)
+            .FirstOrDefault(),
+        Currency = booking.Listing.Currency,
+        PricePerDay = booking.Listing.PricePerDay,
+        DepositAmount = booking.Listing.DepositAmount,
         StartDate = booking.StartDate,
         EndDate = booking.EndDate,
         TotalPrice = booking.TotalPrice,
@@ -255,6 +267,12 @@ public sealed class BookingsService : IBookingsService
         Id = booking.Id,
         ListingId = booking.ListingId,
         ListingTitle = booking.Listing.Title,
+        ListingPrimaryImageUrl = booking.Listing.Images
+            .OrderByDescending(image => image.IsPrimary)
+            .ThenBy(image => image.SortOrder)
+            .Select(image => image.Url)
+            .FirstOrDefault(),
+        Currency = booking.Listing.Currency,
         RenterId = booking.RenterId,
         RenterEmail = booking.Renter.Email,
         RenterFirstName = booking.Renter.FirstName,

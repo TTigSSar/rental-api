@@ -7,6 +7,8 @@ public sealed class BookingRequestResponse
     public Guid Id { get; init; }
     public Guid ListingId { get; init; }
     public string ListingTitle { get; init; } = string.Empty;
+    public string? ListingPrimaryImageUrl { get; init; }
+    public string Currency { get; init; } = string.Empty;
     public Guid RenterId { get; init; }
     public string RenterEmail { get; init; } = string.Empty;
     public string RenterFirstName { get; init; } = string.Empty;

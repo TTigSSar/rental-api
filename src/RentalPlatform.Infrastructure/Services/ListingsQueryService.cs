@@ -72,6 +72,9 @@ public sealed class ListingsQueryService : IListingsQueryService
                     .ThenBy(image => image.SortOrder)
                     .Select(image => image.Url)
                     .FirstOrDefault(),
+                AgeFromMonths = listing.AgeFromMonths,
+                AgeToMonths = listing.AgeToMonths,
+                Condition = listing.Condition,
                 CreatedAt = listing.CreatedAt
             })
             .ToListAsync(cancellationToken);

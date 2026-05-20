@@ -10,7 +10,7 @@ public static class TestData
 {
     public static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public static User User(Guid id, string email, bool isBlocked = false) => new()
+    public static User User(Guid id, string email, bool isBlocked = false, UserRole role = UserRole.User) => new()
     {
         Id = id,
         Email = email,
@@ -20,7 +20,7 @@ public static class TestData
         PreferredLanguage = "en",
         CreatedAt = DateTime.UtcNow,
         IsBlocked = isBlocked,
-        Role = UserRole.User
+        Role = role
     };
 
     public static Category Category(Guid id) => new()

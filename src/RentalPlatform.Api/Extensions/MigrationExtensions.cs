@@ -11,6 +11,13 @@ public static class MigrationExtensions
     {
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await dbContext.Database.MigrateAsync(cancellationToken);
+
+        // SQLite (used in integration tests) does not support EF migrations because the
+        // migration scripts are SQL Server-specific. EnsureCreated builds an equivalent
+        // schema directly from the model, which is sufficient for the test environment.
+        if (dbContext.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        else
+            await dbContext.Database.MigrateAsync(cancellationToken);
     }
 }

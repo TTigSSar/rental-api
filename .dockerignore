@@ -1,0 +1,48 @@
+# Build artifacts
+**/bin/
+**/obj/
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Tests (not needed in the image)
+tests/
+
+# IDE and tooling
+.vs/
+.vscode/
+*.user
+*.suo
+.idea/
+**/.idea/
+
+# Local secrets and environment overrides
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/*.user.json
+.env
+.env.*
+
+# Docker files themselves (avoid recursive context bloat)
+Dockerfile*
+.dockerignore
+docker-compose*
+
+# CI
+.github/
+
+# Documentation and non-essential files
+*.md
+frontend-contract/
+df/
+
+# Node / frontend (if ever co-located)
+**/node_modules/
+npm-debug.log*
+
+# NuGet cache
+**/.nuget/
+**/packages/
+nuget.config

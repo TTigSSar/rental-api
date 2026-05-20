@@ -145,6 +145,26 @@ public sealed class ListingsController : ControllerBase
         }
     }
 
+    [HttpDelete("{listingId:guid}/images/{imageId:guid}")]
+    [Authorize]
+    [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyCollection<ListingImageResponse>>> DeleteImage(
+        Guid listingId,
+        Guid imageId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingImagesOwnerService.DeleteAsync(listingId, imageId, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
     private ActionResult FromOwnerError(ServiceError? error)
     {
         if (error is null)
@@ -163,6 +183,9 @@ public sealed class ListingsController : ControllerBase
             "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_too_many" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_listing_limit" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "listing.image_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

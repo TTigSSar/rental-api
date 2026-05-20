@@ -11,6 +11,13 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
     // limit; this cap protects against many small files in one multipart batch.
     public const int MaxImagesPerUpload = 10;
 
+    // Hard ceiling on how many images a single listing can accumulate over time.
+    public const int MaxImagesPerListing = 20;
+
+    // Per-file size ceiling. The HTTP layer caps the whole multipart body; this
+    // bounds each individual image so one huge file cannot consume the budget.
+    public const long MaxBytesPerFile = 5L * 1024 * 1024;
+
     private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/jpeg",
@@ -37,6 +44,9 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         public const string EmptyFile = "listing.image_empty";
         public const string InvalidFileType = "listing.image_invalid_type";
         public const string TooManyImages = "listing.image_too_many";
+        public const string ListingImageLimit = "listing.image_listing_limit";
+        public const string FileTooLarge = "listing.image_too_large";
+        public const string ImageNotFound = "listing.image_not_found";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -58,9 +68,191 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         IReadOnlyCollection<UploadListingImageRequest> files,
         CancellationToken cancellationToken = default)
     {
+        var ownerResult = await ResolveOwnedListingAsync(listingId, cancellationToken);
+        if (!ownerResult.IsSuccess || ownerResult.Value is null)
+        {
+            return Failure(ownerResult.Error!);
+        }
+
+        var listing = ownerResult.Value;
+
+        if (files.Count == 0)
+        {
+            return Failure(ErrorCodes.EmptyFile, "At least one file must be provided.");
+        }
+
+        if (files.Count > MaxImagesPerUpload)
+        {
+            return Failure(ErrorCodes.TooManyImages, $"Up to {MaxImagesPerUpload} images can be uploaded per request.");
+        }
+
+        if (listing.Images.Count + files.Count > MaxImagesPerListing)
+        {
+            return Failure(
+                ErrorCodes.ListingImageLimit,
+                $"A listing can have at most {MaxImagesPerListing} images. This listing already has {listing.Images.Count}.");
+        }
+
+        // Pass 1: buffer + fully validate every file BEFORE any disk write, so a late
+        // validation failure cannot leave a partially-uploaded set of orphan files.
+        var buffered = new List<BufferedUpload>(files.Count);
+        try
+        {
+            foreach (var file in files)
+            {
+                if (file.Length > MaxBytesPerFile)
+                {
+                    return Failure(ErrorCodes.FileTooLarge, $"File '{file.FileName}' exceeds the {MaxBytesPerFile / (1024 * 1024)} MB limit.");
+                }
+
+                var extension = Path.GetExtension(file.FileName);
+                if (string.IsNullOrEmpty(extension) || !AllowedExtensions.Contains(extension))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a supported image type.");
+                }
+
+                if (!AllowedContentTypes.Contains(file.ContentType))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a supported image type.");
+                }
+
+                var memory = new MemoryStream();
+                buffered.Add(new BufferedUpload(memory, file.FileName, file.ContentType));
+                await file.Content.CopyToAsync(memory, cancellationToken);
+
+                if (memory.Length == 0)
+                {
+                    return Failure(ErrorCodes.EmptyFile, $"File '{file.FileName}' is empty.");
+                }
+
+                if (memory.Length > MaxBytesPerFile)
+                {
+                    return Failure(ErrorCodes.FileTooLarge, $"File '{file.FileName}' exceeds the {MaxBytesPerFile / (1024 * 1024)} MB limit.");
+                }
+
+                // Magic-byte check: the bytes themselves must look like a whitelisted image,
+                // regardless of what the filename extension or content-type header claim.
+                var header = new byte[ImageContentValidator.HeaderBytesRequired];
+                memory.Position = 0;
+                var read = await memory.ReadAsync(header, cancellationToken);
+                memory.Position = 0;
+
+                if (!ImageContentValidator.TryDetectMimeType(header.AsSpan(0, read), out var detectedMime)
+                    || !AllowedContentTypes.Contains(detectedMime))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a valid or supported image.");
+                }
+            }
+
+            // Pass 2: persist. Validation has fully passed for every file at this point.
+            var uploadedImages = new List<ListingImage>(buffered.Count);
+            var hasPrimary = listing.Images.Any(image => image.IsPrimary);
+            var sortOrder = listing.Images.Count == 0 ? 0 : listing.Images.Max(image => image.SortOrder) + 1;
+
+            foreach (var item in buffered)
+            {
+                item.Content.Position = 0;
+                var storedUrl = await _fileStorageService.SaveListingImageAsync(
+                    item.Content,
+                    item.FileName,
+                    item.ContentType,
+                    listing.Id,
+                    cancellationToken);
+
+                uploadedImages.Add(new ListingImage
+                {
+                    Id = Guid.NewGuid(),
+                    ListingId = listing.Id,
+                    Url = storedUrl,
+                    IsPrimary = !hasPrimary && uploadedImages.Count == 0,
+                    SortOrder = sortOrder++
+                });
+            }
+
+            await _listingsOwnerStore.AddListingImagesAsync(uploadedImages, cancellationToken);
+            listing.UpdatedAt = DateTime.UtcNow;
+            await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(
+                uploadedImages
+                    .OrderBy(image => image.SortOrder)
+                    .Select(ToResponse)
+                    .ToList());
+        }
+        finally
+        {
+            foreach (var item in buffered)
+            {
+                await item.Content.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<ServiceResult<IReadOnlyCollection<ListingImageResponse>>> DeleteAsync(
+        Guid listingId,
+        Guid imageId,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerResult = await ResolveOwnedListingAsync(listingId, cancellationToken);
+        if (!ownerResult.IsSuccess || ownerResult.Value is null)
+        {
+            return Failure(ownerResult.Error!);
+        }
+
+        var listing = ownerResult.Value;
+
+        var image = listing.Images.FirstOrDefault(candidate => candidate.Id == imageId);
+        if (image is null)
+        {
+            return Failure(ErrorCodes.ImageNotFound, "Image was not found on this listing.");
+        }
+
+        _listingsOwnerStore.RemoveListingImage(image);
+
+        // Deterministic primary fallback: if the removed image was primary, promote the
+        // remaining image with the lowest SortOrder so the listing always has a primary
+        // while any images exist.
+        if (image.IsPrimary)
+        {
+            var nextPrimary = listing.Images
+                .Where(candidate => candidate.Id != imageId)
+                .OrderBy(candidate => candidate.SortOrder)
+                .ThenBy(candidate => candidate.Id)
+                .FirstOrDefault();
+
+            if (nextPrimary is not null)
+            {
+                nextPrimary.IsPrimary = true;
+            }
+        }
+
+        listing.UpdatedAt = DateTime.UtcNow;
+        await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+        // Best-effort disk cleanup AFTER the row is gone. DeleteListingImageAsync is a
+        // no-op for remote (seed) URLs and for already-missing files, so it never throws.
+        await _fileStorageService.DeleteListingImageAsync(image.Url, cancellationToken);
+
+        var remaining = listing.Images
+            .Where(candidate => candidate.Id != imageId)
+            .OrderByDescending(candidate => candidate.IsPrimary)
+            .ThenBy(candidate => candidate.SortOrder)
+            .ThenBy(candidate => candidate.Id)
+            .Select(ToResponse)
+            .ToList();
+
+        return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(remaining);
+    }
+
+    // Resolves the current user, verifies they are an active owner of the listing,
+    // and returns the tracked listing with its Images collection loaded.
+    private async Task<ServiceResult<Listing>> ResolveOwnedListingAsync(
+        Guid listingId,
+        CancellationToken cancellationToken)
+    {
         if (_currentUserContext.UserId is not { } userId)
         {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            return ServiceResult<Listing>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
@@ -70,7 +262,7 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         var user = await _listingsOwnerStore.FindUserByIdAsync(userId, cancellationToken);
         if (user is null)
         {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            return ServiceResult<Listing>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
@@ -79,108 +271,52 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
 
         if (user.IsBlocked)
         {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            return ServiceResult<Listing>.Failure(new ServiceError
             {
                 Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot upload listing images."
+                Message = "Blocked users cannot manage listing images."
             });
         }
 
         var listing = await _listingsOwnerStore.FindListingByIdWithImagesAsync(listingId, cancellationToken);
         if (listing is null)
         {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            return ServiceResult<Listing>.Failure(new ServiceError
             {
                 Code = ErrorCodes.ListingNotFound,
                 Message = "Listing was not found."
             });
         }
 
-        if (listing.OwnerId != userId)
+        if (listing.OwnerId != user.Id)
         {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+            return ServiceResult<Listing>.Failure(new ServiceError
             {
                 Code = ErrorCodes.ListingForbidden,
-                Message = "Only the listing owner can upload images."
+                Message = "Only the listing owner can manage images."
             });
         }
 
-        if (files.Count == 0)
-        {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.EmptyFile,
-                Message = "At least one file must be provided."
-            });
-        }
-
-        if (files.Count > MaxImagesPerUpload)
-        {
-            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.TooManyImages,
-                Message = $"Up to {MaxImagesPerUpload} images can be uploaded per request."
-            });
-        }
-
-        var uploadedImages = new List<ListingImage>();
-        var hasPrimary = listing.Images.Any(image => image.IsPrimary);
-        var sortOrder = listing.Images.Count == 0 ? 0 : listing.Images.Max(image => image.SortOrder) + 1;
-
-        foreach (var file in files)
-        {
-            if (file.Length == 0)
-            {
-                return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
-                {
-                    Code = ErrorCodes.EmptyFile,
-                    Message = $"File '{file.FileName}' is empty."
-                });
-            }
-
-            var extension = Path.GetExtension(file.FileName);
-            if (!AllowedContentTypes.Contains(file.ContentType) || !AllowedExtensions.Contains(extension))
-            {
-                return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
-                {
-                    Code = ErrorCodes.InvalidFileType,
-                    Message = $"File '{file.FileName}' is not a supported image type."
-                });
-            }
-
-            var storedUrl = await _fileStorageService.SaveListingImageAsync(
-                file.Content,
-                file.FileName,
-                file.ContentType,
-                cancellationToken);
-
-            var image = new ListingImage
-            {
-                Id = Guid.NewGuid(),
-                ListingId = listing.Id,
-                Url = storedUrl,
-                IsPrimary = !hasPrimary && uploadedImages.Count == 0,
-                SortOrder = sortOrder++
-            };
-
-            uploadedImages.Add(image);
-        }
-
-        await _listingsOwnerStore.AddListingImagesAsync(uploadedImages, cancellationToken);
-        listing.UpdatedAt = DateTime.UtcNow;
-        await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
-
-        var response = uploadedImages
-            .OrderBy(image => image.SortOrder)
-            .Select(image => new ListingImageResponse
-            {
-                Id = image.Id,
-                Url = image.Url,
-                IsPrimary = image.IsPrimary,
-                SortOrder = image.SortOrder
-            })
-            .ToList();
-
-        return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(response);
+        return ServiceResult<Listing>.Success(listing);
     }
+
+    private static ListingImageResponse ToResponse(ListingImage image) => new()
+    {
+        Id = image.Id,
+        Url = image.Url,
+        IsPrimary = image.IsPrimary,
+        SortOrder = image.SortOrder
+    };
+
+    private static ServiceResult<IReadOnlyCollection<ListingImageResponse>> Failure(string code, string message) =>
+        ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(new ServiceError
+        {
+            Code = code,
+            Message = message
+        });
+
+    private static ServiceResult<IReadOnlyCollection<ListingImageResponse>> Failure(ServiceError error) =>
+        ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Failure(error);
+
+    private sealed record BufferedUpload(MemoryStream Content, string FileName, string ContentType);
 }

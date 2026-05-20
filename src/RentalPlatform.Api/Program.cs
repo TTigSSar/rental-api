@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.FileProviders;
 using RentalPlatform.Api.Extensions;
 using RentalPlatform.Api.Middleware;
 using RentalPlatform.Infrastructure.DependencyInjection;
@@ -26,10 +28,38 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
 app.UseHttpsRedirection();
-if (Directory.Exists(app.Environment.WebRootPath))
+
+// Serve ONLY uploaded listing images, and only files with a whitelisted image
+// extension. Anything else under the uploads tree (or wwwroot at large) is not
+// reachable — a non-image file that lands here returns 404 and is never executed.
+var uploadsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads", "listings");
+if (Directory.Exists(uploadsPhysicalRoot))
 {
-    app.UseStaticFiles();
+    var imageContentTypeProvider = new FileExtensionContentTypeProvider();
+    imageContentTypeProvider.Mappings.Clear();
+    imageContentTypeProvider.Mappings[".jpg"] = "image/jpeg";
+    imageContentTypeProvider.Mappings[".jpeg"] = "image/jpeg";
+    imageContentTypeProvider.Mappings[".png"] = "image/png";
+    imageContentTypeProvider.Mappings[".webp"] = "image/webp";
+    imageContentTypeProvider.Mappings[".gif"] = "image/gif";
+
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        RequestPath = "/uploads/listings",
+        FileProvider = new PhysicalFileProvider(uploadsPhysicalRoot),
+        ContentTypeProvider = imageContentTypeProvider,
+        ServeUnknownFileTypes = false,
+        OnPrepareResponse = static context =>
+        {
+            var headers = context.Context.Response.Headers;
+            // Filenames are content-derived GUIDs and never change — safe to cache hard.
+            headers.CacheControl = "public, max-age=31536000, immutable";
+            // Always render inline; never offer an uploaded file as a download attachment.
+            headers.ContentDisposition = "inline";
+        }
+    });
 }
+
 app.UseCors(RentalPlatform.Api.Extensions.ServiceCollectionExtensions.FrontendCorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();

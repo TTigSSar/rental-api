@@ -29,29 +29,89 @@ public sealed class LocalFileStorageService : IFileStorageService
         Stream content,
         string fileName,
         string contentType,
+        Guid listingId,
         CancellationToken cancellationToken = default)
     {
-        Directory.CreateDirectory(_targetDirectory);
+        var extension = NormalizeExtension(fileName);
 
-        var originalFileName = Path.GetFileName(fileName);
-        var extension = Path.GetExtension(originalFileName);
-        if (!AllowedExtensions.Contains(extension))
+        // Per-listing subdirectory keeps the storage flat-listable per listing and means a
+        // listing-delete cleanup (when it exists) can drop one directory rather than scan.
+        // listingId comes from server-side data, so it's safe to use as a path segment —
+        // but we still verify path containment as defense in depth.
+        var listingDirectory = Path.Combine(_targetDirectory, listingId.ToString("N"));
+        var resolvedListingDir = Path.GetFullPath(listingDirectory);
+        if (!resolvedListingDir.StartsWith(_targetDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Unsupported file extension for listing image.");
+            throw new InvalidOperationException("Resolved listing storage path escaped the configured root.");
         }
 
-        var storageFileName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
-        var fullPath = Path.Combine(_targetDirectory, storageFileName);
+        Directory.CreateDirectory(resolvedListingDir);
+
+        // GUID-N is 32 hex chars with no separators — collision probability is negligible,
+        // but loop anyway so a hypothetical collision can never silently overwrite.
+        string storageFileName;
+        string fullPath;
+        do
+        {
+            storageFileName = $"{Guid.NewGuid():N}{extension}";
+            fullPath = Path.Combine(resolvedListingDir, storageFileName);
+        } while (File.Exists(fullPath));
 
         if (content.CanSeek)
         {
             content.Position = 0;
         }
 
-        await using var destination = File.Create(fullPath);
+        // FileMode.CreateNew throws if the file appeared between the existence check above
+        // and this open — eliminating the last sliver of TOCTOU risk on overwrite.
+        await using var destination = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await content.CopyToAsync(destination, cancellationToken);
 
-        return $"{_publicPrefix}/{storageFileName}";
+        return $"{_publicPrefix}/{listingId:N}/{storageFileName}";
+    }
+
+    public Task<bool> DeleteListingImageAsync(string url, CancellationToken cancellationToken = default)
+    {
+        // Only operate on URLs the local storage actually issued. Seed data references
+        // external picsum.photos URLs which must never trigger a disk operation.
+        if (string.IsNullOrWhiteSpace(url) || !url.StartsWith(_publicPrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(false);
+        }
+
+        var relativePart = url[(_publicPrefix.Length + 1)..]
+            .Replace('/', Path.DirectorySeparatorChar);
+
+        var candidate = Path.GetFullPath(Path.Combine(_targetDirectory, relativePart));
+
+        // Defense in depth — refuse anything that escapes the storage root.
+        if (!candidate.StartsWith(_targetDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !candidate.Equals(_targetDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(false);
+        }
+
+        if (!File.Exists(candidate))
+        {
+            return Task.FromResult(false);
+        }
+
+        File.Delete(candidate);
+        return Task.FromResult(true);
+    }
+
+    private static string NormalizeExtension(string fileName)
+    {
+        // Path.GetFileName strips any directory components a malicious client may have included.
+        var safeName = Path.GetFileName(fileName);
+        var extension = Path.GetExtension(safeName).ToLowerInvariant();
+
+        if (!AllowedExtensions.Contains(extension))
+        {
+            throw new InvalidOperationException("Unsupported file extension for listing image.");
+        }
+
+        return extension;
     }
 
     private static string NormalizeRelativePath(string configuredPath, string contentRootPath)

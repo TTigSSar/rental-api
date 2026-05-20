@@ -40,6 +40,9 @@ public sealed class ListingsOwnerStore : IListingsOwnerStore
     public async Task AddListingImagesAsync(IEnumerable<ListingImage> images, CancellationToken cancellationToken = default) =>
         await _dbContext.ListingImages.AddRangeAsync(images, cancellationToken);
 
+    public void RemoveListingImage(ListingImage image) =>
+        _dbContext.ListingImages.Remove(image);
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         await _dbContext.SaveChangesAsync(cancellationToken);
 }

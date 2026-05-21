@@ -1,0 +1,42 @@
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "RentalPlatform_SA#1"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'RentalPlatform_SA#1' -Q 'SELECT 1' -C -b"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ConnectionStrings__DefaultConnection: "Server=db,1433;Database=RentalPlatformDb;User Id=sa;Password=RentalPlatform_SA#1;TrustServerCertificate=True;"
+      Jwt__SecretKey: "docker-compose-dev-secret-key-change-in-production"
+      Jwt__Issuer: "RentalPlatform"
+      Jwt__Audience: "RentalPlatform.Api"
+      FileStorage__ListingsImagesPath: "uploads/listings"
+
+  ui:
+    build: ../rental-ui
+    depends_on:
+      - api
+    ports:
+      - "4200:80"
+
+volumes:
+  sqldata:

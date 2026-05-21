@@ -22,5 +22,15 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
 
         builder.HasIndex(category => category.Slug)
             .IsUnique();
+
+        builder.Property(category => category.IconName)
+            .HasMaxLength(80);
+
+        builder.Property(category => category.ImageUrl)
+            .HasMaxLength(1000);
+
+        builder.Property(category => category.DisplayOrder)
+            .IsRequired()
+            .HasDefaultValue(0);
     }
 }

@@ -9,7 +9,7 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 /// </summary>
 internal static class DevelopmentSeedData
 {
-    public sealed record SeedCategory(Guid Id, string Name, string Slug);
+    public sealed record SeedCategory(Guid Id, string Name, string Slug, string? IconName, string? ImageUrl, int DisplayOrder);
 
     public sealed record SeedUser(
         Guid Id,
@@ -69,6 +69,12 @@ internal static class DevelopmentSeedData
     // Toy-rental MVP listing ids. Prefix `77777777-` marks them as the toy-MVP seed cohort.
     public static class ListingIds
     {
+        // ---- Additional approved listings owned by demo_owner@toyrent.am ----
+        public static readonly Guid StemScienceDiscoveryKit  = new("77777777-000b-4000-9000-00000000000b");
+        public static readonly Guid ClassicBoardGameTrio     = new("77777777-000c-4000-9000-00000000000c");
+        public static readonly Guid PartyFunActivityPack     = new("77777777-000d-4000-9000-00000000000d");
+        public static readonly Guid WoodenTrainSet           = new("77777777-000e-4000-9000-00000000000e");
+        public static readonly Guid KidsArtEasel             = new("77777777-000f-4000-9000-00000000000f");
         public static readonly Guid LegoDuploStarterSet     = new("77777777-0001-4000-9000-000000000001");
         public static readonly Guid MontessoriWoodenToySet  = new("77777777-0002-4000-9000-000000000002");
         public static readonly Guid BabyActivityGym         = new("77777777-0003-4000-9000-000000000003");
@@ -82,18 +88,20 @@ internal static class DevelopmentSeedData
     }
 
     // Toy categories. Slugs are stable, lowercase, hyphenated and unique.
+    // DisplayOrder controls carousel order on the home page.
+    // IconName uses PrimeIcons class names (without the "pi " prefix).
     public static readonly SeedCategory[] Categories =
     [
-        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", "educational-toys"),
-        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks",  "building-blocks"),
-        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys",     "outdoor-toys"),
-        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys",        "baby-toys"),
-        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games",      "board-games"),
-        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play",     "pretend-play"),
-        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys",     "ride-on-toys"),
-        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles",          "puzzles"),
-        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys",  "montessori-toys"),
-        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys",       "party-toys")
+        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys",        "baby-toys",        IconName: "pi-heart",    ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1),
+        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks",  "building-blocks",  IconName: "pi-box",      ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2),
+        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", "educational-toys", IconName: "pi-book",     ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3),
+        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys",     "outdoor-toys",     IconName: "pi-sun",      ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4),
+        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys",     "ride-on-toys",     IconName: "pi-car",      ImageUrl: "/assets/categories/ride-on-toys.svg",     DisplayOrder: 5),
+        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play",     "pretend-play",     IconName: "pi-palette",  ImageUrl: "/assets/categories/pretend-play.svg",     DisplayOrder: 6),
+        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys",  "montessori-toys",  IconName: "pi-leaf",     ImageUrl: "/assets/categories/montessori-toys.svg",  DisplayOrder: 7),
+        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles",          "puzzles",          IconName: "pi-th-large", ImageUrl: "/assets/categories/puzzles.svg",           DisplayOrder: 8),
+        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games",      "board-games",      IconName: "pi-table",    ImageUrl: "/assets/categories/board-games.svg",      DisplayOrder: 9),
+        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys",       "party-toys",       IconName: "pi-gift",     ImageUrl: "/assets/categories/party-toys.svg",       DisplayOrder: 10)
     ];
 
     public static readonly SeedUser[] Users =
@@ -122,7 +130,24 @@ internal static class DevelopmentSeedData
             new Guid("11111111-0005-4000-9000-000000000005"),
             DevelopmentSeedCredentials.BlockedEmail,
             "Ben", "Blocked",
-            UserRole.User, IsBlocked: true)
+            UserRole.User, IsBlocked: true),
+
+        // ---- Docker / public demo accounts (toyrent.am) ----
+        new(
+            new Guid("11111111-0006-4000-9000-000000000006"),
+            DevelopmentSeedCredentials.DemoAdminEmail,
+            "Admin", "ToyRent",
+            UserRole.Admin, IsBlocked: false),
+        new(
+            new Guid("11111111-0007-4000-9000-000000000007"),
+            DevelopmentSeedCredentials.DemoOwnerEmail,
+            "Demo", "Owner",
+            UserRole.User, IsBlocked: false),
+        new(
+            new Guid("11111111-0008-4000-9000-000000000008"),
+            DevelopmentSeedCredentials.DemoRenterEmail,
+            "Demo", "Renter",
+            UserRole.User, IsBlocked: false)
     ];
 
     // 10 toy listings (7 Approved, 2 PendingApproval, 1 Rejected), all owned by demo owner, Yerevan-focused.
@@ -262,7 +287,74 @@ internal static class DevelopmentSeedData
             HygieneNotes: null,
             SafetyNotes: null,
             DepositAmount: 25m,
-            RejectionReason: "Hygiene notes are required. Please describe how the item is cleaned between rentals.")
+            RejectionReason: "Hygiene notes are required. Please describe how the item is cleaned between rentals."),
+
+        // ---- Additional approved listings owned by demo_owner@toyrent.am (listings 8–12 approved) ----
+        new(
+            ListingIds.StemScienceDiscoveryKit,
+            "STEM Science Discovery Kit",
+            "Hands-on science kit with 20+ experiments: volcano, crystal growing, slime, and simple circuit activities. All chemicals are child-safe and pre-measured.",
+            "educational-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            7m, "USD", "Armenia", "Yerevan", "14 Tigranyan St",
+            40.1862m, 44.5171m,
+            ListingStatus.Approved, CreatedDaysAgo: 11, UpdatedDaysAgo: 2,
+            AgeFromMonths: 60, AgeToMonths: 144,
+            Condition: "Excellent",
+            HygieneNotes: "Single-use chemical sachets replaced after each rental. Trays and tools washed with soapy water.",
+            SafetyNotes: "Adult supervision required for all experiments. No open flames. Includes safety goggles.",
+            DepositAmount: 20m),
+        new(
+            ListingIds.ClassicBoardGameTrio,
+            "Classic Board Game Trio",
+            "Three timeless board games in one bundle: Snakes & Ladders, Ludo, and a 100-piece junior jigsaw. All pieces verified complete.",
+            "board-games", DevelopmentSeedCredentials.DemoOwnerEmail,
+            5m, "USD", "Armenia", "Yerevan", "6 Hanrapetutyan St",
+            40.1783m, 44.5139m,
+            ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 1,
+            AgeFromMonths: 48, AgeToMonths: 144,
+            Condition: "Like new",
+            HygieneNotes: "Cards and tokens wiped with a dry cloth before return; boxes sealed with elastic for storage.",
+            SafetyNotes: "Contains small pieces; not suitable for children under 3 years without supervision.",
+            DepositAmount: 15m),
+        new(
+            ListingIds.PartyFunActivityPack,
+            "Party Fun Activity Pack",
+            "Complete party activity kit: parachute play cloth, bean bags, hula hoops (×2), jump rope, and a set of colourful cones. Perfect for birthdays and group play.",
+            "party-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            11m, "USD", "Armenia", "Yerevan", "22 Azatutyan Ave",
+            40.2102m, 44.4997m,
+            ListingStatus.Approved, CreatedDaysAgo: 7, UpdatedDaysAgo: 1,
+            AgeFromMonths: 36, AgeToMonths: 144,
+            Condition: "Good",
+            HygieneNotes: "Fabric items machine-washed after every rental. Hard plastic items wiped with antibacterial spray.",
+            SafetyNotes: "Parachute activity requires adult supervision. Clear a flat open area of at least 4 × 4 m.",
+            DepositAmount: 30m),
+        new(
+            ListingIds.WoodenTrainSet,
+            "Wooden Train Set & Track (56 pcs)",
+            "56-piece wooden train set with figure-of-eight track, bridges, tunnels, a station, two engines and six carriages. Compatible with major wooden-rail brands.",
+            "building-blocks", DevelopmentSeedCredentials.DemoOwnerEmail,
+            8m, "USD", "Armenia", "Yerevan", "31 Movses Khorenatsi St",
+            40.1756m, 44.5068m,
+            ListingStatus.Approved, CreatedDaysAgo: 5, UpdatedDaysAgo: 1,
+            AgeFromMonths: 24, AgeToMonths: 84,
+            Condition: "Excellent",
+            HygieneNotes: "Track pieces and rolling stock wiped with a damp cloth and dried before packing. Piece count verified.",
+            SafetyNotes: "No small detachable parts below 3-year-old threshold. Supervised use recommended under 24 months.",
+            DepositAmount: 35m),
+        new(
+            ListingIds.KidsArtEasel,
+            "Kids Double-Sided Art Easel",
+            "Height-adjustable double-sided easel: whiteboard on one side, blackboard on the other, with a paper roll holder. Includes chalk, eraser, and 3 dry-erase markers.",
+            "pretend-play", DevelopmentSeedCredentials.DemoOwnerEmail,
+            6m, "USD", "Armenia", "Yerevan", "9 Arshakunyats Ave",
+            40.1728m, 44.5205m,
+            ListingStatus.Approved, CreatedDaysAgo: 4, UpdatedDaysAgo: 0,
+            AgeFromMonths: 24, AgeToMonths: 96,
+            Condition: "Like new",
+            HygieneNotes: "Whiteboard and blackboard surfaces wiped clean before handover. Markers capped and tested.",
+            SafetyNotes: "Child-safe, non-toxic chalk and markers. Easel folds flat for transport; locking pins provided.",
+            DepositAmount: 20m)
     ];
 
     // Every listing gets at least one primary image; several have a multi-image gallery.
@@ -282,7 +374,16 @@ internal static class DevelopmentSeedData
         new(new Guid("33333333-0007-4000-9000-000000000002"), ListingIds.ToyKitchenSet,          "https://picsum.photos/seed/toy-kitchen-2/1200/800",      IsPrimary: false, SortOrder: 1),
         new(new Guid("33333333-0008-4000-9000-000000000001"), ListingIds.BoardGameFamilyBundle,  "https://picsum.photos/seed/toy-board-games/1200/800",    IsPrimary: true,  SortOrder: 0),
         new(new Guid("33333333-0009-4000-9000-000000000001"), ListingIds.BirthdayPartyToyPack,   "https://picsum.photos/seed/toy-party-pack/1200/800",     IsPrimary: true,  SortOrder: 0),
-        new(new Guid("33333333-000a-4000-9000-00000000000a"), ListingIds.SoftPlayFoamSet,        "https://picsum.photos/seed/toy-soft-play/1200/800",      IsPrimary: true,  SortOrder: 0)
+        new(new Guid("33333333-000a-4000-9000-00000000000a"), ListingIds.SoftPlayFoamSet,           "https://picsum.photos/seed/toy-soft-play/1200/800",       IsPrimary: true,  SortOrder: 0),
+        // Images for the 5 additional approved demo listings
+        new(new Guid("33333333-000b-4000-9000-00000000000b"), ListingIds.StemScienceDiscoveryKit,   "https://picsum.photos/seed/toy-stem-science-1/1200/800",  IsPrimary: true,  SortOrder: 0),
+        new(new Guid("33333333-000b-4000-9000-00000000000c"), ListingIds.StemScienceDiscoveryKit,   "https://picsum.photos/seed/toy-stem-science-2/1200/800",  IsPrimary: false, SortOrder: 1),
+        new(new Guid("33333333-000c-4000-9000-00000000000b"), ListingIds.ClassicBoardGameTrio,      "https://picsum.photos/seed/toy-board-trio-1/1200/800",    IsPrimary: true,  SortOrder: 0),
+        new(new Guid("33333333-000d-4000-9000-00000000000b"), ListingIds.PartyFunActivityPack,      "https://picsum.photos/seed/toy-party-fun-1/1200/800",     IsPrimary: true,  SortOrder: 0),
+        new(new Guid("33333333-000d-4000-9000-00000000000c"), ListingIds.PartyFunActivityPack,      "https://picsum.photos/seed/toy-party-fun-2/1200/800",     IsPrimary: false, SortOrder: 1),
+        new(new Guid("33333333-000e-4000-9000-00000000000b"), ListingIds.WoodenTrainSet,            "https://picsum.photos/seed/toy-train-set-1/1200/800",     IsPrimary: true,  SortOrder: 0),
+        new(new Guid("33333333-000e-4000-9000-00000000000c"), ListingIds.WoodenTrainSet,            "https://picsum.photos/seed/toy-train-set-2/1200/800",     IsPrimary: false, SortOrder: 1),
+        new(new Guid("33333333-000f-4000-9000-00000000000b"), ListingIds.KidsArtEasel,              "https://picsum.photos/seed/toy-art-easel-1/1200/800",     IsPrimary: true,  SortOrder: 0)
     ];
 
     public static readonly SeedFavorite[] Favorites =

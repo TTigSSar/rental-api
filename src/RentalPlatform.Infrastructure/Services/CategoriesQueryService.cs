@@ -18,12 +18,16 @@ public sealed class CategoriesQueryService : ICategoriesQueryService
     {
         return await _dbContext.Categories
             .AsNoTracking()
-            .OrderBy(category => category.Name)
+            .OrderBy(category => category.DisplayOrder)
+            .ThenBy(category => category.Name)
             .Select(category => new CategoryResponse
             {
                 Id = category.Id,
                 Name = category.Name,
-                Slug = category.Slug
+                Slug = category.Slug,
+                IconName = category.IconName,
+                ImageUrl = category.ImageUrl,
+                DisplayOrder = category.DisplayOrder
             })
             .ToListAsync(cancellationToken);
     }

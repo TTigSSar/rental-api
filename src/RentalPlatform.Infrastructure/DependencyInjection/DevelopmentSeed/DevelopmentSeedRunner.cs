@@ -64,20 +64,25 @@ internal sealed class DevelopmentSeedRunner
             .Select(category => category.Slug)
             .ToArray();
 
-        var existingSlugs = await _dbContext.Categories
+        var existingBySlug = await _dbContext.Categories
             .Where(category => seedSlugs.Contains(category.Slug))
-            .Select(category => category.Slug)
             .ToListAsync(cancellationToken);
 
-        var existingSlugSet = new HashSet<string>(existingSlugs, StringComparer.OrdinalIgnoreCase);
+        var existingSlugSet = existingBySlug
+            .Select(category => category.Slug)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Insert categories that are missing entirely.
         var newRows = DevelopmentSeedData.Categories
             .Where(category => !existingSlugSet.Contains(category.Slug))
             .Select(category => new Category
             {
                 Id = category.Id,
                 Name = category.Name,
-                Slug = category.Slug
+                Slug = category.Slug,
+                IconName = category.IconName,
+                ImageUrl = category.ImageUrl,
+                DisplayOrder = category.DisplayOrder
             })
             .ToArray();
 
@@ -86,7 +91,26 @@ internal sealed class DevelopmentSeedRunner
             await _dbContext.Categories.AddRangeAsync(newRows, cancellationToken);
         }
 
-        return newRows.Length;
+        // Backfill visual metadata on existing rows that predate this field.
+        var seedBySlug = DevelopmentSeedData.Categories
+            .ToDictionary(category => category.Slug, StringComparer.OrdinalIgnoreCase);
+
+        var updated = 0;
+        foreach (var existing in existingBySlug)
+        {
+            if (!seedBySlug.TryGetValue(existing.Slug, out var seed))
+            {
+                continue;
+            }
+
+            var dirty = false;
+            if (existing.IconName != seed.IconName)  { existing.IconName     = seed.IconName;     dirty = true; }
+            if (existing.ImageUrl != seed.ImageUrl)  { existing.ImageUrl     = seed.ImageUrl;     dirty = true; }
+            if (existing.DisplayOrder != seed.DisplayOrder) { existing.DisplayOrder = seed.DisplayOrder; dirty = true; }
+            if (dirty) updated++;
+        }
+
+        return newRows.Length + updated;
     }
 
     private async Task<(IDictionary<string, User> ByEmail, int Inserted)> SeedUsersAsync(

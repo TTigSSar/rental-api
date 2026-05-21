@@ -24,7 +24,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      ASPNETCORE_ENVIRONMENT: "Production"
+      ASPNETCORE_ENVIRONMENT: "Development"
       ConnectionStrings__DefaultConnection: "Server=db,1433;Database=RentalPlatformDb;User Id=sa;Password=RentalPlatform_SA#1;TrustServerCertificate=True;"
       Jwt__SecretKey: "docker-compose-dev-secret-key-change-in-production"
       Jwt__Issuer: "RentalPlatform"

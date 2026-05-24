@@ -113,10 +113,12 @@ internal sealed class DevelopmentSeedRunner
         return newRows.Length + updated;
     }
 
-    private async Task<(IDictionary<string, User> ByEmail, int Inserted)> SeedUsersAsync(
+    private async Task<(IDictionary<string, User> ByEmail, int Changes)> SeedUsersAsync(
         DateTime now,
         CancellationToken cancellationToken)
     {
+        var targetPassword = DevelopmentSeedCredentials.Password;
+
         var seedEmails = DevelopmentSeedData.Users
             .Select(user => NormalizeEmail(user.Email))
             .ToArray();
@@ -130,11 +132,31 @@ internal sealed class DevelopmentSeedRunner
             StringComparer.OrdinalIgnoreCase);
 
         var inserted = 0;
+        var updated = 0;
+
         foreach (var seed in DevelopmentSeedData.Users)
         {
             var email = NormalizeEmail(seed.Email);
-            if (byEmail.ContainsKey(email))
+
+            if (byEmail.TryGetValue(email, out var existing))
             {
+                // Reset password hash if it no longer matches the target demo password.
+                // This ensures that changing DevelopmentSeedCredentials.Password takes
+                // effect on existing rows without requiring a full database wipe.
+                if (!_passwordHasher.VerifyPassword(targetPassword, existing.PasswordHash))
+                {
+                    existing.PasswordHash = _passwordHasher.HashPassword(targetPassword);
+                    _logger.LogInformation("Demo seed: reset password hash for {Email}.", email);
+                    updated++;
+                }
+
+                // Keep the role in sync with the seed definition.
+                if (existing.Role != seed.Role)
+                {
+                    existing.Role = seed.Role;
+                    updated++;
+                }
+
                 continue;
             }
 
@@ -142,7 +164,7 @@ internal sealed class DevelopmentSeedRunner
             {
                 Id = seed.Id,
                 Email = email,
-                PasswordHash = _passwordHasher.HashPassword(DevelopmentSeedCredentials.Password),
+                PasswordHash = _passwordHasher.HashPassword(targetPassword),
                 FirstName = seed.FirstName,
                 LastName = seed.LastName,
                 PhoneNumber = null,
@@ -160,7 +182,12 @@ internal sealed class DevelopmentSeedRunner
             inserted++;
         }
 
-        return (byEmail, inserted);
+        if (inserted > 0)
+            _logger.LogInformation("Demo seed: created {Count} user(s).", inserted);
+        if (updated > 0)
+            _logger.LogInformation("Demo seed: updated {Count} user(s) (password reset or role change).", updated);
+
+        return (byEmail, inserted + updated);
     }
 
     private async Task<int> SeedListingsAsync(

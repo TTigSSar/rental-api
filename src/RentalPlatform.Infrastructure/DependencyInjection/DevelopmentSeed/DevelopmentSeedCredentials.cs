@@ -19,7 +19,8 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 /// </remarks>
 internal static class DevelopmentSeedCredentials
 {
-    public const string Password = "LocalDemo123!";
+    // Password used for ALL seeded accounts (local dev + Docker demo).
+    public const string Password = "Demo1234";
 
     public const string AdminEmail = "admin@rental.local";
     public const string OwnerEmail = "owner@rental.local";

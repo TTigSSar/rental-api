@@ -59,7 +59,7 @@ public sealed class BookingHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal(0, doc.RootElement.GetProperty("status").GetInt32()); // BookingStatus.Pending = 0
+        Assert.Equal("Pending", doc.RootElement.GetProperty("status").GetString());
         Assert.Equal(listingId.ToString(), doc.RootElement.GetProperty("listingId").GetString());
     }
 
@@ -122,7 +122,7 @@ public sealed class BookingHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal(3, doc.RootElement.GetProperty("status").GetInt32()); // BookingStatus.Cancelled = 3
+        Assert.Equal("Cancelled", doc.RootElement.GetProperty("status").GetString());
     }
 
     [Fact]

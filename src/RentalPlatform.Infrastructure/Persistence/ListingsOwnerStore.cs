@@ -37,6 +37,10 @@ public sealed class ListingsOwnerStore : IListingsOwnerStore
             .Include(listing => listing.Images)
             .FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
 
+    public Task<Listing?> FindListingByIdAndOwnerAsync(Guid listingId, Guid ownerId, CancellationToken cancellationToken = default) =>
+        _dbContext.Listings
+            .FirstOrDefaultAsync(listing => listing.Id == listingId && listing.OwnerId == ownerId, cancellationToken);
+
     public async Task AddListingImagesAsync(IEnumerable<ListingImage> images, CancellationToken cancellationToken = default) =>
         await _dbContext.ListingImages.AddRangeAsync(images, cancellationToken);
 

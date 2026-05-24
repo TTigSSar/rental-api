@@ -33,7 +33,7 @@ app.UseHttpsRedirection();
 // extension. Anything else under the uploads tree (or wwwroot at large) is not
 // reachable — a non-image file that lands here returns 404 and is never executed.
 var uploadsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads", "listings");
-if (Directory.Exists(uploadsPhysicalRoot))
+Directory.CreateDirectory(uploadsPhysicalRoot);
 {
     var imageContentTypeProvider = new FileExtensionContentTypeProvider();
     imageContentTypeProvider.Mappings.Clear();

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,7 +24,11 @@ public static class ServiceCollectionExtensions
             ?? throw new InvalidOperationException("JWT settings are not configured.");
         ValidateJwtOptions(jwtSettings, environment);
 
-        services.AddControllers();
+        services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            });
         services.AddEndpointsApiExplorer();
         services.AddCors(options =>
         {

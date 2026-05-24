@@ -11,4 +11,13 @@ public interface IListingsOwnerService
 
     Task<ServiceResult<IReadOnlyCollection<MyListingResponse>>> GetMineAsync(
         CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<bool>> ArchiveAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<Guid>> UpdateAsync(
+        Guid listingId,
+        UpdateListingRequest request,
+        CancellationToken cancellationToken = default);
 }

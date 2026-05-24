@@ -9,6 +9,7 @@ public interface IListingsOwnerStore
     Task AddListingAsync(Listing listing, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Listing>> GetListingsByOwnerIdAsync(Guid ownerId, CancellationToken cancellationToken = default);
     Task<Listing?> FindListingByIdWithImagesAsync(Guid listingId, CancellationToken cancellationToken = default);
+    Task<Listing?> FindListingByIdAndOwnerAsync(Guid listingId, Guid ownerId, CancellationToken cancellationToken = default);
     Task AddListingImagesAsync(IEnumerable<ListingImage> images, CancellationToken cancellationToken = default);
     void RemoveListingImage(ListingImage image);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

@@ -30,6 +30,8 @@ services:
       Jwt__Issuer: "RentalPlatform"
       Jwt__Audience: "RentalPlatform.Api"
       FileStorage__ListingsImagesPath: "uploads/listings"
+    volumes:
+      - uploads:/app/wwwroot/uploads/listings
 
   ui:
     build: ../rental-ui
@@ -40,3 +42,4 @@ services:
 
 volumes:
   sqldata:
+  uploads:

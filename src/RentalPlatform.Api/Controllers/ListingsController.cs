@@ -145,6 +145,45 @@ public sealed class ListingsController : ControllerBase
         }
     }
 
+    [HttpPost("{id:guid}/archive")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Archive(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.ArchiveAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
+    [HttpPatch("{id:guid}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Update(
+        Guid id,
+        [FromBody] UpdateListingRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.UpdateAsync(id, request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
     [HttpDelete("{listingId:guid}/images/{imageId:guid}")]
     [Authorize]
     [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
@@ -186,6 +225,7 @@ public sealed class ListingsController : ControllerBase
             "listing.image_listing_limit" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
+            "listing.invalid_status" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

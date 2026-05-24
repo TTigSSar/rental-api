@@ -163,6 +163,24 @@ public sealed class ListingsController : ControllerBase
         return FromOwnerError(result.Error);
     }
 
+    [HttpPost("{id:guid}/restore")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.RestoreAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
     [HttpPatch("{id:guid}")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

@@ -160,10 +160,17 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 CategoryId = listing.CategoryId,
                 CategoryName = listing.Category.Name,
                 Title = listing.Title,
+                Description = listing.Description,
                 PricePerDay = listing.PricePerDay,
                 Currency = listing.Currency,
                 Country = listing.Country,
                 City = listing.City,
+                AgeFromMonths = listing.AgeFromMonths,
+                AgeToMonths = listing.AgeToMonths,
+                Condition = listing.Condition,
+                HygieneNotes = listing.HygieneNotes,
+                SafetyNotes = listing.SafetyNotes,
+                DepositAmount = listing.DepositAmount,
                 Status = listing.Status,
                 RejectionReason = listing.RejectionReason,
                 PrimaryImageUrl = listing.Images
@@ -213,6 +220,45 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         }
 
         listing.Status = ListingStatus.Archived;
+        listing.UpdatedAt = DateTime.UtcNow;
+        await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<bool>.Success(true);
+    }
+
+    public async Task<ServiceResult<bool>> RestoreAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } ownerId)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
+        if (listing is null)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.NotFound,
+                Message = "Listing not found."
+            });
+        }
+
+        if (listing.Status != ListingStatus.Archived)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidStatus,
+                Message = "Only archived listings can be restored."
+            });
+        }
+
+        listing.Status = ListingStatus.PendingApproval;
         listing.UpdatedAt = DateTime.UtcNow;
         await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
 

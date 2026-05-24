@@ -16,6 +16,10 @@ public interface IListingsOwnerService
         Guid listingId,
         CancellationToken cancellationToken = default);
 
+    Task<ServiceResult<bool>> RestoreAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default);
+
     Task<ServiceResult<Guid>> UpdateAsync(
         Guid listingId,
         UpdateListingRequest request,

@@ -91,6 +91,7 @@ public sealed class ListingsQueryService : IListingsQueryService
 
     public async Task<ListingDetailsResponse?> GetApprovedListingByIdAsync(
         Guid id,
+        Guid? callerId = null,
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.Listings
@@ -127,7 +128,14 @@ public sealed class ListingsQueryService : IListingsQueryService
                     Id = listing.Owner.Id,
                     FirstName = listing.Owner.FirstName,
                     LastName = listing.Owner.LastName,
-                    AvatarUrl = listing.Owner.AvatarUrl
+                    AvatarUrl = listing.Owner.AvatarUrl,
+                    PhoneNumber = callerId != null && listing.Bookings.Any(booking =>
+                        booking.RenterId == callerId &&
+                        (booking.Status == BookingStatus.Pending ||
+                         booking.Status == BookingStatus.Approved ||
+                         booking.Status == BookingStatus.Completed))
+                        ? listing.Owner.PhoneNumber
+                        : null
                 },
                 Images = listing.Images
                     .OrderByDescending(image => image.IsPrimary)

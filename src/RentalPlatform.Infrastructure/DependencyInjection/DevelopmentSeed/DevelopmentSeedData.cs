@@ -17,7 +17,8 @@ internal static class DevelopmentSeedData
         string FirstName,
         string LastName,
         UserRole Role,
-        bool IsBlocked);
+        bool IsBlocked,
+        string? PhoneNumber = null);
 
     public sealed record SeedListing(
         Guid Id,
@@ -110,44 +111,44 @@ internal static class DevelopmentSeedData
             new Guid("11111111-0001-4000-9000-000000000001"),
             DevelopmentSeedCredentials.AdminEmail,
             "Alex", "Admin",
-            UserRole.Admin, IsBlocked: false),
+            UserRole.Admin, IsBlocked: false, PhoneNumber: "+374 55 100 001"),
         new(
             new Guid("11111111-0002-4000-9000-000000000002"),
             DevelopmentSeedCredentials.OwnerEmail,
             "Olivia", "Owner",
-            UserRole.User, IsBlocked: false),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 100 002"),
         new(
             new Guid("11111111-0003-4000-9000-000000000003"),
             DevelopmentSeedCredentials.RenterEmail,
             "Ryan", "Renter",
-            UserRole.User, IsBlocked: false),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 91 100 003"),
         new(
             new Guid("11111111-0004-4000-9000-000000000004"),
             DevelopmentSeedCredentials.SecondUserEmail,
             "Sam", "User",
-            UserRole.User, IsBlocked: false),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 93 100 004"),
         new(
             new Guid("11111111-0005-4000-9000-000000000005"),
             DevelopmentSeedCredentials.BlockedEmail,
             "Ben", "Blocked",
-            UserRole.User, IsBlocked: true),
+            UserRole.User, IsBlocked: true, PhoneNumber: "+374 77 100 005"),
 
         // ---- Docker / public demo accounts (toyrent.am) ----
         new(
             new Guid("11111111-0006-4000-9000-000000000006"),
             DevelopmentSeedCredentials.DemoAdminEmail,
             "Admin", "ToyRent",
-            UserRole.Admin, IsBlocked: false),
+            UserRole.Admin, IsBlocked: false, PhoneNumber: "+374 55 200 001"),
         new(
             new Guid("11111111-0007-4000-9000-000000000007"),
             DevelopmentSeedCredentials.DemoOwnerEmail,
             "Demo", "Owner",
-            UserRole.User, IsBlocked: false),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 200 002"),
         new(
             new Guid("11111111-0008-4000-9000-000000000008"),
             DevelopmentSeedCredentials.DemoRenterEmail,
             "Demo", "Renter",
-            UserRole.User, IsBlocked: false)
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 91 200 003")
     ];
 
     // 10 toy listings (7 Approved, 2 PendingApproval, 1 Rejected), all owned by demo owner, Yerevan-focused.

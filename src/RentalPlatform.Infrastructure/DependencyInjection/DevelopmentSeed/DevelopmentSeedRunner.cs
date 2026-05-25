@@ -157,6 +157,13 @@ internal sealed class DevelopmentSeedRunner
                     updated++;
                 }
 
+                // Backfill phone number if the seed has one and the row is missing it.
+                if (seed.PhoneNumber is not null && existing.PhoneNumber is null)
+                {
+                    existing.PhoneNumber = seed.PhoneNumber;
+                    updated++;
+                }
+
                 continue;
             }
 
@@ -167,7 +174,7 @@ internal sealed class DevelopmentSeedRunner
                 PasswordHash = _passwordHasher.HashPassword(targetPassword),
                 FirstName = seed.FirstName,
                 LastName = seed.LastName,
-                PhoneNumber = null,
+                PhoneNumber = seed.PhoneNumber,
                 PreferredLanguage = "en",
                 ExternalAuthProvider = null,
                 ExternalProviderId = null,

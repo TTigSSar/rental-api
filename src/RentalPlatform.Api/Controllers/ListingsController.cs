@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -48,7 +49,11 @@ public sealed class ListingsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ListingDetailsResponse>> GetListingById(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _listingsQueryService.GetApprovedListingByIdAsync(id, cancellationToken);
+        Guid? callerId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsedId)
+            ? parsedId
+            : null;
+
+        var result = await _listingsQueryService.GetApprovedListingByIdAsync(id, callerId, cancellationToken);
         if (result is null)
         {
             return NotFound();

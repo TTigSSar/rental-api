@@ -6,4 +6,5 @@ public sealed class ListingOwnerResponse
     public string FirstName { get; init; } = string.Empty;
     public string LastName { get; init; } = string.Empty;
     public string? AvatarUrl { get; init; }
+    public string? PhoneNumber { get; init; }
 }

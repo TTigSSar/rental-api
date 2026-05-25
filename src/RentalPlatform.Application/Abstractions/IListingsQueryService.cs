@@ -10,5 +10,6 @@ public interface IListingsQueryService
 
     Task<ListingDetailsResponse?> GetApprovedListingByIdAsync(
         Guid id,
+        Guid? callerId = null,
         CancellationToken cancellationToken = default);
 }

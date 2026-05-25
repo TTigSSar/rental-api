@@ -23,7 +23,7 @@ public sealed class RegisterRequest
     public string LastName { get; set; } = string.Empty;
 
     [Required]
-    [RegularExpression(@"^\+?[\d\s\-()\\.]{7,20}$", ErrorMessage = "Enter a valid phone number.")]
+    [RegularExpression(@"^\+?(?=(?:[^\d]*\d){7,20}[^\d]*$)[\d\s\-().]+$", ErrorMessage = "Enter a valid phone number.")]
     [MaxLength(32)]
     public string PhoneNumber { get; set; } = string.Empty;
 

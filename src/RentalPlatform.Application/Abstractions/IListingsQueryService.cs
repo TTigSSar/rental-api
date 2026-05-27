@@ -11,5 +11,6 @@ public interface IListingsQueryService
     Task<ListingDetailsResponse?> GetApprovedListingByIdAsync(
         Guid id,
         Guid? callerId = null,
+        bool isAdmin = false,
         CancellationToken cancellationToken = default);
 }

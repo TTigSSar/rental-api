@@ -7,6 +7,7 @@ using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Api.Controllers;
 
@@ -53,7 +54,8 @@ public sealed class ListingsController : ControllerBase
             ? parsedId
             : null;
 
-        var result = await _listingsQueryService.GetApprovedListingByIdAsync(id, callerId, cancellationToken);
+        bool isAdmin = User.IsInRole(nameof(UserRole.Admin));
+        var result = await _listingsQueryService.GetApprovedListingByIdAsync(id, callerId, isAdmin, cancellationToken);
         if (result is null)
         {
             return NotFound();

@@ -92,12 +92,14 @@ public sealed class ListingsQueryService : IListingsQueryService
     public async Task<ListingDetailsResponse?> GetApprovedListingByIdAsync(
         Guid id,
         Guid? callerId = null,
+        bool isAdmin = false,
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.Listings
             .AsNoTracking()
             .Where(listing => listing.Id == id &&
-                (listing.Status == ListingStatus.Approved ||
+                (isAdmin ||
+                 listing.Status == ListingStatus.Approved ||
                  (callerId.HasValue && listing.OwnerId == callerId.Value)))
             .Select(listing => new ListingDetailsResponse
             {

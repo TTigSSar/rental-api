@@ -1,0 +1,440 @@
+Phase 1 — Design System Foundation
+
+Goal:
+
+Build reusable UI primitives before implementing pages.
+
+Deliverables:
+
+Design Tokens
+colors
+spacing
+radius
+shadows
+typography
+breakpoints
+z-index
+Buttons
+
+Variants:
+
+Primary
+Secondary
+Ghost
+Danger
+
+States:
+
+loading
+disabled
+icon left
+icon right
+full width
+Inputs
+text
+email
+password
+phone
+textarea
+
+States:
+
+normal
+focused
+error
+disabled
+Selection Controls
+dropdown
+select
+chip
+radio
+checkbox
+Badges
+pending
+approved
+rejected
+archived
+booked
+completed
+Cards
+ListingCard
+CategoryCard
+InfoCard
+Empty States
+
+Reusable component:
+
+title
+description
+illustration
+action
+Skeletons
+listing skeleton
+detail skeleton
+profile skeleton
+Dialog System
+modal
+bottom sheet
+confirmation dialog
+Navigation Components
+mobile bottom navigation
+page header
+section header
+
+Success Criteria:
+
+reusable
+responsive
+build passes
+visually aligned with Flow A
+Phase 2 — Architecture Audit
+
+Goal:
+
+Verify current architecture before feature implementation.
+
+Review:
+
+Frontend
+Angular structure
+feature boundaries
+shared components
+NgRx slices
+routing
+translations
+auth state
+Backend
+Domain layer
+Application layer
+Infrastructure layer
+API layer
+Docker
+
+Verify:
+
+db
+api
+ui
+
+run from clean environment.
+
+Deliverable:
+
+Architecture review report.
+
+Phase 3 — Authentication Vertical Slice
+
+Goal:
+
+Complete authentication flow.
+
+Features:
+
+Login
+Registration
+
+Includes:
+
+phone number required
+validation
+translations
+Auth Dialog
+
+Supports:
+
+sign in
+sign up
+
+Mobile:
+
+bottom sheet animation
+Session Restore
+
+Supports:
+
+refresh
+page reload
+persisted login
+Logout
+Route Protection
+
+Success Criteria:
+
+Guest → Login → Refresh works correctly.
+
+Phase 4 — Listings Vertical Slice
+
+Goal:
+
+Complete discovery experience.
+
+Features:
+
+Home
+categories
+featured content
+Listings
+search
+filters
+pagination
+URL persistence
+Favorites
+save listing
+remove favorite
+Saved Toys screen
+
+Success Criteria:
+
+Guest browsing journey complete.
+
+Phase 5 — Listing Details Vertical Slice
+
+Goal:
+
+Complete listing consumption experience.
+
+Features:
+
+Gallery
+Description
+Owner Information
+Locked State
+
+Phone hidden
+
+Unlocked State
+
+Phone visible after booking request
+
+Date Picker
+Booking Panel
+Auth Integration
+
+Success Criteria:
+
+Listing details fully functional.
+
+Phase 6 — Booking System
+
+Goal:
+
+Complete renter booking journey.
+
+Features:
+
+Booking Request
+Booking Success
+Booking Detail
+Booking Cancelled
+Booking Declined
+
+Business Rule:
+
+Phone visibility only after booking request.
+
+Success Criteria:
+
+End-to-end booking flow works.
+
+Phase 7 — Owner Listing Management
+
+Goal:
+
+Complete supply-side experience.
+
+Features:
+
+My Toys
+Create Listing Wizard
+
+Steps:
+
+Photos
+Basics
+Pricing & Location
+Safety & Hygiene
+Preview & Submit
+Edit Listing
+Archive Listing
+Restore Listing
+
+Success Criteria:
+
+Owner can manage inventory.
+
+Phase 8 — Incoming Requests
+
+Goal:
+
+Complete owner booking management.
+
+Features:
+
+Incoming Requests
+Request Details
+
+Shows:
+
+renter
+dates
+booking summary
+message
+
+Actions:
+
+accept
+decline
+
+Success Criteria:
+
+Owner can process requests.
+
+Phase 9 — Admin Moderation
+
+Goal:
+
+Complete moderation workflow.
+
+Features:
+
+Pending Listings
+Approve
+Reject
+
+Reject Reasons:
+
+poor images
+missing information
+wrong category
+unsafe item
+duplicate listing
+inappropriate content
+other
+
+Success Criteria:
+
+Moderation workflow operational.
+
+Phase 10 — Reviews
+
+Goal:
+
+Build trust system.
+
+Features:
+
+Renter Reviews Owner
+
+Fields:
+
+overall rating
+communication
+condition
+cleanliness
+description accuracy
+comment
+Owner Reviews Renter
+
+Fields:
+
+communication
+returned on time
+toy care
+comment
+Review Summary
+
+Profile and listing visibility.
+
+Success Criteria:
+
+Two-sided reviews working.
+
+Phase 11 — Mobile Polish Sprint
+
+Goal:
+
+Pay down all mobile UX debt.
+
+Review:
+
+390px
+375px
+414px
+
+Fix:
+
+overflow
+datepicker issues
+bottom nav issues
+modal issues
+translation overflow
+spacing inconsistencies
+
+Success Criteria:
+
+No major mobile defects.
+
+Phase 12 — Full E2E Testing
+
+Test:
+
+Guest
+browse
+search
+favorite
+register
+login
+Renter
+request booking
+see phone
+review owner
+Owner
+create listing
+edit listing
+archive listing
+restore listing
+review renter
+Admin
+approve listing
+reject listing
+
+Fix:
+
+P0 issues
+P1 issues
+Phase 13 — MVP Release Candidate
+
+Requirements:
+
+build passes
+tests pass
+Docker works
+no critical bugs
+mobile polished
+responsive validated
+
+Tag:
+
+v1.0.0-rc1
+AI Development Workflow
+
+For every phase:
+
+Read this roadmap
+Review existing implementation
+Compare against approved Flow A design
+Implement only current phase scope
+Run build/tests
+Report changed files
+Commit
+Request review before next phase
+
+Rules:
+
+Do not redesign Flow A
+Do not introduce new visual direction
+Do not hardcode data
+Preserve architecture consistency
+Prefer reusable components over page-specific implementations
+Keep Mobile M (390px) as primary design target
+Validate all changes on 375px and 414px before completion

@@ -163,4 +163,56 @@ public sealed class ImageHttpTests
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Upload_Then_GetMine_Returns_Listing_With_Image_Url()
+    {
+        var (ownerId, listingId) = await SeedBaselineAsync();
+
+        var token = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@image-owner.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var form = BuildImageForm(TestData.PngBytes(), "photo.png", "image/png");
+        await client.PostAsync($"/api/listings/{listingId}/images", form);
+
+        var mineResponse = await client.GetAsync("/api/listings/mine");
+        Assert.Equal(HttpStatusCode.OK, mineResponse.StatusCode);
+
+        var body = await mineResponse.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var listing = doc.RootElement.EnumerateArray()
+            .FirstOrDefault(l => l.GetProperty("id").GetString() == listingId.ToString());
+
+        Assert.NotEqual(default, listing);
+        var imageUrl = listing.GetProperty("primaryImageUrl").GetString();
+        Assert.False(string.IsNullOrEmpty(imageUrl), "primaryImageUrl should be populated after upload");
+    }
+
+    [Fact]
+    public async Task Owner_Gets_Detail_Of_Own_PendingApproval_Listing()
+    {
+        var ownerId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+
+        await _factory.SeedAsync(
+            TestData.User(ownerId, $"{ownerId:N}@owner-pending.local"),
+            TestData.Category(categoryId));
+
+        await _factory.SeedAsync(
+            TestData.Listing(listingId, ownerId, categoryId, ListingStatus.PendingApproval));
+
+        var token = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@owner-pending.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync($"/api/listings/{listingId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(listingId.ToString(), doc.RootElement.GetProperty("id").GetString());
+    }
 }

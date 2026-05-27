@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using RentalPlatform.Api.Extensions;
 using RentalPlatform.Api.Middleware;
 using RentalPlatform.Infrastructure.DependencyInjection;
+using RentalPlatform.Infrastructure.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,7 +34,13 @@ app.UseHttpsRedirection();
 // Serve ONLY uploaded listing images, and only files with a whitelisted image
 // extension. Anything else under the uploads tree (or wwwroot at large) is not
 // reachable — a non-image file that lands here returns 404 and is never executed.
-var uploadsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads", "listings");
+//
+// Path is derived from FileStorage:ListingsImagesPath config so it stays in sync
+// with LocalFileStorageService — both always read from the same source of truth.
+var fileStorageOptions = app.Services.GetRequiredService<IOptions<LocalFileStorageOptions>>().Value;
+var uploadsRelPath = fileStorageOptions.ListingsImagesPath.Trim().TrimStart('/', '\\');
+var uploadsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", uploadsRelPath);
+var uploadsRequestPath = "/" + uploadsRelPath.Replace("\\", "/", StringComparison.Ordinal).Trim('/');
 Directory.CreateDirectory(uploadsPhysicalRoot);
 {
     var imageContentTypeProvider = new FileExtensionContentTypeProvider();
@@ -45,7 +53,7 @@ Directory.CreateDirectory(uploadsPhysicalRoot);
 
     app.UseStaticFiles(new StaticFileOptions
     {
-        RequestPath = "/uploads/listings",
+        RequestPath = uploadsRequestPath,
         FileProvider = new PhysicalFileProvider(uploadsPhysicalRoot),
         ContentTypeProvider = imageContentTypeProvider,
         ServeUnknownFileTypes = false,

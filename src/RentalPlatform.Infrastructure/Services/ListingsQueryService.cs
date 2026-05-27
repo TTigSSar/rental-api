@@ -96,7 +96,9 @@ public sealed class ListingsQueryService : IListingsQueryService
     {
         return await _dbContext.Listings
             .AsNoTracking()
-            .Where(listing => listing.Id == id && listing.Status == ListingStatus.Approved)
+            .Where(listing => listing.Id == id &&
+                (listing.Status == ListingStatus.Approved ||
+                 (callerId.HasValue && listing.OwnerId == callerId.Value)))
             .Select(listing => new ListingDetailsResponse
             {
                 Id = listing.Id,

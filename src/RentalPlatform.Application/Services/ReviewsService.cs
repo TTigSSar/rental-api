@@ -117,6 +117,22 @@ public sealed class ReviewsService : IReviewsService
         return ServiceResult<IReadOnlyCollection<ReviewResponse>>.Success(response);
     }
 
+    public async Task<RatingSummaryResponse> GetListingSummaryAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default)
+    {
+        var (count, avg) = await _reviewsStore.GetListingSummaryAsync(listingId, cancellationToken);
+        return new RatingSummaryResponse { ReviewCount = count, AverageRating = avg };
+    }
+
+    public async Task<RatingSummaryResponse> GetUserSummaryAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var (count, avg) = await _reviewsStore.GetUserSummaryAsync(userId, cancellationToken);
+        return new RatingSummaryResponse { ReviewCount = count, AverageRating = avg };
+    }
+
     private static ReviewResponse MapReview(Review review, User? reviewer) => new()
     {
         Id = review.Id,

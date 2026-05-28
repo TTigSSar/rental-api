@@ -16,4 +16,12 @@ public interface IReviewsService
     Task<ServiceResult<IReadOnlyCollection<ReviewResponse>>> GetByUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
+
+    Task<RatingSummaryResponse> GetListingSummaryAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default);
+
+    Task<RatingSummaryResponse> GetUserSummaryAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
 }

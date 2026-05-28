@@ -11,4 +11,8 @@ public interface IReviewsStore
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Review>> GetByListingAsync(Guid listingId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Review>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    // Returns (count, average) aggregated in the DB. Count==0 → average==0.
+    Task<(int Count, double AverageRating)> GetListingSummaryAsync(Guid listingId, CancellationToken cancellationToken = default);
+    Task<(int Count, double AverageRating)> GetUserSummaryAsync(Guid userId, CancellationToken cancellationToken = default);
 }

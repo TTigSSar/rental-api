@@ -57,4 +57,33 @@ public sealed class ReviewsStore : IReviewsStore
             .Include(r => r.Reviewer)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<(int Count, double AverageRating)> GetListingSummaryAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default)
+    {
+        // Only renter reviews count toward the listing rating.
+        var query = _dbContext.Reviews
+            .Where(r => r.ListingId == listingId && r.ReviewerRole == ReviewerRole.Renter);
+
+        var count = await query.CountAsync(cancellationToken);
+        if (count == 0) return (0, 0.0);
+
+        var avg = await query.AverageAsync(r => (double)r.Rating, cancellationToken);
+        return (count, Math.Round(avg, 1));
+    }
+
+    public async Task<(int Count, double AverageRating)> GetUserSummaryAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        // All reviews received by this user (as owner or as renter).
+        var query = _dbContext.Reviews.Where(r => r.RevieweeId == userId);
+
+        var count = await query.CountAsync(cancellationToken);
+        if (count == 0) return (0, 0.0);
+
+        var avg = await query.AverageAsync(r => (double)r.Rating, cancellationToken);
+        return (count, Math.Round(avg, 1));
+    }
 }

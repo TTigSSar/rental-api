@@ -60,6 +60,28 @@ public sealed class ReviewsController : ControllerBase
         return Ok(result.Value);
     }
 
+    [HttpGet("listing/{listingId:guid}/summary")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(RatingSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<RatingSummaryResponse>> GetListingSummary(
+        Guid listingId,
+        CancellationToken cancellationToken)
+    {
+        var summary = await _reviewsService.GetListingSummaryAsync(listingId, cancellationToken);
+        return Ok(summary);
+    }
+
+    [HttpGet("user/{userId:guid}/summary")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(RatingSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<RatingSummaryResponse>> GetUserSummary(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var summary = await _reviewsService.GetUserSummaryAsync(userId, cancellationToken);
+        return Ok(summary);
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)

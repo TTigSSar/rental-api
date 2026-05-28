@@ -239,4 +239,101 @@ public sealed class ReviewsHttpTests
         Assert.NotEmpty(reviews);
         Assert.Equal(ownerId.ToString(), reviews[0].GetProperty("revieweeId").GetString());
     }
+
+    // -----------------------------------------------------------------------
+    // Summary endpoints
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetListingSummary_Returns_200_With_Correct_Values()
+    {
+        var (_, renterId, listingId, bookingId) = await SeedCompletedBookingAsync();
+
+        var token  = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@rev-renter.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        await client.PostAsJsonAsync("/api/reviews", new { bookingId, rating = 5 });
+
+        var response = await _factory.CreateClient().GetAsync($"/api/reviews/listing/{listingId}/summary");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(1,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(5.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    [Fact]
+    public async Task GetListingSummary_Returns_Zero_When_No_Reviews()
+    {
+        var (_, _, listingId, _) = await SeedCompletedBookingAsync();
+
+        var response = await _factory.CreateClient().GetAsync($"/api/reviews/listing/{listingId}/summary");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(0,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(0.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    [Fact]
+    public async Task GetListingSummary_Excludes_Owner_Reviews()
+    {
+        var (ownerId, renterId, listingId, bookingId) = await SeedCompletedBookingAsync();
+
+        // Owner submits a review of the renter — must NOT affect the listing summary.
+        var ownerToken = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@rev-owner.local");
+        var ownerClient = _factory.CreateClient();
+        ownerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await ownerClient.PostAsJsonAsync("/api/reviews", new { bookingId, rating = 1 });
+
+        var response = await _factory.CreateClient().GetAsync($"/api/reviews/listing/{listingId}/summary");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(0,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(0.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    [Fact]
+    public async Task GetUserSummary_Returns_200_With_Correct_Values()
+    {
+        var (ownerId, renterId, _, bookingId) = await SeedCompletedBookingAsync();
+
+        var token  = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@rev-renter.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        await client.PostAsJsonAsync("/api/reviews", new { bookingId, rating = 4 });
+
+        var response = await _factory.CreateClient().GetAsync($"/api/reviews/user/{ownerId}/summary");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(1,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(4.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    [Fact]
+    public async Task GetUserSummary_Returns_Zero_When_No_Reviews()
+    {
+        var (ownerId, _, _, _) = await SeedCompletedBookingAsync();
+
+        var response = await _factory.CreateClient().GetAsync($"/api/reviews/user/{ownerId}/summary");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(0,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(0.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
 }

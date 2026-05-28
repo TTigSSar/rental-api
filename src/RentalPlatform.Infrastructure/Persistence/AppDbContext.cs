@@ -15,6 +15,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<ListingImage> ListingImages => Set<ListingImage>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<Favorite> Favorites => Set<Favorite>();
+    public DbSet<Review> Reviews => Set<Review>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

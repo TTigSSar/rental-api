@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IBookingsStore, BookingsStore>();
         services.AddScoped<IFavoritesStore, FavoritesStore>();
         services.AddScoped<IAdminListingsStore, AdminListingsStore>();
+        services.AddScoped<IReviewsStore, ReviewsStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
         return services;

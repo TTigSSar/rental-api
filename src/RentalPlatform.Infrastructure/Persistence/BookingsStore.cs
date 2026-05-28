@@ -24,6 +24,17 @@ public sealed class BookingsStore : IBookingsStore
                 .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
     }
 
+    public async Task CompleteApprovedAsync(DateTime utcNow, CancellationToken cancellationToken = default)
+    {
+        // The rental window ends at the end of EndDate, so completion fires the next calendar day.
+        var today = DateOnly.FromDateTime(utcNow);
+        await _dbContext.Bookings
+            .Where(booking => booking.Status == BookingStatus.Approved && booking.EndDate < today)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(booking => booking.Status, BookingStatus.Completed)
+                .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
+    }
+
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 

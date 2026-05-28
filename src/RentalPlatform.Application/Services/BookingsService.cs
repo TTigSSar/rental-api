@@ -39,6 +39,7 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -102,6 +103,7 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -123,6 +125,7 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -149,6 +152,7 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -202,6 +206,7 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)

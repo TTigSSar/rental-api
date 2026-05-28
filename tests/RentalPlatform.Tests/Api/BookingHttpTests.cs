@@ -164,4 +164,33 @@ public sealed class BookingHttpTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetMine_Returns_Completed_Status_For_Past_Approved_Booking()
+    {
+        var (_, renterId, listingId) = await SeedBaselineAsync();
+        var bookingId = Guid.NewGuid();
+
+        // Seed as Approved with an EndDate in the past so CompleteApprovedAsync picks it up.
+        await _factory.SeedAsync(TestData.Booking(
+            bookingId, listingId, renterId,
+            Today.AddDays(-5), Today.AddDays(-1),
+            BookingStatus.Approved));
+
+        var token = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@booking-renter.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync("/api/bookings/mine");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var booking = doc.RootElement.EnumerateArray()
+            .FirstOrDefault(b => b.GetProperty("id").GetString() == bookingId.ToString());
+
+        Assert.NotEqual(default, booking);
+        Assert.Equal("Completed", booking.GetProperty("status").GetString());
+    }
 }

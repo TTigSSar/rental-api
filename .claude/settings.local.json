@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build *)",
-      "Bash(dotnet test *)"
+      "Bash(dotnet test *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\tigra\\\\Projects\\\\rental\\\\rental-app\\\\rental-ui\\\\src\" -Recurse -Directory | Where-Object { $_.Name -imatch 'review|rating|feedback' } | Select-Object -ExpandProperty FullName)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\tigra\\\\Projects\\\\rental\\\\rental-app\\\\rental-api\\\\src\" -Recurse -File | Where-Object { $_.Name -imatch 'review|rating' } | Select-Object -ExpandProperty FullName)"
     ]
   }
 }

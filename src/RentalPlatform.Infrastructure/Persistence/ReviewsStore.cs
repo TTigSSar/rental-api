@@ -35,6 +35,9 @@ public sealed class ReviewsStore : IReviewsStore
             .Include(b => b.Listing)
             .FirstOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
 
+    public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+
     public async Task<IReadOnlyCollection<Review>> GetByListingAsync(
         Guid listingId,
         CancellationToken cancellationToken = default) =>

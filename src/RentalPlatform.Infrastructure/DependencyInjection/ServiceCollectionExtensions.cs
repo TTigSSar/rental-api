@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();
         services.AddScoped<IBookingsService, BookingsService>();
+        services.AddScoped<IReviewsService, ReviewsService>();
         services.AddScoped<IFavoritesService, FavoritesService>();
         services.AddScoped<IAdminListingsService, AdminListingsService>();
         services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();

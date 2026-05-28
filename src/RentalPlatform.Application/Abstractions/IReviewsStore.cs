@@ -8,6 +8,7 @@ public interface IReviewsStore
     Task AddAsync(Review review, CancellationToken cancellationToken = default);
     Task<bool> HasReviewForBookingAsync(Guid bookingId, ReviewerRole role, CancellationToken cancellationToken = default);
     Task<Booking?> FindBookingForReviewAsync(Guid bookingId, CancellationToken cancellationToken = default);
+    Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Review>> GetByListingAsync(Guid listingId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Review>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default);
 }

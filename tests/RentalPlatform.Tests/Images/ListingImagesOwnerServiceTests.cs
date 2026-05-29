@@ -228,4 +228,162 @@ public sealed class ListingImagesOwnerServiceTests
         Assert.Equal("listing.forbidden", result.Error!.Code);
         Assert.Empty(storage.DeletedUrls);
     }
+
+    // -----------------------------------------------------------------------
+    // ReplaceAsync
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Replace_Succeeds_For_Owner_With_Valid_Image()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await db.SeedAsync(TestData.Image(Guid.NewGuid(), ListingId, isPrimary: true, sortOrder: 0));
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+
+        var result = await service.ReplaceAsync(ListingId, new[] { TestData.UploadRequest() });
+
+        Assert.True(result.IsSuccess);
+        var image = Assert.Single(result.Value!);
+        Assert.True(image.IsPrimary);
+        Assert.Equal(0, image.SortOrder);
+    }
+
+    [Fact]
+    public async Task Replace_First_Uploaded_Image_Is_Primary()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+
+        var result = await service.ReplaceAsync(ListingId, new[]
+        {
+            TestData.UploadRequest(fileName: "first.png"),
+            TestData.UploadRequest(fileName: "second.png")
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value!.Count);
+        var ordered = result.Value!.OrderBy(i => i.SortOrder).ToList();
+        Assert.True(ordered[0].IsPrimary);
+        Assert.Equal(0, ordered[0].SortOrder);
+        Assert.False(ordered[1].IsPrimary);
+        Assert.Equal(1, ordered[1].SortOrder);
+    }
+
+    [Fact]
+    public async Task Replace_Old_DB_Rows_Are_Removed()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var oldId1 = Guid.NewGuid();
+        var oldId2 = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Image(oldId1, ListingId, isPrimary: true,  sortOrder: 0),
+            TestData.Image(oldId2, ListingId, isPrimary: false, sortOrder: 1));
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+        await service.ReplaceAsync(ListingId, new[] { TestData.UploadRequest() });
+
+        await using var verify = db.CreateContext();
+        Assert.Null(await verify.ListingImages.FindAsync(oldId1));
+        Assert.Null(await verify.ListingImages.FindAsync(oldId2));
+        // Only the one new image exists.
+        Assert.Single(verify.ListingImages.Where(i => i.ListingId == ListingId));
+    }
+
+    [Fact]
+    public async Task Replace_Old_Physical_Files_Are_Deleted()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var oldId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Image(oldId, ListingId, isPrimary: true, sortOrder: 0));
+        var storage = new FakeFileStorageService();
+
+        // Capture the old URL that was seeded.
+        await using var preCtx = db.CreateContext();
+        var oldUrl = (await preCtx.ListingImages.FindAsync(oldId))!.Url;
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+        await service.ReplaceAsync(ListingId, new[] { TestData.UploadRequest() });
+
+        Assert.Contains(oldUrl, storage.DeletedUrls);
+    }
+
+    [Fact]
+    public async Task Replace_Sets_Listing_Status_To_PendingApproval()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db); // listing seeded as Approved
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+        await service.ReplaceAsync(ListingId, new[] { TestData.UploadRequest() });
+
+        await using var verify = db.CreateContext();
+        var listing = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(RentalPlatform.Domain.Enums.ListingStatus.PendingApproval, listing!.Status);
+    }
+
+    [Fact]
+    public async Task Replace_Fails_For_Non_Owner()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OtherUserId, storage);
+
+        var result = await service.ReplaceAsync(ListingId, new[] { TestData.UploadRequest() });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("listing.forbidden", result.Error!.Code);
+        Assert.Empty(storage.SavedUrls);
+    }
+
+    [Fact]
+    public async Task Replace_Fails_With_No_Files()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+
+        var result = await service.ReplaceAsync(ListingId, Array.Empty<UploadListingImageRequest>());
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("listing.image_empty", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Replace_Fails_For_Invalid_Extension()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var storage = new FakeFileStorageService();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, storage);
+
+        var result = await service.ReplaceAsync(ListingId,
+            new[] { TestData.UploadRequest(fileName: "malware.txt") });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("listing.image_invalid_type", result.Error!.Code);
+        Assert.Empty(storage.SavedUrls);
+    }
 }

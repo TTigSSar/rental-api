@@ -215,4 +215,104 @@ public sealed class ImageHttpTests
         using var doc = JsonDocument.Parse(body);
         Assert.Equal(listingId.ToString(), doc.RootElement.GetProperty("id").GetString());
     }
+
+    // -----------------------------------------------------------------------
+    // PUT /api/listings/{listingId}/images  — image replacement
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Replace_Returns_200_With_New_Images_For_Owner()
+    {
+        var (ownerId, listingId) = await SeedBaselineAsync();
+
+        // Pre-seed an existing image that must be replaced.
+        await _factory.SeedAsync(TestData.Image(Guid.NewGuid(), listingId, isPrimary: true, sortOrder: 0));
+
+        var token  = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@image-owner.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var form = BuildImageForm(TestData.PngBytes(), "new.png", "image/png");
+        var response = await client.PutAsync($"/api/listings/{listingId}/images", form);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var images = doc.RootElement.EnumerateArray().ToList();
+        Assert.Single(images);
+        Assert.True(images[0].GetProperty("isPrimary").GetBoolean());
+        Assert.Equal(0, images[0].GetProperty("sortOrder").GetInt32());
+    }
+
+    [Fact]
+    public async Task Replace_Sets_Listing_To_PendingApproval()
+    {
+        var (ownerId, listingId) = await SeedBaselineAsync();
+
+        var token  = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@image-owner.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var form = BuildImageForm(TestData.PngBytes(), "new.png", "image/png");
+        await client.PutAsync($"/api/listings/{listingId}/images", form);
+
+        // Confirm via GET /api/listings/mine that status flipped to PendingApproval.
+        var mineResponse = await client.GetAsync("/api/listings/mine");
+        var mineBody = await mineResponse.Content.ReadAsStringAsync();
+        using var mineDoc = JsonDocument.Parse(mineBody);
+        var listing = mineDoc.RootElement.EnumerateArray()
+            .FirstOrDefault(l => l.GetProperty("id").GetString() == listingId.ToString());
+
+        Assert.NotEqual(default, listing);
+        Assert.Equal("PendingApproval", listing.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Replace_Returns_401_When_Not_Authenticated()
+    {
+        var (_, listingId) = await SeedBaselineAsync();
+
+        using var form = BuildImageForm(TestData.PngBytes(), "new.png", "image/png");
+        var response = await _factory.CreateClient().PutAsync($"/api/listings/{listingId}/images", form);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Replace_Old_Images_No_Longer_Appear_In_Listing_Detail()
+    {
+        var (ownerId, listingId) = await SeedBaselineAsync();
+
+        // Snapshot shared storage state before this test so assertions are delta-based
+        // (FakeStorage accumulates across the entire "Integration" collection).
+        var savedBefore  = _factory.FakeStorage.SavedUrls.Count;
+        var deletedBefore = _factory.FakeStorage.DeletedUrls.Count;
+
+        var token  = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@image-owner.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // First: upload an image to give the listing something to replace.
+        using var uploadForm = BuildImageForm(TestData.PngBytes(), "original.png", "image/png");
+        var uploadResponse = await client.PostAsync($"/api/listings/{listingId}/images", uploadForm);
+        var uploadBody = await uploadResponse.Content.ReadAsStringAsync();
+        using var uploadDoc = JsonDocument.Parse(uploadBody);
+        var originalUrl = uploadDoc.RootElement.EnumerateArray().First().GetProperty("url").GetString();
+
+        // Then: replace with a new image.
+        using var replaceForm = BuildImageForm(TestData.PngBytes(), "replacement.png", "image/png");
+        var replaceResponse = await client.PutAsync($"/api/listings/{listingId}/images", replaceForm);
+        var replaceBody = await replaceResponse.Content.ReadAsStringAsync();
+        using var replaceDoc = JsonDocument.Parse(replaceBody);
+        var newUrl = replaceDoc.RootElement.EnumerateArray().First().GetProperty("url").GetString();
+
+        // New URL must differ — a genuinely new file was stored.
+        Assert.NotEqual(originalUrl, newUrl);
+
+        // Delta assertions: 2 saves (1 upload + 1 replace) and 1 delete (the upload was cleaned up).
+        Assert.Equal(savedBefore  + 2, _factory.FakeStorage.SavedUrls.Count);
+        Assert.Equal(deletedBefore + 1, _factory.FakeStorage.DeletedUrls.Count);
+        Assert.Equal(originalUrl, _factory.FakeStorage.DeletedUrls[^1]);
+    }
 }

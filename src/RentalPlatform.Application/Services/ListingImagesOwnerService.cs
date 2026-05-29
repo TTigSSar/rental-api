@@ -2,6 +2,7 @@ using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Entities;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Services;
 
@@ -242,6 +243,134 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
             .ToList();
 
         return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(remaining);
+    }
+
+    public async Task<ServiceResult<IReadOnlyCollection<ListingImageResponse>>> ReplaceAsync(
+        Guid listingId,
+        IReadOnlyCollection<UploadListingImageRequest> files,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerResult = await ResolveOwnedListingAsync(listingId, cancellationToken);
+        if (!ownerResult.IsSuccess || ownerResult.Value is null)
+        {
+            return Failure(ownerResult.Error!);
+        }
+
+        var listing = ownerResult.Value;
+
+        if (files.Count == 0)
+        {
+            return Failure(ErrorCodes.EmptyFile, "At least one file must be provided.");
+        }
+
+        if (files.Count > MaxImagesPerUpload)
+        {
+            return Failure(ErrorCodes.TooManyImages, $"Up to {MaxImagesPerUpload} images can be uploaded per request.");
+        }
+
+        // Pass 1: buffer + validate every incoming file BEFORE touching the DB or disk,
+        // so a late failure cannot leave the listing in a partially-replaced state.
+        var buffered = new List<BufferedUpload>(files.Count);
+        try
+        {
+            foreach (var file in files)
+            {
+                if (file.Length > MaxBytesPerFile)
+                {
+                    return Failure(ErrorCodes.FileTooLarge, $"File '{file.FileName}' exceeds the {MaxBytesPerFile / (1024 * 1024)} MB limit.");
+                }
+
+                var extension = Path.GetExtension(file.FileName);
+                if (string.IsNullOrEmpty(extension) || !AllowedExtensions.Contains(extension))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a supported image type.");
+                }
+
+                if (!AllowedContentTypes.Contains(file.ContentType))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a supported image type.");
+                }
+
+                var memory = new MemoryStream();
+                buffered.Add(new BufferedUpload(memory, file.FileName, file.ContentType));
+                await file.Content.CopyToAsync(memory, cancellationToken);
+
+                if (memory.Length == 0)
+                {
+                    return Failure(ErrorCodes.EmptyFile, $"File '{file.FileName}' is empty.");
+                }
+
+                if (memory.Length > MaxBytesPerFile)
+                {
+                    return Failure(ErrorCodes.FileTooLarge, $"File '{file.FileName}' exceeds the {MaxBytesPerFile / (1024 * 1024)} MB limit.");
+                }
+
+                var header = new byte[ImageContentValidator.HeaderBytesRequired];
+                memory.Position = 0;
+                var read = await memory.ReadAsync(header, cancellationToken);
+                memory.Position = 0;
+
+                if (!ImageContentValidator.TryDetectMimeType(header.AsSpan(0, read), out var detectedMime)
+                    || !AllowedContentTypes.Contains(detectedMime))
+                {
+                    return Failure(ErrorCodes.InvalidFileType, $"File '{file.FileName}' is not a valid or supported image.");
+                }
+            }
+
+            // Capture existing image URLs for best-effort physical cleanup after DB commit.
+            var oldUrls = listing.Images.Select(img => img.Url).ToList();
+
+            // Pass 2: remove all current DB rows. ToList() snapshots the collection so
+            // we iterate a stable copy while the tracked collection is modified.
+            foreach (var existing in listing.Images.ToList())
+            {
+                _listingsOwnerStore.RemoveListingImage(existing);
+            }
+
+            // Pass 3: persist new images starting at SortOrder 0; first is primary.
+            var newImages = new List<ListingImage>(buffered.Count);
+            var sortOrder = 0;
+            foreach (var item in buffered)
+            {
+                item.Content.Position = 0;
+                var storedUrl = await _fileStorageService.SaveListingImageAsync(
+                    item.Content, item.FileName, item.ContentType, listing.Id, cancellationToken);
+
+                newImages.Add(new ListingImage
+                {
+                    Id = Guid.NewGuid(),
+                    ListingId = listing.Id,
+                    Url = storedUrl,
+                    IsPrimary = sortOrder == 0,
+                    SortOrder = sortOrder++
+                });
+            }
+
+            await _listingsOwnerStore.AddListingImagesAsync(newImages, cancellationToken);
+
+            // Images are public-facing and were checked during original moderation.
+            // Replacing them always triggers a fresh moderation cycle.
+            listing.Status = ListingStatus.PendingApproval;
+            listing.UpdatedAt = DateTime.UtcNow;
+            await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+            // Best-effort physical cleanup AFTER the DB commit. Mirrors the pattern in
+            // DeleteAsync: never throws, no-ops for external/seed URLs, safe to skip.
+            foreach (var url in oldUrls)
+            {
+                await _fileStorageService.DeleteListingImageAsync(url, cancellationToken);
+            }
+
+            return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(
+                newImages.Select(ToResponse).ToList());
+        }
+        finally
+        {
+            foreach (var item in buffered)
+            {
+                await item.Content.DisposeAsync();
+            }
+        }
     }
 
     // Resolves the current user, verifies they are an active owner of the listing,

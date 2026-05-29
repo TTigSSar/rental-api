@@ -16,4 +16,13 @@ public interface IListingImagesOwnerService
         Guid listingId,
         Guid imageId,
         CancellationToken cancellationToken = default);
+
+    // Atomically replaces ALL existing images with the supplied set.
+    // The first file becomes primary (SortOrder 0). Old physical files are
+    // deleted best-effort after the DB commit. The listing is reset to
+    // PendingApproval so moderation sees the new images before re-publishing.
+    Task<ServiceResult<IReadOnlyCollection<ListingImageResponse>>> ReplaceAsync(
+        Guid listingId,
+        IReadOnlyCollection<UploadListingImageRequest> files,
+        CancellationToken cancellationToken = default);
 }

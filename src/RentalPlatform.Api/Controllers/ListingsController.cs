@@ -99,6 +99,59 @@ public sealed class ListingsController : ControllerBase
         return FromOwnerError(result.Error);
     }
 
+    [HttpPut("{listingId:guid}/images")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.ImageUploadPolicy)]
+    [RequestSizeLimit(MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadBytes)]
+    [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<IReadOnlyCollection<ListingImageResponse>>> ReplaceImages(
+        Guid listingId,
+        [FromForm] UploadListingImagesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var openStreams = new List<Stream>();
+
+        try
+        {
+            var uploadFiles = request.Files
+                .Select(file =>
+                {
+                    var stream = file.OpenReadStream();
+                    openStreams.Add(stream);
+
+                    return new UploadListingImageRequest
+                    {
+                        FileName = file.FileName,
+                        ContentType = file.ContentType,
+                        Length = file.Length,
+                        Content = stream
+                    };
+                })
+                .ToList();
+
+            var result = await _listingImagesOwnerService.ReplaceAsync(listingId, uploadFiles, cancellationToken);
+            if (result.IsSuccess && result.Value is not null)
+            {
+                return Ok(result.Value);
+            }
+
+            return FromOwnerError(result.Error);
+        }
+        finally
+        {
+            foreach (var stream in openStreams)
+            {
+                await stream.DisposeAsync();
+            }
+        }
+    }
+
     [HttpPost("{listingId:guid}/images")]
     [Authorize]
     [EnableRateLimiting(RateLimiterExtensions.ImageUploadPolicy)]

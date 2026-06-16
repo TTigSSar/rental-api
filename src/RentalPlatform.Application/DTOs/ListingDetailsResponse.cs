@@ -22,6 +22,10 @@ public sealed class ListingDetailsResponse
     public string? SafetyNotes { get; init; }
     public decimal? DepositAmount { get; init; }
 
+    /// <summary>Average toy rating, or null when below the aggregate threshold.</summary>
+    public double? Rating { get; init; }
+    public int ReviewCount { get; init; }
+
     public ListingCategoryResponse Category { get; init; } = new();
     public ListingOwnerResponse Owner { get; init; } = new();
     public IReadOnlyCollection<ListingImageResponse> Images { get; init; } = Array.Empty<ListingImageResponse>();

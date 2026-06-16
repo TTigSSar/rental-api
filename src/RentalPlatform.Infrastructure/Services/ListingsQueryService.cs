@@ -53,31 +53,57 @@ public sealed class ListingsQueryService : IListingsQueryService
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var items = await query
+        var rows = await query
             .OrderByDescending(listing => listing.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(listing => new ListingPreviewResponse
+            .Select(listing => new
             {
-                Id = listing.Id,
-                CategoryId = listing.CategoryId,
+                listing.Id,
+                listing.CategoryId,
                 CategoryName = listing.Category.Name,
-                Title = listing.Title,
-                PricePerDay = listing.PricePerDay,
-                Currency = listing.Currency,
-                Country = listing.Country,
-                City = listing.City,
+                listing.Title,
+                listing.PricePerDay,
+                listing.Currency,
+                listing.Country,
+                listing.City,
                 PrimaryImageUrl = listing.Images
                     .OrderByDescending(image => image.IsPrimary)
                     .ThenBy(image => image.SortOrder)
                     .Select(image => image.Url)
                     .FirstOrDefault(),
-                AgeFromMonths = listing.AgeFromMonths,
-                AgeToMonths = listing.AgeToMonths,
-                Condition = listing.Condition,
-                CreatedAt = listing.CreatedAt
+                listing.AgeFromMonths,
+                listing.AgeToMonths,
+                listing.Condition,
+                listing.CreatedAt,
+                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
+                RatingSum = _dbContext.ToyReviews
+                    .Where(tr => tr.ListingId == listing.Id)
+                    .Sum(tr => tr.OverallRating)
             })
             .ToListAsync(cancellationToken);
+
+        var items = rows
+            .Select(r => new ListingPreviewResponse
+            {
+                Id = r.Id,
+                CategoryId = r.CategoryId,
+                CategoryName = r.CategoryName,
+                Title = r.Title,
+                PricePerDay = r.PricePerDay,
+                Currency = r.Currency,
+                Country = r.Country,
+                City = r.City,
+                PrimaryImageUrl = r.PrimaryImageUrl,
+                AgeFromMonths = r.AgeFromMonths,
+                AgeToMonths = r.AgeToMonths,
+                Condition = r.Condition,
+                CreatedAt = r.CreatedAt,
+                ReviewCount = r.ReviewCount,
+                // Aggregate hidden until the minimum number of reviews (2).
+                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null
+            })
+            .ToList();
 
         return new PagedResult<ListingPreviewResponse>
         {
@@ -121,6 +147,13 @@ public sealed class ListingsQueryService : IListingsQueryService
                 HygieneNotes = listing.HygieneNotes,
                 SafetyNotes = listing.SafetyNotes,
                 DepositAmount = listing.DepositAmount,
+                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
+                // Aggregate hidden until the minimum number of reviews (2).
+                Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id) >= 2
+                    ? (double?)_dbContext.ToyReviews
+                        .Where(tr => tr.ListingId == listing.Id)
+                        .Average(tr => (double)tr.OverallRating)
+                    : null,
                 Category = new ListingCategoryResponse
                 {
                     Id = listing.Category.Id,

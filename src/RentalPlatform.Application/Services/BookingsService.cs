@@ -22,6 +22,7 @@ public sealed class BookingsService : IBookingsService
         public const string BookingForbidden = "booking.forbidden";
         public const string BookingNotPending = "booking.not_pending";
         public const string NotCancellable = "booking.not_cancellable";
+        public const string NotCompletable = "booking.not_completable";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -39,7 +40,6 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
-        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -103,7 +103,6 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
-        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -125,7 +124,6 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
-        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -152,7 +150,6 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
-        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -199,6 +196,44 @@ public sealed class BookingsService : IBookingsService
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
 
+    public async Task<ServiceResult<BookingResponse>> CompleteAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+
+        var userResult = await GetCurrentUserAsync(cancellationToken);
+        if (!userResult.IsSuccess || userResult.Value is null)
+        {
+            return ServiceResult<BookingResponse>.Failure(userResult.Error!);
+        }
+
+        var owner = userResult.Value;
+        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
+        if (booking is null)
+        {
+            return Failure<BookingResponse>(ErrorCodes.BookingNotFound, "Booking was not found.");
+        }
+
+        // Completion is an owner-only action: the owner confirms the toy was returned.
+        if (booking.Listing.OwnerId != owner.Id)
+        {
+            return Failure<BookingResponse>(ErrorCodes.BookingForbidden, "Only the listing owner can complete this booking.");
+        }
+
+        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Completed))
+        {
+            return Failure<BookingResponse>(
+                ErrorCodes.NotCompletable,
+                $"Bookings in status '{booking.Status}' cannot be completed.");
+        }
+
+        booking.Status = BookingStatus.Completed;
+        booking.UpdatedAt = now;
+        await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<BookingResponse>.Success(MapBooking(booking));
+    }
+
     private async Task<ServiceResult<BookingRequestResponse>> UpdateOwnerDecisionAsync(
         Guid bookingId,
         BookingStatus decision,
@@ -206,7 +241,6 @@ public sealed class BookingsService : IBookingsService
     {
         var now = DateTime.UtcNow;
         await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
-        await _bookingsStore.CompleteApprovedAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)

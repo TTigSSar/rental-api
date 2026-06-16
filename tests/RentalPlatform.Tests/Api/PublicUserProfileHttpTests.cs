@@ -162,22 +162,53 @@ public sealed class PublicUserProfileHttpTests
     }
 
     [Fact]
-    public async Task GetPublicProfile_Returns_Correct_Rating_After_Review()
+    public async Task GetPublicProfile_Hides_Rating_Below_Two_Owner_Reviews()
     {
         var (ownerId, renterId, _, bookingId) = await SeedOwnerAsync();
 
-        // Renter leaves a review of the owner.
-        var token  = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@profile-renter.local");
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        await client.PostAsJsonAsync("/api/reviews", new { bookingId, rating = 4 });
+        await SubmitOwnerReviewAsync(renterId, $"{renterId:N}@profile-renter.local", bookingId, 4);
 
         var response = await _factory.CreateClient().GetAsync($"/api/users/{ownerId}/public-profile");
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
+        // One review: count is shown, but the aggregate average is hidden (min 2).
         Assert.Equal(1,   doc.RootElement.GetProperty("reviewCount").GetInt32());
+        Assert.Equal(0.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    [Fact]
+    public async Task GetPublicProfile_Returns_Correct_Rating_With_Two_Owner_Reviews()
+    {
+        var (ownerId, renterId, listingId, bookingId) = await SeedOwnerAsync();
+
+        // A second renter + completed booking, so the owner accrues two reviews.
+        var renter2 = Guid.NewGuid();
+        var booking2 = Guid.NewGuid();
+        await _factory.SeedAsync(TestData.User(renter2, $"{renter2:N}@profile-renter2.local"));
+        await _factory.SeedAsync(TestData.Booking(booking2, listingId, renter2, PastStart, PastEnd, BookingStatus.Completed));
+
+        await SubmitOwnerReviewAsync(renterId, $"{renterId:N}@profile-renter.local", bookingId, 4);
+        await SubmitOwnerReviewAsync(renter2, $"{renter2:N}@profile-renter2.local", booking2, 4);
+
+        var response = await _factory.CreateClient().GetAsync($"/api/users/{ownerId}/public-profile");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(2,   doc.RootElement.GetProperty("reviewCount").GetInt32());
         Assert.Equal(4.0, doc.RootElement.GetProperty("averageRating").GetDouble());
+    }
+
+    private async Task SubmitOwnerReviewAsync(Guid renterId, string renterEmail, Guid bookingId, int score)
+    {
+        var token  = TestJwtTokenHelper.GenerateToken(renterId, renterEmail);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await client.PostAsJsonAsync("/api/reviews/owner", new
+        {
+            bookingId,
+            communicationRating = score,
+            pickupHandoverRating = score,
+            friendlinessRating = score
+        });
     }
 
     // -----------------------------------------------------------------------

@@ -1,18 +1,22 @@
 using RentalPlatform.Domain.Entities;
-using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Abstractions;
 
 public interface IReviewsStore
 {
-    Task AddAsync(Review review, CancellationToken cancellationToken = default);
-    Task<bool> HasReviewForBookingAsync(Guid bookingId, ReviewerRole role, CancellationToken cancellationToken = default);
     Task<Booking?> FindBookingForReviewAsync(Guid bookingId, CancellationToken cancellationToken = default);
-    Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<Review>> GetByListingAsync(Guid listingId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<Review>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
-    // Returns (count, average) aggregated in the DB. Count==0 → average==0.
-    Task<(int Count, double AverageRating)> GetListingSummaryAsync(Guid listingId, CancellationToken cancellationToken = default);
-    Task<(int Count, double AverageRating)> GetUserSummaryAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> HasToyReviewAsync(Guid bookingId, CancellationToken cancellationToken = default);
+    Task<bool> HasOwnerReviewAsync(Guid bookingId, CancellationToken cancellationToken = default);
+    Task<bool> HasRenterReviewAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
+    Task AddToyReviewAsync(ToyReview review, CancellationToken cancellationToken = default);
+    Task AddOwnerReviewAsync(OwnerReview review, CancellationToken cancellationToken = default);
+    Task AddRenterReviewAsync(RenterReview review, CancellationToken cancellationToken = default);
+
+    // Read sides for aggregation. Reviewer + Booking are included so the service
+    // can build public comment cards (name, avatar, rented days).
+    Task<IReadOnlyList<ToyReview>> GetToyReviewsByListingAsync(Guid listingId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OwnerReview>> GetOwnerReviewsByUserAsync(Guid ownerId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RenterReview>> GetRenterReviewsByUserAsync(Guid renterId, CancellationToken cancellationToken = default);
 }

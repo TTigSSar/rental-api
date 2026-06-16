@@ -5,7 +5,6 @@ namespace RentalPlatform.Application.Abstractions;
 public interface IBookingsStore
 {
     Task ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default);
-    Task CompleteApprovedAsync(DateTime utcNow, CancellationToken cancellationToken = default);
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default);
     Task<bool> HasApprovedOverlapAsync(

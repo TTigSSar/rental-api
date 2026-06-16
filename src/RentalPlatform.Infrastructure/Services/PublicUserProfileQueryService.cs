@@ -9,12 +9,12 @@ namespace RentalPlatform.Infrastructure.Services;
 public sealed class PublicUserProfileQueryService : IPublicUserProfileService
 {
     private readonly AppDbContext _dbContext;
-    private readonly IReviewsStore _reviewsStore;
+    private readonly IReviewsService _reviewsService;
 
-    public PublicUserProfileQueryService(AppDbContext dbContext, IReviewsStore reviewsStore)
+    public PublicUserProfileQueryService(AppDbContext dbContext, IReviewsService reviewsService)
     {
         _dbContext = dbContext;
-        _reviewsStore = reviewsStore;
+        _reviewsService = reviewsService;
     }
 
     public async Task<PublicUserProfileResponse?> GetPublicProfileAsync(
@@ -38,7 +38,8 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
 
         if (user is null) return null;
 
-        var (reviewCount, averageRating) = await _reviewsStore.GetUserSummaryAsync(userId, cancellationToken);
+        // A public profile reflects the user's reputation as an owner.
+        var ownerReviews = await _reviewsService.GetOwnerReviewsAsync(userId, cancellationToken);
 
         return new PublicUserProfileResponse
         {
@@ -48,8 +49,8 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
             AvatarUrl = user.AvatarUrl,
             MemberSince = user.CreatedAt,
             ActiveListingsCount = user.ActiveListingsCount,
-            AverageRating = averageRating,
-            ReviewCount = reviewCount
+            AverageRating = ownerReviews.HasAggregate ? ownerReviews.OverallAverage : 0,
+            ReviewCount = ownerReviews.ReviewCount
         };
     }
 }

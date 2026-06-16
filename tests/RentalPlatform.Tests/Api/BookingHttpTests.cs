@@ -166,12 +166,36 @@ public sealed class BookingHttpTests
     }
 
     [Fact]
-    public async Task GetMine_Returns_Completed_Status_For_Past_Approved_Booking()
+    public async Task Complete_By_Owner_Transitions_Approved_To_Completed()
+    {
+        var (ownerId, renterId, listingId) = await SeedBaselineAsync();
+        var bookingId = Guid.NewGuid();
+
+        await _factory.SeedAsync(TestData.Booking(
+            bookingId, listingId, renterId,
+            Today.AddDays(-5), Today.AddDays(-1),
+            BookingStatus.Approved));
+
+        // Completion is a manual owner action.
+        var token = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@booking-owner.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.PostAsync($"/api/bookings/{bookingId}/complete", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal("Completed", doc.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Complete_By_Renter_Returns_403()
     {
         var (_, renterId, listingId) = await SeedBaselineAsync();
         var bookingId = Guid.NewGuid();
 
-        // Seed as Approved with an EndDate in the past so CompleteApprovedAsync picks it up.
         await _factory.SeedAsync(TestData.Booking(
             bookingId, listingId, renterId,
             Today.AddDays(-5), Today.AddDays(-1),
@@ -181,16 +205,8 @@ public sealed class BookingHttpTests
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        var response = await client.GetAsync("/api/bookings/mine");
+        var response = await client.PostAsync($"/api/bookings/{bookingId}/complete", null);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-        var booking = doc.RootElement.EnumerateArray()
-            .FirstOrDefault(b => b.GetProperty("id").GetString() == bookingId.ToString());
-
-        Assert.NotEqual(default, booking);
-        Assert.Equal("Completed", booking.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 }

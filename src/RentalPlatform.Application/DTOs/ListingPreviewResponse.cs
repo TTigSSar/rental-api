@@ -15,4 +15,8 @@ public sealed class ListingPreviewResponse
     public int? AgeToMonths { get; init; }
     public string? Condition { get; init; }
     public DateTime CreatedAt { get; init; }
+
+    /// <summary>Average toy rating, or null when below the aggregate threshold.</summary>
+    public double? Rating { get; init; }
+    public int ReviewCount { get; init; }
 }

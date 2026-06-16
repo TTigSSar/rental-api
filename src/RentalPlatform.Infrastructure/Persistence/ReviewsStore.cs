@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
-using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Infrastructure.Persistence;
 
@@ -14,76 +13,68 @@ public sealed class ReviewsStore : IReviewsStore
         _dbContext = dbContext;
     }
 
-    public async Task AddAsync(Review review, CancellationToken cancellationToken = default)
-    {
-        await _dbContext.Reviews.AddAsync(review, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    public Task<bool> HasReviewForBookingAsync(
-        Guid bookingId,
-        ReviewerRole role,
-        CancellationToken cancellationToken = default) =>
-        _dbContext.Reviews.AnyAsync(
-            r => r.BookingId == bookingId && r.ReviewerRole == role,
-            cancellationToken);
-
-    public Task<Booking?> FindBookingForReviewAsync(
-        Guid bookingId,
-        CancellationToken cancellationToken = default) =>
+    public Task<Booking?> FindBookingForReviewAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
         _dbContext.Bookings
             .Include(b => b.Listing)
             .FirstOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
 
-    public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+    public Task<bool> HasToyReviewAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
+        _dbContext.ToyReviews.AnyAsync(r => r.BookingId == bookingId, cancellationToken);
 
-    public async Task<IReadOnlyCollection<Review>> GetByListingAsync(
+    public Task<bool> HasOwnerReviewAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
+        _dbContext.OwnerReviews.AnyAsync(r => r.BookingId == bookingId, cancellationToken);
+
+    public Task<bool> HasRenterReviewAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
+        _dbContext.RenterReviews.AnyAsync(r => r.BookingId == bookingId, cancellationToken);
+
+    public async Task AddToyReviewAsync(ToyReview review, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.ToyReviews.AddAsync(review, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddOwnerReviewAsync(OwnerReview review, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.OwnerReviews.AddAsync(review, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddRenterReviewAsync(RenterReview review, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.RenterReviews.AddAsync(review, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ToyReview>> GetToyReviewsByListingAsync(
         Guid listingId,
         CancellationToken cancellationToken = default) =>
-        await _dbContext.Reviews
+        await _dbContext.ToyReviews
             .AsNoTracking()
-            .Where(r => r.ListingId == listingId && r.ReviewerRole == ReviewerRole.Renter)
+            .Where(r => r.ListingId == listingId)
             .Include(r => r.Reviewer)
+            .Include(r => r.Booking)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public async Task<IReadOnlyCollection<Review>> GetByUserAsync(
-        Guid userId,
+    public async Task<IReadOnlyList<OwnerReview>> GetOwnerReviewsByUserAsync(
+        Guid ownerId,
         CancellationToken cancellationToken = default) =>
-        await _dbContext.Reviews
+        await _dbContext.OwnerReviews
             .AsNoTracking()
-            .Where(r => r.RevieweeId == userId)
+            .Where(r => r.OwnerId == ownerId)
             .Include(r => r.Reviewer)
+            .Include(r => r.Booking)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);
 
-    public async Task<(int Count, double AverageRating)> GetListingSummaryAsync(
-        Guid listingId,
-        CancellationToken cancellationToken = default)
-    {
-        // Only renter reviews count toward the listing rating.
-        var query = _dbContext.Reviews
-            .Where(r => r.ListingId == listingId && r.ReviewerRole == ReviewerRole.Renter);
-
-        var count = await query.CountAsync(cancellationToken);
-        if (count == 0) return (0, 0.0);
-
-        var avg = await query.AverageAsync(r => (double)r.Rating, cancellationToken);
-        return (count, Math.Round(avg, 1));
-    }
-
-    public async Task<(int Count, double AverageRating)> GetUserSummaryAsync(
-        Guid userId,
-        CancellationToken cancellationToken = default)
-    {
-        // All reviews received by this user (as owner or as renter).
-        var query = _dbContext.Reviews.Where(r => r.RevieweeId == userId);
-
-        var count = await query.CountAsync(cancellationToken);
-        if (count == 0) return (0, 0.0);
-
-        var avg = await query.AverageAsync(r => (double)r.Rating, cancellationToken);
-        return (count, Math.Round(avg, 1));
-    }
+    public async Task<IReadOnlyList<RenterReview>> GetRenterReviewsByUserAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default) =>
+        await _dbContext.RenterReviews
+            .AsNoTracking()
+            .Where(r => r.RenterId == renterId)
+            .Include(r => r.Reviewer)
+            .Include(r => r.Booking)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(cancellationToken);
 }

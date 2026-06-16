@@ -17,68 +17,97 @@ public sealed class ReviewsController : ControllerBase
         _reviewsService = reviewsService;
     }
 
-    [HttpPost]
+    [HttpPost("toy")]
     [Authorize]
-    [ProducesResponseType(typeof(ReviewResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(BookingReviewStatusResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<ReviewResponse>> Create(
-        [FromBody] CreateReviewRequest request,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<BookingReviewStatusResponse>> SubmitToy(
+        [FromBody] CreateToyReviewRequest request, CancellationToken cancellationToken)
     {
-        var result = await _reviewsService.CreateAsync(request, cancellationToken);
-        if (result.IsSuccess && result.Value is not null)
-        {
-            return StatusCode(StatusCodes.Status201Created, result.Value);
-        }
+        var result = await _reviewsService.SubmitToyReviewAsync(request, cancellationToken);
+        return result.IsSuccess && result.Value is not null
+            ? StatusCode(StatusCodes.Status201Created, result.Value)
+            : FromError(result.Error);
+    }
 
-        return FromError(result.Error);
+    [HttpPost("owner")]
+    [Authorize]
+    [ProducesResponseType(typeof(BookingReviewStatusResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BookingReviewStatusResponse>> SubmitOwner(
+        [FromBody] CreateOwnerReviewRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _reviewsService.SubmitOwnerReviewAsync(request, cancellationToken);
+        return result.IsSuccess && result.Value is not null
+            ? StatusCode(StatusCodes.Status201Created, result.Value)
+            : FromError(result.Error);
+    }
+
+    [HttpPost("renter")]
+    [Authorize]
+    [ProducesResponseType(typeof(BookingReviewStatusResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BookingReviewStatusResponse>> SubmitRenter(
+        [FromBody] CreateRenterReviewRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _reviewsService.SubmitRenterReviewAsync(request, cancellationToken);
+        return result.IsSuccess && result.Value is not null
+            ? StatusCode(StatusCodes.Status201Created, result.Value)
+            : FromError(result.Error);
+    }
+
+    [HttpGet("booking/{bookingId:guid}/status")]
+    [Authorize]
+    [ProducesResponseType(typeof(BookingReviewStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingReviewStatusResponse>> GetBookingStatus(
+        Guid bookingId, CancellationToken cancellationToken)
+    {
+        var result = await _reviewsService.GetBookingReviewStatusAsync(bookingId, cancellationToken);
+        return result.IsSuccess && result.Value is not null ? Ok(result.Value) : FromError(result.Error);
     }
 
     [HttpGet("listing/{listingId:guid}")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(IReadOnlyCollection<ReviewResponse>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyCollection<ReviewResponse>>> GetByListing(
-        Guid listingId,
-        CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ToyReviewSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ToyReviewSummaryResponse>> GetListingToyReviews(
+        Guid listingId, CancellationToken cancellationToken)
     {
-        var result = await _reviewsService.GetByListingAsync(listingId, cancellationToken);
-        return Ok(result.Value);
-    }
-
-    [HttpGet("user/{userId:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(IReadOnlyCollection<ReviewResponse>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyCollection<ReviewResponse>>> GetByUser(
-        Guid userId,
-        CancellationToken cancellationToken)
-    {
-        var result = await _reviewsService.GetByUserAsync(userId, cancellationToken);
-        return Ok(result.Value);
-    }
-
-    [HttpGet("listing/{listingId:guid}/summary")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(RatingSummaryResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<RatingSummaryResponse>> GetListingSummary(
-        Guid listingId,
-        CancellationToken cancellationToken)
-    {
-        var summary = await _reviewsService.GetListingSummaryAsync(listingId, cancellationToken);
+        var summary = await _reviewsService.GetListingToyReviewsAsync(listingId, cancellationToken);
         return Ok(summary);
     }
 
-    [HttpGet("user/{userId:guid}/summary")]
+    [HttpGet("owner/{userId:guid}")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(RatingSummaryResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<RatingSummaryResponse>> GetUserSummary(
-        Guid userId,
-        CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(OwnerReviewSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<OwnerReviewSummaryResponse>> GetOwnerReviews(
+        Guid userId, CancellationToken cancellationToken)
     {
-        var summary = await _reviewsService.GetUserSummaryAsync(userId, cancellationToken);
+        var summary = await _reviewsService.GetOwnerReviewsAsync(userId, cancellationToken);
+        return Ok(summary);
+    }
+
+    [HttpGet("renter/{userId:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(RenterReviewSummaryResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<RenterReviewSummaryResponse>> GetRenterReviews(
+        Guid userId, CancellationToken cancellationToken)
+    {
+        var summary = await _reviewsService.GetRenterReviewsAsync(userId, cancellationToken);
         return Ok(summary);
     }
 
@@ -91,12 +120,11 @@ public sealed class ReviewsController : ControllerBase
 
         return error.Code switch
         {
-            "review.unauthenticated"     => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "review.booking_not_found"   => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "review.forbidden"           => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
+            "review.unauthenticated"       => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
+            "review.booking_not_found"     => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
+            "review.forbidden"             => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "review.booking_not_completed" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "review.already_submitted"   => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "review.invalid_rating"      => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "review.already_submitted"     => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

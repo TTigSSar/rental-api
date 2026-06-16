@@ -67,6 +67,22 @@ internal static class DevelopmentSeedData
         int ExpiresAtHoursFromNow,
         int CreatedDaysAgo);
 
+    // Reviews resolve reviewer/reviewee/listing from the referenced booking at seed time.
+    public sealed record SeedToyReview(
+        Guid Id, Guid BookingId,
+        int Overall, int Condition, int Cleanliness, int Value, int Fun, int Description,
+        string? Comment, int CreatedDaysAgo);
+
+    public sealed record SeedOwnerReview(
+        Guid Id, Guid BookingId,
+        int Communication, int Pickup, int Friendliness,
+        string? Comment, int CreatedDaysAgo);
+
+    public sealed record SeedRenterReview(
+        Guid Id, Guid BookingId,
+        int Communication, int Returned, int Care, int WouldRent,
+        string? Comment, int CreatedDaysAgo);
+
     // Toy-rental MVP listing ids. Prefix `77777777-` marks them as the toy-MVP seed cohort.
     public static class ListingIds
     {
@@ -442,6 +458,70 @@ internal static class DevelopmentSeedData
             DevelopmentSeedCredentials.RenterEmail,
             StartDaysFromToday: 25, DurationDays: 3,
             BookingStatus.Cancelled,
-            ExpiresAtHoursFromNow: -48, CreatedDaysAgo: 4)
+            ExpiresAtHoursFromNow: -48, CreatedDaysAgo: 4),
+
+        // ---- Completed bookings that back the seeded reviews (≥2 per listing/owner so
+        //      aggregates clear the minimum-reviews threshold and render in the demo). ----
+        new(new Guid("55555555-0007-4000-9000-000000000007"), ListingIds.ToyKitchenSet,
+            DevelopmentSeedCredentials.SecondUserEmail,
+            StartDaysFromToday: -20, DurationDays: 3, BookingStatus.Completed,
+            ExpiresAtHoursFromNow: -360, CreatedDaysAgo: 22),
+        new(new Guid("55555555-0008-4000-9000-000000000008"), ListingIds.StemScienceDiscoveryKit,
+            DevelopmentSeedCredentials.RenterEmail,
+            StartDaysFromToday: -30, DurationDays: 4, BookingStatus.Completed,
+            ExpiresAtHoursFromNow: -600, CreatedDaysAgo: 33),
+        new(new Guid("55555555-0009-4000-9000-000000000009"), ListingIds.StemScienceDiscoveryKit,
+            DevelopmentSeedCredentials.SecondUserEmail,
+            StartDaysFromToday: -25, DurationDays: 5, BookingStatus.Completed,
+            ExpiresAtHoursFromNow: -480, CreatedDaysAgo: 28),
+        new(new Guid("55555555-000a-4000-9000-00000000000a"), ListingIds.LegoDuploStarterSet,
+            DevelopmentSeedCredentials.SecondUserEmail,
+            StartDaysFromToday: -18, DurationDays: 3, BookingStatus.Completed,
+            ExpiresAtHoursFromNow: -300, CreatedDaysAgo: 20)
+    ];
+
+    // Toy reviews (renter → toy). Booking 0005 + 0007 give ToyKitchenSet two reviews.
+    public static readonly SeedToyReview[] ToyReviews =
+    [
+        new(new Guid("66666666-0001-4000-9000-000000000001"), new Guid("55555555-0005-4000-9000-000000000005"),
+            Overall: 5, Condition: 5, Cleanliness: 5, Value: 4, Fun: 5, Description: 5,
+            "All pieces present and spotless. My son played non-stop — the kitchen is a winner.", CreatedDaysAgo: 5),
+        new(new Guid("66666666-0002-4000-9000-000000000002"), new Guid("55555555-0007-4000-9000-000000000007"),
+            Overall: 4, Condition: 4, Cleanliness: 5, Value: 4, Fun: 5, Description: 4,
+            "Exactly as described and well sanitized. Sturdy pieces, nothing missing.", CreatedDaysAgo: 16),
+        new(new Guid("66666666-0003-4000-9000-000000000003"), new Guid("55555555-0008-4000-9000-000000000008"),
+            Overall: 5, Condition: 5, Cleanliness: 5, Value: 5, Fun: 5, Description: 5,
+            "Fantastic STEM kit — the experiments kept the kids busy all weekend.", CreatedDaysAgo: 26),
+        new(new Guid("66666666-0004-4000-9000-000000000004"), new Guid("55555555-0009-4000-9000-000000000009"),
+            Overall: 4, Condition: 4, Cleanliness: 4, Value: 5, Fun: 4, Description: 4,
+            "Great value. One sachet was running low but the owner sorted it instantly.", CreatedDaysAgo: 21)
+    ];
+
+    // Owner reviews (renter → owner). Owner@ gets two; DemoOwner@ gets two.
+    public static readonly SeedOwnerReview[] OwnerReviews =
+    [
+        new(new Guid("77777771-0001-4000-9000-000000000001"), new Guid("55555555-0005-4000-9000-000000000005"),
+            Communication: 5, Pickup: 5, Friendliness: 5,
+            "Olivia was super communicative and flexible with pickup. Would happily rent again!", CreatedDaysAgo: 5),
+        new(new Guid("77777771-0002-4000-9000-000000000002"), new Guid("55555555-0007-4000-9000-000000000007"),
+            Communication: 5, Pickup: 4, Friendliness: 5,
+            "Smooth handover, very friendly and on time.", CreatedDaysAgo: 16),
+        new(new Guid("77777771-0003-4000-9000-000000000003"), new Guid("55555555-0008-4000-9000-000000000008"),
+            Communication: 5, Pickup: 5, Friendliness: 5,
+            "Quick replies and easy meetup. Highly recommend.", CreatedDaysAgo: 26),
+        new(new Guid("77777771-0004-4000-9000-000000000004"), new Guid("55555555-0009-4000-9000-000000000009"),
+            Communication: 4, Pickup: 5, Friendliness: 5,
+            null, CreatedDaysAgo: 21)
+    ];
+
+    // Renter reviews (owner → renter).
+    public static readonly SeedRenterReview[] RenterReviews =
+    [
+        new(new Guid("77777772-0001-4000-9000-000000000001"), new Guid("55555555-0005-4000-9000-000000000005"),
+            Communication: 5, Returned: 5, Care: 4, WouldRent: 5,
+            "Easy to coordinate, returned the set in great shape. Welcome anytime!", CreatedDaysAgo: 4),
+        new(new Guid("77777772-0002-4000-9000-000000000002"), new Guid("55555555-0008-4000-9000-000000000008"),
+            Communication: 5, Returned: 5, Care: 5, WouldRent: 5,
+            null, CreatedDaysAgo: 25)
     ];
 }

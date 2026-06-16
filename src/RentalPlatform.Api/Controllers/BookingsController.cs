@@ -123,6 +123,23 @@ public sealed class BookingsController : ControllerBase
         return FromError(result.Error);
     }
 
+    [HttpPost("{id:guid}/complete")]
+    [ProducesResponseType(typeof(BookingResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<BookingResponse>> Complete(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _bookingsService.CompleteAsync(id, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)
@@ -141,6 +158,7 @@ public sealed class BookingsController : ControllerBase
             "booking.overlap" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "booking.not_pending" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "booking.not_cancellable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
+            "booking.not_completable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "booking.listing_not_approved" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "booking.invalid_dates" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))

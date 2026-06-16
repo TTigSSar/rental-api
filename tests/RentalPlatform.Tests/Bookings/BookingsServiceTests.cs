@@ -264,49 +264,66 @@ public sealed class BookingsServiceTests
     }
 
     [Fact]
-    public async Task GetMine_Returns_Completed_For_Approved_Booking_With_Past_EndDate()
+    public async Task Complete_By_Owner_Sets_Status_Completed()
     {
         using var db = new SqliteTestDatabase();
         await SeedBaselineAsync(db);
         var bookingId = Guid.NewGuid();
 
-        // EndDate yesterday — rental window has fully passed.
         await db.SeedAsync(TestData.Booking(
             bookingId, ListingId, RenterId,
             Today.AddDays(-5), Today.AddDays(-1),
             BookingStatus.Approved));
 
         await using var context = db.CreateContext();
-        var service = CreateService(context, RenterId);
-
-        var result = await service.GetMineAsync();
+        var result = await CreateService(context, OwnerId).CompleteAsync(bookingId);
 
         Assert.True(result.IsSuccess);
-        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
-        Assert.Equal(BookingStatus.Completed, booking.Status);
+        Assert.Equal(BookingStatus.Completed, result.Value!.Status);
     }
 
     [Fact]
-    public async Task GetMine_Does_Not_Complete_Approved_Booking_Ending_Today()
+    public async Task Complete_By_Renter_Is_Forbidden()
     {
         using var db = new SqliteTestDatabase();
         await SeedBaselineAsync(db);
         var bookingId = Guid.NewGuid();
 
-        // EndDate is today — rental window is still open, must stay Approved.
         await db.SeedAsync(TestData.Booking(
             bookingId, ListingId, RenterId,
-            Today.AddDays(-2), Today,
+            Today.AddDays(-5), Today.AddDays(-1),
             BookingStatus.Approved));
 
         await using var context = db.CreateContext();
-        var service = CreateService(context, RenterId);
+        var result = await CreateService(context, RenterId).CompleteAsync(bookingId);
 
-        var result = await service.GetMineAsync();
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.forbidden", result.Error!.Code);
+    }
 
-        Assert.True(result.IsSuccess);
-        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
-        Assert.Equal(BookingStatus.Approved, booking.Status);
+    [Theory]
+    [InlineData(BookingStatus.Pending)]
+    [InlineData(BookingStatus.Rejected)]
+    [InlineData(BookingStatus.Cancelled)]
+    [InlineData(BookingStatus.Expired)]
+    [InlineData(BookingStatus.Completed)]
+    public async Task Complete_Fails_For_Non_Approved_Booking(BookingStatus status)
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(-5), Today.AddDays(-1),
+            status,
+            expiresAt: DateTime.UtcNow.AddHours(-24)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).CompleteAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.not_completable", result.Error!.Code);
     }
 
     [Theory]

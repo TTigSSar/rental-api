@@ -38,10 +38,11 @@ internal sealed class DevelopmentSeedRunner
         var insertedImages = await SeedListingImagesAsync(cancellationToken);
         var insertedFavorites = await SeedFavoritesAsync(userByEmail, now, cancellationToken);
         var insertedBookings = await SeedBookingsAsync(userByEmail, today, now, cancellationToken);
+        var insertedReviews = await SeedReviewsAsync(userByEmail, now, cancellationToken);
 
         var totalInserted =
             insertedCategories + insertedUsers + insertedListings +
-            insertedImages + insertedFavorites + insertedBookings;
+            insertedImages + insertedFavorites + insertedBookings + insertedReviews;
 
         if (totalInserted == 0)
         {
@@ -483,6 +484,129 @@ internal sealed class DevelopmentSeedRunner
 
         return newRows.Count;
     }
+
+    private async Task<int> SeedReviewsAsync(
+        IDictionary<string, User> userByEmail,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var bookingsById = DevelopmentSeedData.Bookings.ToDictionary(b => b.Id);
+        var listingsById = DevelopmentSeedData.Listings.ToDictionary(l => l.Id);
+
+        // Booking ids present in the DB plus those queued for insert in this same run.
+        var presentBookingIds = (await _dbContext.Bookings
+            .Select(b => b.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        foreach (var entry in _dbContext.ChangeTracker.Entries<Booking>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                presentBookingIds.Add(entry.Entity.Id);
+            }
+        }
+
+        User? Renter(SeedBookingRef booking) =>
+            userByEmail.TryGetValue(NormalizeEmail(booking.RenterEmail), out var u) ? u : null;
+
+        User? Owner(SeedBookingRef booking) =>
+            listingsById.TryGetValue(booking.ListingId, out var listing)
+            && userByEmail.TryGetValue(NormalizeEmail(listing.OwnerEmail), out var u) ? u : null;
+
+        var added = 0;
+
+        // --- Toy reviews ---
+        var toyIds = DevelopmentSeedData.ToyReviews.Select(r => r.Id).ToArray();
+        var existingToy = (await _dbContext.ToyReviews
+            .Where(r => toyIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(cancellationToken)).ToHashSet();
+        foreach (var seed in DevelopmentSeedData.ToyReviews)
+        {
+            if (existingToy.Contains(seed.Id) || !presentBookingIds.Contains(seed.BookingId)) continue;
+            if (!bookingsById.TryGetValue(seed.BookingId, out var b)) continue;
+            var renter = Renter(new SeedBookingRef(b.ListingId, b.RenterEmail));
+            if (renter is null) continue;
+
+            await _dbContext.ToyReviews.AddAsync(new ToyReview
+            {
+                Id = seed.Id,
+                BookingId = seed.BookingId,
+                ListingId = b.ListingId,
+                ReviewerId = renter.Id,
+                OverallRating = seed.Overall,
+                ConditionRating = seed.Condition,
+                CleanlinessRating = seed.Cleanliness,
+                ValueForMoneyRating = seed.Value,
+                FunPlayValueRating = seed.Fun,
+                DescriptionAccuracyRating = seed.Description,
+                Comment = seed.Comment,
+                CreatedAt = now.AddDays(-seed.CreatedDaysAgo)
+            }, cancellationToken);
+            added++;
+        }
+
+        // --- Owner reviews (renter → owner) ---
+        var ownerIds = DevelopmentSeedData.OwnerReviews.Select(r => r.Id).ToArray();
+        var existingOwner = (await _dbContext.OwnerReviews
+            .Where(r => ownerIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(cancellationToken)).ToHashSet();
+        foreach (var seed in DevelopmentSeedData.OwnerReviews)
+        {
+            if (existingOwner.Contains(seed.Id) || !presentBookingIds.Contains(seed.BookingId)) continue;
+            if (!bookingsById.TryGetValue(seed.BookingId, out var b)) continue;
+            var bookingRef = new SeedBookingRef(b.ListingId, b.RenterEmail);
+            var renter = Renter(bookingRef);
+            var owner = Owner(bookingRef);
+            if (renter is null || owner is null) continue;
+
+            await _dbContext.OwnerReviews.AddAsync(new OwnerReview
+            {
+                Id = seed.Id,
+                BookingId = seed.BookingId,
+                OwnerId = owner.Id,
+                ReviewerId = renter.Id,
+                CommunicationRating = seed.Communication,
+                PickupHandoverRating = seed.Pickup,
+                FriendlinessRating = seed.Friendliness,
+                Comment = seed.Comment,
+                CreatedAt = now.AddDays(-seed.CreatedDaysAgo)
+            }, cancellationToken);
+            added++;
+        }
+
+        // --- Renter reviews (owner → renter) ---
+        var renterIds = DevelopmentSeedData.RenterReviews.Select(r => r.Id).ToArray();
+        var existingRenter = (await _dbContext.RenterReviews
+            .Where(r => renterIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(cancellationToken)).ToHashSet();
+        foreach (var seed in DevelopmentSeedData.RenterReviews)
+        {
+            if (existingRenter.Contains(seed.Id) || !presentBookingIds.Contains(seed.BookingId)) continue;
+            if (!bookingsById.TryGetValue(seed.BookingId, out var b)) continue;
+            var bookingRef = new SeedBookingRef(b.ListingId, b.RenterEmail);
+            var renter = Renter(bookingRef);
+            var owner = Owner(bookingRef);
+            if (renter is null || owner is null) continue;
+
+            await _dbContext.RenterReviews.AddAsync(new RenterReview
+            {
+                Id = seed.Id,
+                BookingId = seed.BookingId,
+                RenterId = renter.Id,
+                ReviewerId = owner.Id,
+                CommunicationRating = seed.Communication,
+                ReturnedOnTimeRating = seed.Returned,
+                CareOfToyRating = seed.Care,
+                WouldRentAgainRating = seed.WouldRent,
+                Comment = seed.Comment,
+                CreatedAt = now.AddDays(-seed.CreatedDaysAgo)
+            }, cancellationToken);
+            added++;
+        }
+
+        if (added > 0)
+            _logger.LogInformation("Demo seed: created {Count} review(s).", added);
+
+        return added;
+    }
+
+    private readonly record struct SeedBookingRef(Guid ListingId, string RenterEmail);
 
     private async Task<HashSet<Guid>> ResolvePresentListingIdsAsync(
         Guid[] ids,

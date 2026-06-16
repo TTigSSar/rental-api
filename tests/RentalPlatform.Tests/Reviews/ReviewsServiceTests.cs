@@ -7,8 +7,8 @@ using Xunit;
 
 namespace RentalPlatform.Tests.Reviews;
 
-// Service-layer tests for ReviewsService. Each test runs against an isolated
-// in-memory SQLite database so no shared state exists between tests.
+// Service-layer tests for the three-table review model. Each test runs against an
+// isolated in-memory SQLite database.
 public sealed class ReviewsServiceTests
 {
     private static readonly Guid OwnerId    = new("c0000000-0000-0000-0000-000000000001");
@@ -27,111 +27,103 @@ public sealed class ReviewsServiceTests
             TestData.User(RenterId,   "srv-review-renter@test.local"),
             TestData.User(StrangerId, "srv-review-stranger@test.local"),
             TestData.Category(CategoryId));
-
         await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved));
 
         var bookingId = Guid.NewGuid();
-        await db.SeedAsync(TestData.Booking(
-            bookingId, ListingId, RenterId,
-            PastStart, PastEnd,
-            status));
-
+        await db.SeedAsync(TestData.Booking(bookingId, ListingId, RenterId, PastStart, PastEnd, status));
         return bookingId;
     }
 
     private static ReviewsService CreateService(AppDbContext context, Guid? callerId) =>
         new(new FakeCurrentUserContext(callerId), new ReviewsStore(context));
 
-    // -----------------------------------------------------------------------
-    // Successful submissions
-    // -----------------------------------------------------------------------
+    private static CreateToyReviewRequest ToyRequest(Guid bookingId, int overall = 5, string? comment = null) => new()
+    {
+        BookingId = bookingId,
+        OverallRating = overall,
+        ConditionRating = overall,
+        CleanlinessRating = overall,
+        ValueForMoneyRating = overall,
+        FunPlayValueRating = overall,
+        DescriptionAccuracyRating = overall,
+        Comment = comment
+    };
+
+    private static CreateOwnerReviewRequest OwnerRequest(Guid bookingId, int score = 5, string? comment = null) => new()
+    {
+        BookingId = bookingId,
+        CommunicationRating = score,
+        PickupHandoverRating = score,
+        FriendlinessRating = score,
+        Comment = comment
+    };
+
+    private static CreateRenterReviewRequest RenterRequest(Guid bookingId, int score = 5, string? comment = null) => new()
+    {
+        BookingId = bookingId,
+        CommunicationRating = score,
+        ReturnedOnTimeRating = score,
+        CareOfToyRating = score,
+        WouldRentAgainRating = score,
+        Comment = comment
+    };
+
+    // --- toy review submission ---
 
     [Fact]
-    public async Task Create_Succeeds_For_Renter_Reviewing_Owner()
+    public async Task SubmitToy_Succeeds_For_Renter()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var service = CreateService(context, RenterId);
-
-        var result = await service.CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 5,
-            Comment = "Great owner!"
-        });
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId, 5, "Loved it"));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(ReviewerRole.Renter, result.Value!.ReviewerRole);
-        Assert.Equal(OwnerId,             result.Value.RevieweeId);
-        Assert.Equal(RenterId,            result.Value.ReviewerId);
-        Assert.Equal(5,                   result.Value.Rating);
-        Assert.Equal("Great owner!",      result.Value.Comment);
+        Assert.Equal("renter", result.Value!.Role);
+        Assert.True(result.Value.HasToyReview);
+        Assert.False(result.Value.CanReviewToy);   // already submitted
+        Assert.True(result.Value.CanReviewOwner);  // owner still pending
     }
 
     [Fact]
-    public async Task Create_Succeeds_For_Owner_Reviewing_Renter()
+    public async Task SubmitToy_Fails_For_Owner()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var service = CreateService(context, OwnerId);
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, OwnerId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
-        var result = await service.CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 4
-        });
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal(ReviewerRole.Owner, result.Value!.ReviewerRole);
-        Assert.Equal(RenterId,           result.Value.RevieweeId);
-        Assert.Equal(OwnerId,            result.Value.ReviewerId);
-        Assert.Equal(4,                  result.Value.Rating);
-        Assert.Null(result.Value.Comment);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.forbidden", result.Error!.Code);
     }
 
     [Fact]
-    public async Task Create_Trims_Comment_Whitespace()
+    public async Task SubmitToy_Fails_For_Stranger()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 3,
-            Comment = "  Nice!  "
-        });
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, StrangerId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("Nice!", result.Value!.Comment);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.forbidden", result.Error!.Code);
     }
 
     [Fact]
-    public async Task Create_Treats_Whitespace_Only_Comment_As_Null()
+    public async Task SubmitToy_Fails_When_Not_Authenticated()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 3,
-            Comment = "   "
-        });
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, null).SubmitToyReviewAsync(ToyRequest(bookingId));
 
-        Assert.True(result.IsSuccess);
-        Assert.Null(result.Value!.Comment);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.unauthenticated", result.Error!.Code);
     }
-
-    // -----------------------------------------------------------------------
-    // Booking status validation
-    // -----------------------------------------------------------------------
 
     [Theory]
     [InlineData(BookingStatus.Pending)]
@@ -139,220 +131,192 @@ public sealed class ReviewsServiceTests
     [InlineData(BookingStatus.Rejected)]
     [InlineData(BookingStatus.Cancelled)]
     [InlineData(BookingStatus.Expired)]
-    public async Task Create_Fails_For_Non_Completed_Booking(BookingStatus status)
+    public async Task SubmitToy_Fails_For_Non_Completed_Booking(BookingStatus status)
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db, status);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 5
-        });
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
         Assert.False(result.IsSuccess);
         Assert.Equal("review.booking_not_completed", result.Error!.Code);
     }
 
-    // -----------------------------------------------------------------------
-    // Booking not found
-    // -----------------------------------------------------------------------
-
     [Fact]
-    public async Task Create_Fails_When_Booking_Does_Not_Exist()
-    {
-        using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
-
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = Guid.NewGuid(),
-            Rating = 5
-        });
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal("review.booking_not_found", result.Error!.Code);
-    }
-
-    // -----------------------------------------------------------------------
-    // Authorization: caller must be renter or owner of this booking
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task Create_Fails_For_Unrelated_User()
+    public async Task SubmitToy_Fails_When_Already_Submitted()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, StrangerId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 5
-        });
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal("review.forbidden", result.Error!.Code);
-    }
-
-    [Fact]
-    public async Task Create_Fails_When_Not_Authenticated()
-    {
-        using var db = new SqliteTestDatabase();
-        var bookingId = await SeedBaselineAsync(db);
-
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, null).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 5
-        });
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal("review.unauthenticated", result.Error!.Code);
-    }
-
-    // -----------------------------------------------------------------------
-    // Duplicate prevention
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task Create_Fails_When_Renter_Already_Reviewed()
-    {
-        using var db = new SqliteTestDatabase();
-        var bookingId = await SeedBaselineAsync(db);
-
-        await using var first = db.CreateContext();
-        await CreateService(first, RenterId).CreateAsync(new CreateReviewRequest { BookingId = bookingId, Rating = 5 });
-
-        await using var second = db.CreateContext();
-        var result = await CreateService(second, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = 3
-        });
+        await using var ctx2 = db.CreateContext();
+        var result = await CreateService(ctx2, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
         Assert.False(result.IsSuccess);
         Assert.Equal("review.already_submitted", result.Error!.Code);
     }
 
     [Fact]
-    public async Task Create_Allows_Both_Sides_To_Review_Independently()
+    public async Task SubmitToy_Trims_Comment_And_Treats_Whitespace_As_Null()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var ctx1 = db.CreateContext();
-        var renterResult = await CreateService(ctx1, RenterId).CreateAsync(
-            new CreateReviewRequest { BookingId = bookingId, Rating = 5 });
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId, 4, "  Nice  "));
 
-        await using var ctx2 = db.CreateContext();
-        var ownerResult = await CreateService(ctx2, OwnerId).CreateAsync(
-            new CreateReviewRequest { BookingId = bookingId, Rating = 4 });
-
-        Assert.True(renterResult.IsSuccess);
-        Assert.True(ownerResult.IsSuccess);
+        await using var read = db.CreateContext();
+        var summary = await CreateService(read, null).GetListingToyReviewsAsync(ListingId);
+        Assert.Single(summary.Comments);
+        Assert.Equal("Nice", summary.Comments.First().Comment);
     }
 
-    // -----------------------------------------------------------------------
-    // Rating validation
-    // -----------------------------------------------------------------------
+    // --- owner & renter review submission ---
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(6)]
-    [InlineData(100)]
-    public async Task Create_Fails_For_Invalid_Rating(int rating)
+    [Fact]
+    public async Task SubmitOwner_Succeeds_For_Renter()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = rating
-        });
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitOwnerReviewAsync(OwnerRequest(bookingId));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value!.HasOwnerReview);
+    }
+
+    [Fact]
+    public async Task SubmitRenter_Succeeds_For_Owner()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, OwnerId).SubmitRenterReviewAsync(RenterRequest(bookingId));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("owner", result.Value!.Role);
+        Assert.True(result.Value.HasRenterReview);
+    }
+
+    [Fact]
+    public async Task SubmitRenter_Fails_For_Renter()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitRenterReviewAsync(RenterRequest(bookingId));
 
         Assert.False(result.IsSuccess);
-        Assert.Equal("review.invalid_rating", result.Error!.Code);
+        Assert.Equal("review.forbidden", result.Error!.Code);
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
-    [InlineData(5)]
-    public async Task Create_Accepts_Valid_Rating_Boundaries(int rating)
+    [Fact]
+    public async Task Toy_And_Owner_Reviews_Are_Independent()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(new CreateReviewRequest
-        {
-            BookingId = bookingId,
-            Rating = rating
-        });
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(rating, result.Value!.Rating);
+        await using var ctx2 = db.CreateContext();
+        var status = await CreateService(ctx2, RenterId).GetBookingReviewStatusAsync(bookingId);
+
+        Assert.True(status.Value!.HasToyReview);
+        Assert.False(status.Value.HasOwnerReview);
+        Assert.True(status.Value.CanReviewOwner);
     }
 
-    // -----------------------------------------------------------------------
-    // Read queries
-    // -----------------------------------------------------------------------
+    // --- aggregates: min-2 threshold ---
 
     [Fact]
-    public async Task GetByListing_Returns_Reviews_For_Listing()
+    public async Task ToySummary_Hides_Aggregate_Below_Two_Reviews()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        await using var writeCtx = db.CreateContext();
-        await CreateService(writeCtx, RenterId).CreateAsync(
-            new CreateReviewRequest { BookingId = bookingId, Rating = 4, Comment = "Good!" });
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId, 5, "Solid"));
 
-        await using var readCtx = db.CreateContext();
-        var result = await CreateService(readCtx, null).GetByListingAsync(ListingId);
+        await using var read = db.CreateContext();
+        var summary = await CreateService(read, null).GetListingToyReviewsAsync(ListingId);
 
-        Assert.True(result.IsSuccess);
-        Assert.Single(result.Value!);
-        Assert.Equal(4, result.Value!.First().Rating);
-        Assert.Equal("Good!", result.Value!.First().Comment);
+        Assert.Equal(1, summary.ReviewCount);
+        Assert.False(summary.HasAggregate);
+        Assert.Single(summary.Comments);   // comment still shown
     }
 
     [Fact]
-    public async Task GetByListing_Returns_Empty_When_No_Reviews()
+    public async Task ToySummary_Shows_Aggregate_At_Two_Reviews()
     {
         using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
+        await db.SeedAsync(
+            TestData.User(OwnerId,  "agg-owner@test.local"),
+            TestData.User(RenterId, "agg-renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved));
 
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, null).GetByListingAsync(ListingId);
+        var renter2 = Guid.NewGuid();
+        await db.SeedAsync(TestData.User(renter2, "agg-renter2@test.local"));
 
-        Assert.True(result.IsSuccess);
-        Assert.Empty(result.Value!);
+        var b1 = Guid.NewGuid();
+        var b2 = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Booking(b1, ListingId, RenterId, PastStart, PastEnd, BookingStatus.Completed),
+            TestData.Booking(b2, ListingId, renter2,  PastStart, PastEnd, BookingStatus.Completed));
+
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(b1, 5));
+        await using (var ctx2 = db.CreateContext())
+            await CreateService(ctx2, renter2).SubmitToyReviewAsync(ToyRequest(b2, 3));
+
+        await using var read = db.CreateContext();
+        var summary = await CreateService(read, null).GetListingToyReviewsAsync(ListingId);
+
+        Assert.Equal(2, summary.ReviewCount);
+        Assert.True(summary.HasAggregate);
+        Assert.Equal(4.0, summary.OverallAverage);     // (5 + 3) / 2
+        Assert.Equal(1, summary.Distribution[4]);      // one 5★
+        Assert.Equal(1, summary.Distribution[2]);      // one 3★
     }
 
     [Fact]
-    public async Task GetByUser_Returns_Reviews_Received_By_User()
+    public async Task OwnerSummary_Averages_Subscores()
     {
         using var db = new SqliteTestDatabase();
         var bookingId = await SeedBaselineAsync(db);
 
-        // Renter reviews the owner → owner is the reviewee.
-        await using var writeCtx = db.CreateContext();
-        await CreateService(writeCtx, RenterId).CreateAsync(
-            new CreateReviewRequest { BookingId = bookingId, Rating = 5 });
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitOwnerReviewAsync(OwnerRequest(bookingId, 4, "Friendly"));
 
-        await using var readCtx = db.CreateContext();
-        var result = await CreateService(readCtx, null).GetByUserAsync(OwnerId);
+        await using var read = db.CreateContext();
+        var summary = await CreateService(read, null).GetOwnerReviewsAsync(OwnerId);
 
-        Assert.True(result.IsSuccess);
-        Assert.Single(result.Value!);
-        Assert.Equal(OwnerId, result.Value!.First().RevieweeId);
+        Assert.Equal(1, summary.ReviewCount);
+        Assert.Equal(4.0, summary.CommunicationAverage);
+        Assert.Equal(4.0, summary.OverallAverage);
+        Assert.Single(summary.Comments);
+    }
+
+    [Fact]
+    public async Task Comment_Carries_RentedDays_From_Booking()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId, 5, "Great"));
+
+        await using var read = db.CreateContext();
+        var summary = await CreateService(read, null).GetListingToyReviewsAsync(ListingId);
+
+        // PastEnd - PastStart inclusive = 8 days.
+        Assert.Equal(PastEnd.DayNumber - PastStart.DayNumber + 1, summary.Comments.First().RentedDays);
     }
 }

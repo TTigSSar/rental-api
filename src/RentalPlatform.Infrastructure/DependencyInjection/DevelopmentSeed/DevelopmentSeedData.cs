@@ -65,7 +65,10 @@ internal static class DevelopmentSeedData
         int DurationDays,
         BookingStatus Status,
         int ExpiresAtHoursFromNow,
-        int CreatedDaysAgo);
+        int CreatedDaysAgo,
+        // Completion handshake (only meaningful for ReturnMarked bookings).
+        BookingParty? ReturnInitiatedBy = null,
+        int? ReturnMarkedHoursAgo = null);
 
     // Reviews resolve reviewer/reviewee/listing from the referenced booking at seed time.
     public sealed record SeedToyReview(
@@ -477,7 +480,26 @@ internal static class DevelopmentSeedData
         new(new Guid("55555555-000a-4000-9000-00000000000a"), ListingIds.LegoDuploStarterSet,
             DevelopmentSeedCredentials.SecondUserEmail,
             StartDaysFromToday: -18, DurationDays: 3, BookingStatus.Completed,
-            ExpiresAtHoursFromNow: -300, CreatedDaysAgo: 20)
+            ExpiresAtHoursFromNow: -300, CreatedDaysAgo: 20),
+
+        // ---- Completion-handshake demo bookings (owner@ listings, rented by renter@) ----
+        // Active: rental in progress (started, not yet ended) — both sides can mark returned.
+        new(new Guid("55555555-000b-4000-9000-00000000000b"), ListingIds.BabyActivityGym,
+            DevelopmentSeedCredentials.RenterEmail,
+            StartDaysFromToday: -2, DurationDays: 7, BookingStatus.Approved,
+            ExpiresAtHoursFromNow: -48, CreatedDaysAgo: 5),
+        // ReturnMarked by the renter — awaiting owner confirmation, never auto-completes.
+        new(new Guid("55555555-000c-4000-9000-00000000000c"), ListingIds.KidsBalanceBike,
+            DevelopmentSeedCredentials.RenterEmail,
+            StartDaysFromToday: -5, DurationDays: 4, BookingStatus.ReturnMarked,
+            ExpiresAtHoursFromNow: -120, CreatedDaysAgo: 7,
+            ReturnInitiatedBy: BookingParty.Renter, ReturnMarkedHoursAgo: 6),
+        // ReturnMarked by the owner — awaiting renter confirmation, auto-completes 48h after the mark.
+        new(new Guid("55555555-000d-4000-9000-00000000000d"), ListingIds.ChildrensPuzzleBundle,
+            DevelopmentSeedCredentials.RenterEmail,
+            StartDaysFromToday: -6, DurationDays: 4, BookingStatus.ReturnMarked,
+            ExpiresAtHoursFromNow: -144, CreatedDaysAgo: 8,
+            ReturnInitiatedBy: BookingParty.Owner, ReturnMarkedHoursAgo: 6)
     ];
 
     // Toy reviews (renter → toy). Booking 0005 + 0007 give ToyKitchenSet two reviews.

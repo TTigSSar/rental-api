@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
+using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
 
 namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
@@ -462,7 +463,7 @@ internal sealed class DevelopmentSeedRunner
             var totalPrice = inclusiveDays * pricePerDay;
             var createdAt = now.AddDays(-seed.CreatedDaysAgo);
 
-            newRows.Add(new Booking
+            var booking = new Booking
             {
                 Id = seed.Id,
                 ListingId = seed.ListingId,
@@ -474,7 +475,27 @@ internal sealed class DevelopmentSeedRunner
                 ExpiresAt = now.AddHours(seed.ExpiresAtHoursFromNow),
                 CreatedAt = createdAt,
                 UpdatedAt = now
-            });
+            };
+
+            // Lifecycle timestamps so the Booking Details timeline renders for demo data.
+            if (seed.Status is BookingStatus.Approved or BookingStatus.ReturnMarked or BookingStatus.Completed)
+            {
+                booking.ApprovedAt = createdAt;
+            }
+
+            if (seed.Status == BookingStatus.ReturnMarked)
+            {
+                booking.ReturnInitiatedBy = seed.ReturnInitiatedBy ?? BookingParty.Renter;
+                booking.ReturnMarkedAt = now.AddHours(-(seed.ReturnMarkedHoursAgo ?? 2));
+            }
+
+            if (seed.Status == BookingStatus.Completed)
+            {
+                booking.CompletedAt = endDate.ToDateTime(TimeOnly.MinValue);
+                booking.CompletedVia = CompletionMethod.Mutual;
+            }
+
+            newRows.Add(booking);
         }
 
         if (newRows.Count > 0)

@@ -263,39 +263,44 @@ public sealed class BookingsServiceTests
         Assert.Equal("booking.forbidden", result.Error!.Code);
     }
 
-    [Fact]
-    public async Task Complete_By_Owner_Sets_Status_Completed()
-    {
-        using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
-        var bookingId = Guid.NewGuid();
+    // --- Completion handshake: mark / confirm / undo / auto-complete ---
 
+    private async Task<Guid> SeedApprovedReturnableAsync(SqliteTestDatabase db)
+    {
+        var bookingId = Guid.NewGuid();
         await db.SeedAsync(TestData.Booking(
             bookingId, ListingId, RenterId,
             Today.AddDays(-5), Today.AddDays(-1),
             BookingStatus.Approved));
+        return bookingId;
+    }
+
+    [Theory]
+    [InlineData(true)]  // owner marks
+    [InlineData(false)] // renter marks
+    public async Task MarkReturned_By_Either_Party_Sets_ReturnMarked(bool asOwner)
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context, OwnerId).CompleteAsync(bookingId);
+        var result = await CreateService(context, asOwner ? OwnerId : RenterId).MarkReturnedAsync(bookingId);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(BookingStatus.Completed, result.Value!.Status);
+        Assert.Equal(BookingStatus.ReturnMarked, result.Value!.Status);
+        Assert.Equal(asOwner ? BookingParty.Owner : BookingParty.Renter, result.Value!.ReturnInitiatedBy);
     }
 
     [Fact]
-    public async Task Complete_By_Renter_Is_Forbidden()
+    public async Task MarkReturned_By_Stranger_Is_Forbidden()
     {
         using var db = new SqliteTestDatabase();
         await SeedBaselineAsync(db);
-        var bookingId = Guid.NewGuid();
-
-        await db.SeedAsync(TestData.Booking(
-            bookingId, ListingId, RenterId,
-            Today.AddDays(-5), Today.AddDays(-1),
-            BookingStatus.Approved));
+        var bookingId = await SeedApprovedReturnableAsync(db);
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CompleteAsync(bookingId);
+        var result = await CreateService(context, OtherUserId).MarkReturnedAsync(bookingId);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("booking.forbidden", result.Error!.Code);
@@ -303,16 +308,13 @@ public sealed class BookingsServiceTests
 
     [Theory]
     [InlineData(BookingStatus.Pending)]
-    [InlineData(BookingStatus.Rejected)]
-    [InlineData(BookingStatus.Cancelled)]
-    [InlineData(BookingStatus.Expired)]
     [InlineData(BookingStatus.Completed)]
-    public async Task Complete_Fails_For_Non_Approved_Booking(BookingStatus status)
+    [InlineData(BookingStatus.Cancelled)]
+    public async Task MarkReturned_Fails_When_Not_Approved(BookingStatus status)
     {
         using var db = new SqliteTestDatabase();
         await SeedBaselineAsync(db);
         var bookingId = Guid.NewGuid();
-
         await db.SeedAsync(TestData.Booking(
             bookingId, ListingId, RenterId,
             Today.AddDays(-5), Today.AddDays(-1),
@@ -320,10 +322,200 @@ public sealed class BookingsServiceTests
             expiresAt: DateTime.UtcNow.AddHours(-24)));
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context, OwnerId).CompleteAsync(bookingId);
+        var result = await CreateService(context, OwnerId).MarkReturnedAsync(bookingId);
 
         Assert.False(result.IsSuccess);
-        Assert.Equal("booking.not_completable", result.Error!.Code);
+        Assert.Equal("booking.not_markable", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task ConfirmReturn_By_Other_Party_Completes_Mutually()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        // Renter marks returned, owner confirms.
+        await using (var markContext = db.CreateContext())
+        {
+            await CreateService(markContext, RenterId).MarkReturnedAsync(bookingId);
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ConfirmReturnAsync(bookingId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingStatus.Completed, result.Value!.Status);
+        Assert.Equal(CompletionMethod.Mutual, result.Value!.CompletedVia);
+    }
+
+    [Fact]
+    public async Task ConfirmReturn_By_Initiator_Is_Forbidden()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        await using (var markContext = db.CreateContext())
+        {
+            await CreateService(markContext, RenterId).MarkReturnedAsync(bookingId);
+        }
+
+        // Same party (renter) that marked tries to confirm — not allowed.
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).ConfirmReturnAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.self_confirm_forbidden", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task ConfirmReturn_Fails_When_Not_ReturnMarked()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ConfirmReturnAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.not_confirmable", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task UndoReturn_By_Initiator_Reverts_To_Approved()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        await using (var markContext = db.CreateContext())
+        {
+            await CreateService(markContext, OwnerId).MarkReturnedAsync(bookingId);
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).UndoReturnAsync(bookingId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingStatus.Approved, result.Value!.Status);
+        Assert.Null(result.Value!.ReturnInitiatedBy);
+    }
+
+    [Fact]
+    public async Task UndoReturn_By_Other_Party_Is_Forbidden()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        // Owner marks; renter (the other party) tries to undo.
+        await using (var markContext = db.CreateContext())
+        {
+            await CreateService(markContext, OwnerId).MarkReturnedAsync(bookingId);
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).UndoReturnAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.forbidden", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task GetMine_AutoCompletes_Overdue_Owner_Initiated_Return()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(-6), Today.AddDays(-2),
+            BookingStatus.ReturnMarked,
+            returnInitiatedBy: BookingParty.Owner,
+            returnMarkedAt: DateTime.UtcNow.AddHours(-49)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).GetMineAsync();
+
+        Assert.True(result.IsSuccess);
+        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
+        Assert.Equal(BookingStatus.Completed, booking.Status);
+    }
+
+    [Fact]
+    public async Task GetMine_Does_Not_AutoComplete_Renter_Initiated_Return()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(-6), Today.AddDays(-2),
+            BookingStatus.ReturnMarked,
+            returnInitiatedBy: BookingParty.Renter,
+            returnMarkedAt: DateTime.UtcNow.AddHours(-72)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).GetMineAsync();
+
+        Assert.True(result.IsSuccess);
+        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
+        Assert.Equal(BookingStatus.ReturnMarked, booking.Status);
+    }
+
+    [Fact]
+    public async Task GetMine_Does_Not_AutoComplete_Owner_Initiated_Within_Window()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(-6), Today.AddDays(-2),
+            BookingStatus.ReturnMarked,
+            returnInitiatedBy: BookingParty.Owner,
+            returnMarkedAt: DateTime.UtcNow.AddHours(-10)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).GetMineAsync();
+
+        Assert.True(result.IsSuccess);
+        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
+        Assert.Equal(BookingStatus.ReturnMarked, booking.Status);
+    }
+
+    [Theory]
+    [InlineData(true)]  // owner
+    [InlineData(false)] // renter
+    public async Task GetById_Returns_Detail_For_Both_Parties(bool asOwner)
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, asOwner ? OwnerId : RenterId).GetByIdAsync(bookingId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(asOwner ? "owner" : "renter", result.Value!.Role);
+        // Counterparty is the other side of the booking.
+        Assert.Equal(asOwner ? RenterId : OwnerId, result.Value!.CounterpartyId);
+    }
+
+    [Fact]
+    public async Task GetById_For_Stranger_Is_Forbidden()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OtherUserId).GetByIdAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.forbidden", result.Error!.Code);
     }
 
     [Theory]

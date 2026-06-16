@@ -22,7 +22,10 @@ public sealed class BookingsService : IBookingsService
         public const string BookingForbidden = "booking.forbidden";
         public const string BookingNotPending = "booking.not_pending";
         public const string NotCancellable = "booking.not_cancellable";
-        public const string NotCompletable = "booking.not_completable";
+        public const string NotMarkable = "booking.not_markable";
+        public const string NotConfirmable = "booking.not_confirmable";
+        public const string SelfConfirmForbidden = "booking.self_confirm_forbidden";
+        public const string NotUndoable = "booking.not_undoable";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -39,7 +42,7 @@ public sealed class BookingsService : IBookingsService
         CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -102,7 +105,7 @@ public sealed class BookingsService : IBookingsService
     public async Task<ServiceResult<IReadOnlyCollection<BookingResponse>>> GetMineAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -123,7 +126,7 @@ public sealed class BookingsService : IBookingsService
         CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -149,7 +152,7 @@ public sealed class BookingsService : IBookingsService
     public async Task<ServiceResult<BookingResponse>> CancelAsync(Guid bookingId, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -196,43 +199,150 @@ public sealed class BookingsService : IBookingsService
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
 
-    public async Task<ServiceResult<BookingResponse>> CompleteAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    public async Task<ServiceResult<BookingDetailResponse>> GetByIdAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
+        if (!ctx.IsSuccess || ctx.Value is null)
+        {
+            return ServiceResult<BookingDetailResponse>.Failure(ctx.Error!);
+        }
+
+        return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(ctx.Value.Booking, ctx.Value.CallerParty));
+    }
+
+    public async Task<ServiceResult<BookingDetailResponse>> MarkReturnedAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
+        if (!ctx.IsSuccess || ctx.Value is null)
+        {
+            return ServiceResult<BookingDetailResponse>.Failure(ctx.Error!);
+        }
+
+        var (booking, callerParty) = ctx.Value;
+        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.ReturnMarked))
+        {
+            return Failure<BookingDetailResponse>(
+                ErrorCodes.NotMarkable,
+                $"Bookings in status '{booking.Status}' cannot be marked as returned.");
+        }
+
+        var now = DateTime.UtcNow;
+        booking.Status = BookingStatus.ReturnMarked;
+        booking.ReturnInitiatedBy = callerParty;
+        booking.ReturnMarkedAt = now;
+        booking.UpdatedAt = now;
+        await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
+    }
+
+    public async Task<ServiceResult<BookingDetailResponse>> ConfirmReturnAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
+        if (!ctx.IsSuccess || ctx.Value is null)
+        {
+            return ServiceResult<BookingDetailResponse>.Failure(ctx.Error!);
+        }
+
+        var (booking, callerParty) = ctx.Value;
+        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Completed))
+        {
+            return Failure<BookingDetailResponse>(
+                ErrorCodes.NotConfirmable,
+                $"Bookings in status '{booking.Status}' have no pending return to confirm.");
+        }
+
+        // The confirming party must be the OTHER side — the initiator cannot self-confirm.
+        if (booking.ReturnInitiatedBy == callerParty)
+        {
+            return Failure<BookingDetailResponse>(
+                ErrorCodes.SelfConfirmForbidden,
+                "The party that marked the return cannot also confirm it.");
+        }
+
+        var now = DateTime.UtcNow;
+        booking.Status = BookingStatus.Completed;
+        booking.CompletedVia = CompletionMethod.Mutual;
+        booking.CompletedAt = now;
+        booking.UpdatedAt = now;
+        await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
+    }
+
+    public async Task<ServiceResult<BookingDetailResponse>> UndoReturnAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
+        if (!ctx.IsSuccess || ctx.Value is null)
+        {
+            return ServiceResult<BookingDetailResponse>.Failure(ctx.Error!);
+        }
+
+        var (booking, callerParty) = ctx.Value;
+        if (booking.Status != BookingStatus.ReturnMarked)
+        {
+            return Failure<BookingDetailResponse>(
+                ErrorCodes.NotUndoable,
+                $"Bookings in status '{booking.Status}' have no return mark to undo.");
+        }
+
+        // Only the party that marked the return may undo it (before the other side confirms).
+        if (booking.ReturnInitiatedBy != callerParty)
+        {
+            return Failure<BookingDetailResponse>(
+                ErrorCodes.BookingForbidden,
+                "Only the party that marked the return can undo it.");
+        }
+
+        var now = DateTime.UtcNow;
+        booking.Status = BookingStatus.Approved;
+        booking.ReturnInitiatedBy = null;
+        booking.ReturnMarkedAt = null;
+        booking.UpdatedAt = now;
+        await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
+    }
+
+    // Loads a booking detail, authenticates the caller, and resolves which party they are.
+    // Fails with forbidden if the caller is neither the renter nor the listing owner.
+    private async Task<ServiceResult<BookingDetailContext>> ResolveDetailAsync(
+        Guid bookingId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
         {
-            return ServiceResult<BookingResponse>.Failure(userResult.Error!);
+            return ServiceResult<BookingDetailContext>.Failure(userResult.Error!);
         }
 
-        var owner = userResult.Value;
-        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
+        var caller = userResult.Value;
+        var booking = await _bookingsStore.FindBookingDetailByIdAsync(bookingId, cancellationToken);
         if (booking is null)
         {
-            return Failure<BookingResponse>(ErrorCodes.BookingNotFound, "Booking was not found.");
+            return Failure<BookingDetailContext>(ErrorCodes.BookingNotFound, "Booking was not found.");
         }
 
-        // Completion is an owner-only action: the owner confirms the toy was returned.
-        if (booking.Listing.OwnerId != owner.Id)
+        BookingParty callerParty;
+        if (booking.RenterId == caller.Id)
         {
-            return Failure<BookingResponse>(ErrorCodes.BookingForbidden, "Only the listing owner can complete this booking.");
+            callerParty = BookingParty.Renter;
         }
-
-        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Completed))
+        else if (booking.Listing.OwnerId == caller.Id)
         {
-            return Failure<BookingResponse>(
-                ErrorCodes.NotCompletable,
-                $"Bookings in status '{booking.Status}' cannot be completed.");
+            callerParty = BookingParty.Owner;
+        }
+        else
+        {
+            return Failure<BookingDetailContext>(ErrorCodes.BookingForbidden, "Only the renter or owner of this booking can view it.");
         }
 
-        booking.Status = BookingStatus.Completed;
-        booking.UpdatedAt = now;
-        await _bookingsStore.SaveChangesAsync(cancellationToken);
-
-        return ServiceResult<BookingResponse>.Success(MapBooking(booking));
+        return ServiceResult<BookingDetailContext>.Success(new BookingDetailContext(booking, callerParty));
     }
+
+    private sealed record BookingDetailContext(Booking Booking, BookingParty CallerParty);
 
     private async Task<ServiceResult<BookingRequestResponse>> UpdateOwnerDecisionAsync(
         Guid bookingId,
@@ -240,7 +350,7 @@ public sealed class BookingsService : IBookingsService
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        await _bookingsStore.ExpirePendingAsync(now, cancellationToken);
+        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -284,9 +394,21 @@ public sealed class BookingsService : IBookingsService
 
         booking.Status = decision;
         booking.UpdatedAt = now;
+        if (decision == BookingStatus.Approved)
+        {
+            booking.ApprovedAt = now;
+        }
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));
+    }
+
+    // Brings time-based lifecycle state up to date before any read or mutation: expires stale
+    // pending requests and auto-completes overdue owner-initiated returns (the 48h fallback).
+    private async Task RefreshLifecycleAsync(DateTime utcNow, CancellationToken cancellationToken)
+    {
+        await _bookingsStore.ExpirePendingAsync(utcNow, cancellationToken);
+        await _bookingsStore.CompleteOverdueReturnsAsync(utcNow, cancellationToken);
     }
 
     private async Task<ServiceResult<User>> GetCurrentUserAsync(CancellationToken cancellationToken)
@@ -371,6 +493,59 @@ public sealed class BookingsService : IBookingsService
         CreatedAt = booking.CreatedAt,
         UpdatedAt = booking.UpdatedAt
     };
+
+    private static BookingDetailResponse MapBookingDetail(Booking booking, BookingParty callerParty)
+    {
+        var listing = booking.Listing;
+        var counterparty = callerParty == BookingParty.Renter ? listing.Owner : booking.Renter;
+
+        // Address and phone are revealed only once the booking is at least Approved.
+        var contactRevealed = booking.Status is BookingStatus.Approved
+            or BookingStatus.ReturnMarked
+            or BookingStatus.Completed;
+
+        return new BookingDetailResponse
+        {
+            Id = booking.Id,
+            Status = booking.Status,
+            Role = callerParty == BookingParty.Renter ? "renter" : "owner",
+
+            ListingId = listing.Id,
+            ListingTitle = listing.Title,
+            ListingPrimaryImageUrl = listing.Images
+                .OrderByDescending(image => image.IsPrimary)
+                .ThenBy(image => image.SortOrder)
+                .Select(image => image.Url)
+                .FirstOrDefault(),
+            CategoryName = listing.Category?.Name,
+            Condition = listing.Condition,
+            City = listing.City,
+            Country = listing.Country,
+            AddressLine = contactRevealed ? listing.AddressLine : null,
+
+            Currency = listing.Currency,
+            PricePerDay = listing.PricePerDay,
+            DepositAmount = listing.DepositAmount,
+            TotalPrice = booking.TotalPrice,
+            StartDate = booking.StartDate,
+            EndDate = booking.EndDate,
+
+            CreatedAt = booking.CreatedAt,
+            ApprovedAt = booking.ApprovedAt,
+            ReturnMarkedAt = booking.ReturnMarkedAt,
+            CompletedAt = booking.CompletedAt,
+            ExpiresAt = booking.ExpiresAt,
+
+            ReturnInitiatedBy = booking.ReturnInitiatedBy,
+            CompletedVia = booking.CompletedVia,
+
+            CounterpartyId = counterparty.Id,
+            CounterpartyFirstName = counterparty.FirstName,
+            CounterpartyLastName = counterparty.LastName,
+            CounterpartyAvatarUrl = counterparty.AvatarUrl,
+            CounterpartyPhoneNumber = contactRevealed ? counterparty.PhoneNumber : null
+        };
+    }
 
     private static ServiceResult<T> Failure<T>(string code, string message) =>
         ServiceResult<T>.Failure(new ServiceError

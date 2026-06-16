@@ -166,7 +166,7 @@ public sealed class BookingHttpTests
     }
 
     [Fact]
-    public async Task Complete_By_Owner_Transitions_Approved_To_Completed()
+    public async Task Handshake_Renter_Marks_Then_Owner_Confirms_Completes()
     {
         var (ownerId, renterId, listingId) = await SeedBaselineAsync();
         var bookingId = Guid.NewGuid();
@@ -176,22 +176,33 @@ public sealed class BookingHttpTests
             Today.AddDays(-5), Today.AddDays(-1),
             BookingStatus.Approved));
 
-        // Completion is a manual owner action.
-        var token = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@booking-owner.local");
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var renterToken = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@booking-renter.local");
+        var renterClient = _factory.CreateClient();
+        renterClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", renterToken);
 
-        var response = await client.PostAsync($"/api/bookings/{bookingId}/complete", null);
+        var markResponse = await renterClient.PostAsync($"/api/bookings/{bookingId}/return/mark", null);
+        Assert.Equal(HttpStatusCode.OK, markResponse.StatusCode);
+        using (var markDoc = JsonDocument.Parse(await markResponse.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("ReturnMarked", markDoc.RootElement.GetProperty("status").GetString());
+            Assert.Equal("Renter", markDoc.RootElement.GetProperty("returnInitiatedBy").GetString());
+        }
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var ownerToken = TestJwtTokenHelper.GenerateToken(ownerId, $"{ownerId:N}@booking-owner.local");
+        var ownerClient = _factory.CreateClient();
+        ownerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
 
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-        Assert.Equal("Completed", doc.RootElement.GetProperty("status").GetString());
+        var confirmResponse = await ownerClient.PostAsync($"/api/bookings/{bookingId}/return/confirm", null);
+        Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
+        using (var confirmDoc = JsonDocument.Parse(await confirmResponse.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("Completed", confirmDoc.RootElement.GetProperty("status").GetString());
+            Assert.Equal("Mutual", confirmDoc.RootElement.GetProperty("completedVia").GetString());
+        }
     }
 
     [Fact]
-    public async Task Complete_By_Renter_Returns_403()
+    public async Task Confirm_By_Initiator_Returns_403()
     {
         var (_, renterId, listingId) = await SeedBaselineAsync();
         var bookingId = Guid.NewGuid();
@@ -205,8 +216,31 @@ public sealed class BookingHttpTests
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        var response = await client.PostAsync($"/api/bookings/{bookingId}/complete", null);
+        await client.PostAsync($"/api/bookings/{bookingId}/return/mark", null);
+        var response = await client.PostAsync($"/api/bookings/{bookingId}/return/confirm", null);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetById_Returns_Detail_For_Renter()
+    {
+        var (_, renterId, listingId) = await SeedBaselineAsync();
+        var bookingId = Guid.NewGuid();
+
+        await _factory.SeedAsync(TestData.Booking(
+            bookingId, listingId, renterId,
+            Today.AddDays(-5), Today.AddDays(-1),
+            BookingStatus.Approved));
+
+        var token = TestJwtTokenHelper.GenerateToken(renterId, $"{renterId:N}@booking-renter.local");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync($"/api/bookings/{bookingId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("renter", doc.RootElement.GetProperty("role").GetString());
     }
 }

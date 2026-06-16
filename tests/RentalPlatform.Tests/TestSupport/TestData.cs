@@ -58,7 +58,9 @@ public static class TestData
         DateOnly startDate,
         DateOnly endDate,
         BookingStatus status,
-        DateTime? expiresAt = null) => new()
+        DateTime? expiresAt = null,
+        BookingParty? returnInitiatedBy = null,
+        DateTime? returnMarkedAt = null) => new()
     {
         Id = id,
         ListingId = listingId,
@@ -69,7 +71,9 @@ public static class TestData
         Status = status,
         ExpiresAt = expiresAt ?? DateTime.UtcNow.AddHours(24),
         CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        UpdatedAt = DateTime.UtcNow,
+        ReturnInitiatedBy = returnInitiatedBy,
+        ReturnMarkedAt = returnMarkedAt
     };
 
     public static ListingImage Image(Guid id, Guid listingId, bool isPrimary, int sortOrder) => new()

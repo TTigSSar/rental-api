@@ -68,7 +68,9 @@ internal static class DevelopmentSeedData
         int CreatedDaysAgo,
         // Completion handshake (only meaningful for ReturnMarked bookings).
         BookingParty? ReturnInitiatedBy = null,
-        int? ReturnMarkedHoursAgo = null);
+        int? ReturnMarkedHoursAgo = null,
+        // Owner's reason when rejected (known reason code or free text).
+        string? RejectionReason = null);
 
     // Reviews resolve reviewer/reviewee/listing from the referenced booking at seed time.
     public sealed record SeedToyReview(
@@ -439,7 +441,8 @@ internal static class DevelopmentSeedData
             DevelopmentSeedCredentials.RenterEmail,
             StartDaysFromToday: 10, DurationDays: 3,
             BookingStatus.Rejected,
-            ExpiresAtHoursFromNow: -2, CreatedDaysAgo: 3),
+            ExpiresAtHoursFromNow: -2, CreatedDaysAgo: 3,
+            RejectionReason: "dates_unavailable"),
         new(
             new Guid("55555555-0004-4000-9000-000000000004"),
             ListingIds.OutdoorBackyardSlide,

@@ -495,6 +495,11 @@ internal sealed class DevelopmentSeedRunner
                 booking.CompletedVia = CompletionMethod.Mutual;
             }
 
+            if (seed.Status == BookingStatus.Rejected)
+            {
+                booking.RejectionReason = seed.RejectionReason;
+            }
+
             newRows.Add(booking);
         }
 

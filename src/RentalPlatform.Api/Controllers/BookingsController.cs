@@ -95,9 +95,12 @@ public sealed class BookingsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BookingRequestResponse>> Reject(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<BookingRequestResponse>> Reject(
+        Guid id,
+        [FromBody] RejectBookingRequest? request,
+        CancellationToken cancellationToken)
     {
-        var result = await _bookingsService.RejectAsync(id, cancellationToken);
+        var result = await _bookingsService.RejectAsync(id, request?.Reason, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);

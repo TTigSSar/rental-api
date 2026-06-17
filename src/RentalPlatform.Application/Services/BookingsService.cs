@@ -144,10 +144,10 @@ public sealed class BookingsService : IBookingsService
     }
 
     public Task<ServiceResult<BookingRequestResponse>> ApproveAsync(Guid id, CancellationToken cancellationToken = default) =>
-        UpdateOwnerDecisionAsync(id, BookingStatus.Approved, cancellationToken);
+        UpdateOwnerDecisionAsync(id, BookingStatus.Approved, null, cancellationToken);
 
-    public Task<ServiceResult<BookingRequestResponse>> RejectAsync(Guid id, CancellationToken cancellationToken = default) =>
-        UpdateOwnerDecisionAsync(id, BookingStatus.Rejected, cancellationToken);
+    public Task<ServiceResult<BookingRequestResponse>> RejectAsync(Guid id, string? reason = null, CancellationToken cancellationToken = default) =>
+        UpdateOwnerDecisionAsync(id, BookingStatus.Rejected, reason, cancellationToken);
 
     public async Task<ServiceResult<BookingResponse>> CancelAsync(Guid bookingId, CancellationToken cancellationToken = default)
     {
@@ -347,6 +347,7 @@ public sealed class BookingsService : IBookingsService
     private async Task<ServiceResult<BookingRequestResponse>> UpdateOwnerDecisionAsync(
         Guid bookingId,
         BookingStatus decision,
+        string? rejectionReason,
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
@@ -397,6 +398,11 @@ public sealed class BookingsService : IBookingsService
         if (decision == BookingStatus.Approved)
         {
             booking.ApprovedAt = now;
+        }
+        else if (decision == BookingStatus.Rejected)
+        {
+            var trimmed = rejectionReason?.Trim();
+            booking.RejectionReason = string.IsNullOrEmpty(trimmed) ? null : trimmed;
         }
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
@@ -535,6 +541,8 @@ public sealed class BookingsService : IBookingsService
             ReturnMarkedAt = booking.ReturnMarkedAt,
             CompletedAt = booking.CompletedAt,
             ExpiresAt = booking.ExpiresAt,
+
+            RejectionReason = booking.RejectionReason,
 
             ReturnInitiatedBy = booking.ReturnInitiatedBy,
             CompletedVia = booking.CompletedVia,

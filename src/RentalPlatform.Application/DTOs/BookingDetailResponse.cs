@@ -41,6 +41,9 @@ public sealed class BookingDetailResponse
     public DateTime? CompletedAt { get; init; }
     public DateTime ExpiresAt { get; init; }
 
+    // Owner's reason when the request was rejected (known reason code or free text). Null otherwise.
+    public string? RejectionReason { get; init; }
+
     // Completion handshake
     public BookingParty? ReturnInitiatedBy { get; init; }
     public CompletionMethod? CompletedVia { get; init; }

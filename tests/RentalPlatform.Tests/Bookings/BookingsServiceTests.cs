@@ -505,6 +505,33 @@ public sealed class BookingsServiceTests
     }
 
     [Fact]
+    public async Task Reject_With_Reason_Is_Exposed_On_Detail()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        await using (var rejectContext = db.CreateContext())
+        {
+            var result = await CreateService(rejectContext, OwnerId)
+                .RejectAsync(bookingId, "dates_unavailable");
+            Assert.True(result.IsSuccess);
+        }
+
+        await using var context = db.CreateContext();
+        var detail = await CreateService(context, RenterId).GetByIdAsync(bookingId);
+
+        Assert.True(detail.IsSuccess);
+        Assert.Equal(BookingStatus.Rejected, detail.Value!.Status);
+        Assert.Equal("dates_unavailable", detail.Value!.RejectionReason);
+    }
+
+    [Fact]
     public async Task GetById_For_Stranger_Is_Forbidden()
     {
         using var db = new SqliteTestDatabase();

@@ -14,8 +14,9 @@ public interface IBookingsService
 
     Task<ServiceResult<BookingDetailResponse>> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Two-sided completion handshake.
-    Task<ServiceResult<BookingDetailResponse>> MarkReturnedAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<ServiceResult<BookingDetailResponse>> ConfirmReturnAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<ServiceResult<BookingDetailResponse>> UndoReturnAsync(Guid id, CancellationToken cancellationToken = default);
+    // Owner marks the toy as handed over (Approved → Active).
+    Task<ServiceResult<BookingDetailResponse>> MarkActiveAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Owner marks the rental as completed (Active → Completed).
+    Task<ServiceResult<BookingDetailResponse>> CompleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

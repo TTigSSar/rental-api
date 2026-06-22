@@ -56,7 +56,7 @@ public sealed class BookingsStore : IBookingsStore
     {
         var query = _dbContext.Bookings.Where(booking =>
             booking.ListingId == listingId &&
-            booking.Status == BookingStatus.Approved &&
+            (booking.Status == BookingStatus.Approved || booking.Status == BookingStatus.Active) &&
             booking.StartDate <= endDate &&
             booking.EndDate >= startDate);
 
@@ -81,7 +81,7 @@ public sealed class BookingsStore : IBookingsStore
 
         var hasBlockingOverlap = await _dbContext.Bookings.AnyAsync(other =>
             other.ListingId == booking.ListingId &&
-            (other.Status == BookingStatus.Pending || other.Status == BookingStatus.Approved) &&
+            (other.Status == BookingStatus.Pending || other.Status == BookingStatus.Approved || other.Status == BookingStatus.Active) &&
             other.StartDate <= booking.EndDate &&
             other.EndDate >= booking.StartDate,
             cancellationToken);
@@ -106,6 +106,8 @@ public sealed class BookingsStore : IBookingsStore
             .Where(booking => booking.RenterId == renterId)
             .Include(booking => booking.Listing)
                 .ThenInclude(listing => listing.Images)
+            .Include(booking => booking.Listing)
+                .ThenInclude(listing => listing.Owner)
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyCollection<Booking>> GetOwnerBookingRequestsAsync(

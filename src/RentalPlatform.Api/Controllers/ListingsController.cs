@@ -282,6 +282,27 @@ public sealed class ListingsController : ControllerBase
         return FromOwnerError(result.Error);
     }
 
+    [HttpPut("{listingId:guid}/images/order")]
+    [Authorize]
+    [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyCollection<ListingImageResponse>>> ReorderImages(
+        Guid listingId,
+        [FromBody] ReorderListingImagesRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingImagesOwnerService.ReorderAsync(listingId, request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
     private ActionResult FromOwnerError(ServiceError? error)
     {
         if (error is null)
@@ -303,6 +324,7 @@ public sealed class ListingsController : ControllerBase
             "listing.image_listing_limit" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.image_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
+            "listing.image_invalid_reorder" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "listing.invalid_status" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };

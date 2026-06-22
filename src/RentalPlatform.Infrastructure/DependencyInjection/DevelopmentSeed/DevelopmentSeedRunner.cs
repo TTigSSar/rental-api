@@ -17,15 +17,21 @@ internal sealed class DevelopmentSeedRunner
     private readonly AppDbContext _dbContext;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ILogger<DevelopmentSeedRunner> _logger;
+    private readonly IFileStorageService _fileStorage;
+    private readonly HttpClient _http;
 
     public DevelopmentSeedRunner(
         AppDbContext dbContext,
         IPasswordHasher passwordHasher,
-        ILogger<DevelopmentSeedRunner> logger)
+        ILogger<DevelopmentSeedRunner> logger,
+        IFileStorageService fileStorage,
+        HttpClient http)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _logger = logger;
+        _fileStorage = fileStorage;
+        _http = http;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -302,24 +308,30 @@ internal sealed class DevelopmentSeedRunner
             }
         }
 
-        var newRows = DevelopmentSeedData.ListingImages
+        var pending = DevelopmentSeedData.ListingImages
             .Where(image => !existingIdSet.Contains(image.Id) && presentListingIds.Contains(image.ListingId))
-            .Select(image => new ListingImage
+            .ToArray();
+
+        var newRows = new List<ListingImage>(pending.Length);
+        foreach (var image in pending)
+        {
+            var url = await ResolveImageUrlAsync(image.Url, image.ListingId, image.FallbackUrl, cancellationToken);
+            newRows.Add(new ListingImage
             {
                 Id = image.Id,
                 ListingId = image.ListingId,
-                Url = image.Url,
+                Url = url,
                 IsPrimary = image.IsPrimary,
                 SortOrder = image.SortOrder
-            })
-            .ToArray();
+            });
+        }
 
-        if (newRows.Length > 0)
+        if (newRows.Count > 0)
         {
             await _dbContext.ListingImages.AddRangeAsync(newRows, cancellationToken);
         }
 
-        return newRows.Length;
+        return newRows.Count;
     }
 
     private async Task<int> SeedFavoritesAsync(
@@ -633,6 +645,43 @@ internal sealed class DevelopmentSeedRunner
     }
 
     private readonly record struct SeedBookingRef(Guid ListingId, string RenterEmail);
+
+    private async Task<string> ResolveImageUrlAsync(
+        string sourceUrl, Guid listingId, string fallbackUrl, CancellationToken cancellationToken)
+    {
+        if (!sourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            return sourceUrl;
+
+        try
+        {
+            using var response = await _http.GetAsync(sourceUrl, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Seed image download returned {Status} for {Url}", response.StatusCode, sourceUrl);
+                return string.IsNullOrEmpty(fallbackUrl) ? sourceUrl : fallbackUrl;
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            var ext = contentType switch
+            {
+                "image/png"  => ".png",
+                "image/webp" => ".webp",
+                "image/gif"  => ".gif",
+                _            => ".jpg"
+            };
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var localUrl = await _fileStorage.SaveListingImageAsync(
+                stream, $"seed{ext}", contentType, listingId, cancellationToken);
+            _logger.LogInformation("Seed image saved locally as {LocalUrl}", localUrl);
+            return localUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download seed image from {Url}", sourceUrl);
+            return string.IsNullOrEmpty(fallbackUrl) ? sourceUrl : fallbackUrl;
+        }
+    }
 
     private async Task<HashSet<Guid>> ResolvePresentListingIdsAsync(
         Guid[] ids,

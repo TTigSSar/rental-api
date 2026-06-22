@@ -21,12 +21,15 @@ public sealed class Booking
     // Owner's reason when a request is rejected (known reason code or free text). Null otherwise.
     public string? RejectionReason { get; set; }
 
-    // Two-sided completion handshake. ReturnInitiatedBy/ReturnMarkedAt are set when the first
-    // party marks the toy returned (status -> ReturnMarked) and cleared on undo. CompletedAt/
-    // CompletedVia are set when the booking reaches Completed (mutual confirm or 48h auto-complete).
+    // Set when owner marks the toy as handed over (Approved → Active).
+    public DateTime? ActiveAt { get; set; }
+
+    // Set when the booking reaches Completed.
+    public DateTime? CompletedAt { get; set; }
+
+    // Legacy handshake fields — retained so existing ReturnMarked rows are not orphaned.
     public BookingParty? ReturnInitiatedBy { get; set; }
     public DateTime? ReturnMarkedAt { get; set; }
-    public DateTime? CompletedAt { get; set; }
     public CompletionMethod? CompletedVia { get; set; }
 
     public Listing Listing { get; set; } = null!;

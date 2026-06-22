@@ -22,10 +22,9 @@ public sealed class BookingsService : IBookingsService
         public const string BookingForbidden = "booking.forbidden";
         public const string BookingNotPending = "booking.not_pending";
         public const string NotCancellable = "booking.not_cancellable";
-        public const string NotMarkable = "booking.not_markable";
-        public const string NotConfirmable = "booking.not_confirmable";
-        public const string SelfConfirmForbidden = "booking.self_confirm_forbidden";
-        public const string NotUndoable = "booking.not_undoable";
+        public const string NotActivatable = "booking.not_activatable";
+        public const string NotCompletable = "booking.not_completable";
+        public const string OwnerOnlyAction = "booking.owner_only";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -210,7 +209,7 @@ public sealed class BookingsService : IBookingsService
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(ctx.Value.Booking, ctx.Value.CallerParty));
     }
 
-    public async Task<ServiceResult<BookingDetailResponse>> MarkReturnedAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    public async Task<ServiceResult<BookingDetailResponse>> MarkActiveAsync(Guid bookingId, CancellationToken cancellationToken = default)
     {
         var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
         if (!ctx.IsSuccess || ctx.Value is null)
@@ -219,24 +218,28 @@ public sealed class BookingsService : IBookingsService
         }
 
         var (booking, callerParty) = ctx.Value;
-        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.ReturnMarked))
+        if (callerParty != BookingParty.Owner)
+        {
+            return Failure<BookingDetailResponse>(ErrorCodes.OwnerOnlyAction, "Only the owner can mark the toy as handed over.");
+        }
+
+        if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Active))
         {
             return Failure<BookingDetailResponse>(
-                ErrorCodes.NotMarkable,
-                $"Bookings in status '{booking.Status}' cannot be marked as returned.");
+                ErrorCodes.NotActivatable,
+                $"Bookings in status '{booking.Status}' cannot be marked active.");
         }
 
         var now = DateTime.UtcNow;
-        booking.Status = BookingStatus.ReturnMarked;
-        booking.ReturnInitiatedBy = callerParty;
-        booking.ReturnMarkedAt = now;
+        booking.Status = BookingStatus.Active;
+        booking.ActiveAt = now;
         booking.UpdatedAt = now;
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
     }
 
-    public async Task<ServiceResult<BookingDetailResponse>> ConfirmReturnAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    public async Task<ServiceResult<BookingDetailResponse>> CompleteAsync(Guid bookingId, CancellationToken cancellationToken = default)
     {
         var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
         if (!ctx.IsSuccess || ctx.Value is null)
@@ -245,59 +248,21 @@ public sealed class BookingsService : IBookingsService
         }
 
         var (booking, callerParty) = ctx.Value;
+        if (callerParty != BookingParty.Owner)
+        {
+            return Failure<BookingDetailResponse>(ErrorCodes.OwnerOnlyAction, "Only the owner can complete the rental.");
+        }
+
         if (!BookingStatusTransitions.CanTransition(booking.Status, BookingStatus.Completed))
         {
             return Failure<BookingDetailResponse>(
-                ErrorCodes.NotConfirmable,
-                $"Bookings in status '{booking.Status}' have no pending return to confirm.");
-        }
-
-        // The confirming party must be the OTHER side — the initiator cannot self-confirm.
-        if (booking.ReturnInitiatedBy == callerParty)
-        {
-            return Failure<BookingDetailResponse>(
-                ErrorCodes.SelfConfirmForbidden,
-                "The party that marked the return cannot also confirm it.");
+                ErrorCodes.NotCompletable,
+                $"Bookings in status '{booking.Status}' cannot be completed.");
         }
 
         var now = DateTime.UtcNow;
         booking.Status = BookingStatus.Completed;
-        booking.CompletedVia = CompletionMethod.Mutual;
         booking.CompletedAt = now;
-        booking.UpdatedAt = now;
-        await _bookingsStore.SaveChangesAsync(cancellationToken);
-
-        return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
-    }
-
-    public async Task<ServiceResult<BookingDetailResponse>> UndoReturnAsync(Guid bookingId, CancellationToken cancellationToken = default)
-    {
-        var ctx = await ResolveDetailAsync(bookingId, cancellationToken);
-        if (!ctx.IsSuccess || ctx.Value is null)
-        {
-            return ServiceResult<BookingDetailResponse>.Failure(ctx.Error!);
-        }
-
-        var (booking, callerParty) = ctx.Value;
-        if (booking.Status != BookingStatus.ReturnMarked)
-        {
-            return Failure<BookingDetailResponse>(
-                ErrorCodes.NotUndoable,
-                $"Bookings in status '{booking.Status}' have no return mark to undo.");
-        }
-
-        // Only the party that marked the return may undo it (before the other side confirms).
-        if (booking.ReturnInitiatedBy != callerParty)
-        {
-            return Failure<BookingDetailResponse>(
-                ErrorCodes.BookingForbidden,
-                "Only the party that marked the return can undo it.");
-        }
-
-        var now = DateTime.UtcNow;
-        booking.Status = BookingStatus.Approved;
-        booking.ReturnInitiatedBy = null;
-        booking.ReturnMarkedAt = null;
         booking.UpdatedAt = now;
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
@@ -467,6 +432,8 @@ public sealed class BookingsService : IBookingsService
         Currency = booking.Listing.Currency,
         PricePerDay = booking.Listing.PricePerDay,
         DepositAmount = booking.Listing.DepositAmount,
+        OwnerFirstName = booking.Listing.Owner?.FirstName ?? string.Empty,
+        OwnerLastName = booking.Listing.Owner?.LastName ?? string.Empty,
         StartDate = booking.StartDate,
         EndDate = booking.EndDate,
         TotalPrice = booking.TotalPrice,
@@ -507,7 +474,7 @@ public sealed class BookingsService : IBookingsService
 
         // Address and phone are revealed only once the booking is at least Approved.
         var contactRevealed = booking.Status is BookingStatus.Approved
-            or BookingStatus.ReturnMarked
+            or BookingStatus.Active
             or BookingStatus.Completed;
 
         return new BookingDetailResponse
@@ -538,14 +505,11 @@ public sealed class BookingsService : IBookingsService
 
             CreatedAt = booking.CreatedAt,
             ApprovedAt = booking.ApprovedAt,
-            ReturnMarkedAt = booking.ReturnMarkedAt,
+            ActiveAt = booking.ActiveAt,
             CompletedAt = booking.CompletedAt,
             ExpiresAt = booking.ExpiresAt,
 
             RejectionReason = booking.RejectionReason,
-
-            ReturnInitiatedBy = booking.ReturnInitiatedBy,
-            CompletedVia = booking.CompletedVia,
 
             CounterpartyId = counterparty.Id,
             CounterpartyFirstName = counterparty.FirstName,

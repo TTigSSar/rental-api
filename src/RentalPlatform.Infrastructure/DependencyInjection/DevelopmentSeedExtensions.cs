@@ -15,11 +15,15 @@ public static class DevelopmentSeedExtensions
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        var fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
         var logger = scope.ServiceProvider
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger<DevelopmentSeedRunner>();
 
-        var runner = new DevelopmentSeedRunner(dbContext, passwordHasher, logger);
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("RentalPlatform-Seeder/1.0");
+
+        var runner = new DevelopmentSeedRunner(dbContext, passwordHasher, logger, fileStorage, http);
         await runner.RunAsync(cancellationToken);
     }
 }

@@ -14,6 +14,8 @@ public sealed class BookingResponse
     public DateOnly StartDate { get; init; }
     public DateOnly EndDate { get; init; }
     public decimal TotalPrice { get; init; }
+    public string OwnerFirstName { get; init; } = string.Empty;
+    public string OwnerLastName { get; init; } = string.Empty;
     public BookingStatus Status { get; init; }
     public DateTime ExpiresAt { get; init; }
     public DateTime CreatedAt { get; init; }

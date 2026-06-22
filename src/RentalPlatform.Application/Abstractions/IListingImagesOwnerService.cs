@@ -25,4 +25,12 @@ public interface IListingImagesOwnerService
         Guid listingId,
         IReadOnlyCollection<UploadListingImageRequest> files,
         CancellationToken cancellationToken = default);
+
+    // Reorders existing images without uploading new ones.
+    // ImageIds must contain exactly the current image IDs; the supplied order
+    // determines SortOrder and the first entry becomes primary.
+    Task<ServiceResult<IReadOnlyCollection<ListingImageResponse>>> ReorderAsync(
+        Guid listingId,
+        ReorderListingImagesRequest request,
+        CancellationToken cancellationToken = default);
 }

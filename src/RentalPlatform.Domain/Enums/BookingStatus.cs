@@ -9,7 +9,9 @@ public enum BookingStatus
     Expired = 4,
     Completed = 5,
 
-    // One party has marked the toy returned and is awaiting the other party's confirmation.
-    // Sits between Approved and Completed in the two-sided completion handshake.
-    ReturnMarked = 6
+    // Legacy — no longer reachable from new transitions. Kept so existing DB rows are not orphaned.
+    ReturnMarked = 6,
+
+    // Owner has handed over the toy (Approved → Active). Owner can then complete the rental.
+    Active = 7
 }

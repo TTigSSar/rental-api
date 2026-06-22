@@ -34,7 +34,7 @@ services:
       - uploads:/app/wwwroot/uploads/listings
 
   ui:
-    build: ../rental-ui
+    build: ../Rental-Ui
     depends_on:
       - api
     ports:

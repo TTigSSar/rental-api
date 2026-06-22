@@ -4,14 +4,10 @@ namespace RentalPlatform.Domain;
 
 // Single source of truth for valid booking state transitions.
 // Rules:
-//   Pending      → Approved | Rejected | Expired | Cancelled
-//   Approved     → ReturnMarked | Cancelled
-//   ReturnMarked → Completed | Approved (undo)
+//   Pending  → Approved | Rejected | Expired | Cancelled
+//   Approved → Active (owner: toy handed over) | Cancelled
+//   Active   → Completed (owner: toy returned)
 //   Rejected, Cancelled, Expired, Completed → (terminal — no further transitions)
-//
-// Completion is a two-sided handshake: the first party marks the toy returned
-// (Approved → ReturnMarked), and the other party confirms (ReturnMarked → Completed).
-// The initiator may undo (ReturnMarked → Approved) until the other party confirms.
 public static class BookingStatusTransitions
 {
     public static bool CanTransition(BookingStatus from, BookingStatus to) => (from, to) switch
@@ -21,9 +17,8 @@ public static class BookingStatusTransitions
         (BookingStatus.Pending, BookingStatus.Expired) => true,
         (BookingStatus.Pending, BookingStatus.Cancelled) => true,
         (BookingStatus.Approved, BookingStatus.Cancelled) => true,
-        (BookingStatus.Approved, BookingStatus.ReturnMarked) => true,
-        (BookingStatus.ReturnMarked, BookingStatus.Completed) => true,
-        (BookingStatus.ReturnMarked, BookingStatus.Approved) => true,
+        (BookingStatus.Approved, BookingStatus.Active) => true,
+        (BookingStatus.Active, BookingStatus.Completed) => true,
         _ => false
     };
 }

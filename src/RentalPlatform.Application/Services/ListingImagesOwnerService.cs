@@ -48,6 +48,7 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         public const string ListingImageLimit = "listing.image_listing_limit";
         public const string FileTooLarge = "listing.image_too_large";
         public const string ImageNotFound = "listing.image_not_found";
+        public const string InvalidReorder = "listing.image_invalid_reorder";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -371,6 +372,45 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
                 await item.Content.DisposeAsync();
             }
         }
+    }
+
+    public async Task<ServiceResult<IReadOnlyCollection<ListingImageResponse>>> ReorderAsync(
+        Guid listingId,
+        ReorderListingImagesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerResult = await ResolveOwnedListingAsync(listingId, cancellationToken);
+        if (!ownerResult.IsSuccess || ownerResult.Value is null)
+        {
+            return Failure(ownerResult.Error!);
+        }
+
+        var listing = ownerResult.Value;
+
+        var currentIds = listing.Images.Select(img => img.Id).ToHashSet();
+        var suppliedIds = request.ImageIds.ToHashSet();
+
+        if (!currentIds.SetEquals(suppliedIds))
+        {
+            return Failure(ErrorCodes.InvalidReorder, "The supplied image IDs must match exactly the current images of the listing.");
+        }
+
+        var imageById = listing.Images.ToDictionary(img => img.Id);
+        for (var i = 0; i < request.ImageIds.Count; i++)
+        {
+            var image = imageById[request.ImageIds[i]];
+            image.SortOrder = i;
+            image.IsPrimary = i == 0;
+        }
+
+        listing.UpdatedAt = DateTime.UtcNow;
+        await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+        var ordered = request.ImageIds
+            .Select((id, i) => ToResponse(imageById[id]))
+            .ToList();
+
+        return ServiceResult<IReadOnlyCollection<ListingImageResponse>>.Success(ordered);
     }
 
     // Resolves the current user, verifies they are an active owner of the listing,

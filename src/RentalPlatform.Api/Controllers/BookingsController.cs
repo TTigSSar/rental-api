@@ -142,15 +142,15 @@ public sealed class BookingsController : ControllerBase
         return FromError(result.Error);
     }
 
-    [HttpPost("{id:guid}/return/mark")]
+    [HttpPost("{id:guid}/activate")]
     [ProducesResponseType(typeof(BookingDetailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BookingDetailResponse>> MarkReturned(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<BookingDetailResponse>> MarkActive(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _bookingsService.MarkReturnedAsync(id, cancellationToken);
+        var result = await _bookingsService.MarkActiveAsync(id, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);
@@ -159,32 +159,15 @@ public sealed class BookingsController : ControllerBase
         return FromError(result.Error);
     }
 
-    [HttpPost("{id:guid}/return/confirm")]
+    [HttpPost("{id:guid}/complete")]
     [ProducesResponseType(typeof(BookingDetailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BookingDetailResponse>> ConfirmReturn(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<BookingDetailResponse>> Complete(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _bookingsService.ConfirmReturnAsync(id, cancellationToken);
-        if (result.IsSuccess && result.Value is not null)
-        {
-            return Ok(result.Value);
-        }
-
-        return FromError(result.Error);
-    }
-
-    [HttpPost("{id:guid}/return/undo")]
-    [ProducesResponseType(typeof(BookingDetailResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<BookingDetailResponse>> UndoReturn(Guid id, CancellationToken cancellationToken)
-    {
-        var result = await _bookingsService.UndoReturnAsync(id, cancellationToken);
+        var result = await _bookingsService.CompleteAsync(id, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);
@@ -206,15 +189,14 @@ public sealed class BookingsController : ControllerBase
             "booking.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "booking.own_listing_forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "booking.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "booking.self_confirm_forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "booking.listing_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "booking.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "booking.overlap" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "booking.not_pending" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "booking.not_cancellable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_markable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_confirmable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_undoable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
+            "booking.not_activatable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
+            "booking.not_completable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
+            "booking.owner_only" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
             "booking.listing_not_approved" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             "booking.invalid_dates" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))

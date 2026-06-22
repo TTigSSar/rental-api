@@ -67,8 +67,8 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
         {
             Sections =
             [
-                new HomeSectionResponse { Key = "popular",      Title = "Popular Toys",     Items = popular },
                 new HomeSectionResponse { Key = "recent",       Title = "Most Recent Toys", Items = recent },
+                new HomeSectionResponse { Key = "popular",      Title = "Popular Toys",     Items = popular },
                 new HomeSectionResponse { Key = "liked",        Title = "Most Liked Toys",  Items = liked },
                 new HomeSectionResponse { Key = "baby-toys",    Title = "Baby Toys",        Items = babyToys },
                 new HomeSectionResponse { Key = "outdoor-toys", Title = "Outdoor Toys",     Items = outdoorToys },

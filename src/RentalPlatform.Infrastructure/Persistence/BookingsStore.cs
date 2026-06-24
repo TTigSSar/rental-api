@@ -47,30 +47,6 @@ public sealed class BookingsStore : IBookingsStore
     public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
         _dbContext.Listings.FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
 
-    public Task<bool> HasApprovedOverlapAsync(
-        Guid listingId,
-        DateOnly startDate,
-        DateOnly endDate,
-        Guid? excludedBookingId,
-        CancellationToken cancellationToken = default)
-    {
-        var query = _dbContext.Bookings.Where(booking =>
-            booking.ListingId == listingId &&
-            (booking.Status == BookingStatus.Approved || booking.Status == BookingStatus.Active) &&
-            booking.StartDate <= endDate &&
-            booking.EndDate >= startDate);
-
-        if (excludedBookingId.HasValue)
-        {
-            query = query.Where(booking => booking.Id != excludedBookingId.Value);
-        }
-
-        return query.AnyAsync(cancellationToken);
-    }
-
-    public async Task AddBookingAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        await _dbContext.Bookings.AddAsync(booking, cancellationToken);
-
     public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
     {
         // SERIALIZABLE prevents two concurrent transactions from both passing the overlap
@@ -93,6 +69,34 @@ public sealed class BookingsStore : IBookingsStore
         }
 
         await _dbContext.Bookings.AddAsync(booking, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        // SERIALIZABLE so two owners (or two tabs) approving overlapping pending requests on the
+        // same listing cannot both pass the overlap check: the key-range lock taken by the read
+        // forces the second transaction to serialize behind the first instead of double-booking.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
+
+        var hasApprovedOverlap = await _dbContext.Bookings.AnyAsync(other =>
+            other.ListingId == booking.ListingId &&
+            other.Id != booking.Id &&
+            (other.Status == BookingStatus.Approved || other.Status == BookingStatus.Active) &&
+            other.StartDate <= booking.EndDate &&
+            other.EndDate >= booking.StartDate,
+            cancellationToken);
+
+        if (hasApprovedOverlap)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return false;
+        }
+
+        // Persists the field changes the caller already applied to the tracked booking entity.
         await _dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;

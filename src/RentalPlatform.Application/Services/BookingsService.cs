@@ -343,33 +343,30 @@ public sealed class BookingsService : IBookingsService
             return Failure<BookingRequestResponse>(ErrorCodes.BookingNotPending, "Only valid pending booking requests can be managed.");
         }
 
+        booking.Status = decision;
+        booking.UpdatedAt = now;
+
         if (decision == BookingStatus.Approved)
         {
-            var hasOverlap = await _bookingsStore.HasApprovedOverlapAsync(
-                booking.ListingId,
-                booking.StartDate,
-                booking.EndDate,
-                booking.Id,
-                cancellationToken);
+            booking.ApprovedAt = now;
 
-            if (hasOverlap)
+            // Atomic overlap-then-approve under SERIALIZABLE: blocks concurrent approvals of
+            // overlapping pending requests from both committing (double-booking guard).
+            var approved = await _bookingsStore.TryApproveBookingAsync(booking, cancellationToken);
+            if (!approved)
             {
                 return Failure<BookingRequestResponse>(ErrorCodes.Overlap, "Cannot approve booking due to overlap with approved booking.");
             }
         }
-
-        booking.Status = decision;
-        booking.UpdatedAt = now;
-        if (decision == BookingStatus.Approved)
+        else
         {
-            booking.ApprovedAt = now;
+            if (decision == BookingStatus.Rejected)
+            {
+                var trimmed = rejectionReason?.Trim();
+                booking.RejectionReason = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+            }
+            await _bookingsStore.SaveChangesAsync(cancellationToken);
         }
-        else if (decision == BookingStatus.Rejected)
-        {
-            var trimmed = rejectionReason?.Trim();
-            booking.RejectionReason = string.IsNullOrEmpty(trimmed) ? null : trimmed;
-        }
-        await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));
     }

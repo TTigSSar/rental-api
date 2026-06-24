@@ -24,23 +24,6 @@ public sealed class BookingsStore : IBookingsStore
                 .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
     }
 
-    public async Task CompleteOverdueReturnsAsync(DateTime utcNow, CancellationToken cancellationToken = default)
-    {
-        var threshold = utcNow.AddHours(-48);
-
-        await _dbContext.Bookings
-            .Where(booking =>
-                booking.Status == BookingStatus.ReturnMarked &&
-                booking.ReturnInitiatedBy == BookingParty.Owner &&
-                booking.ReturnMarkedAt != null &&
-                booking.ReturnMarkedAt <= threshold)
-            .ExecuteUpdateAsync(update => update
-                .SetProperty(booking => booking.Status, BookingStatus.Completed)
-                .SetProperty(booking => booking.CompletedVia, CompletionMethod.Auto)
-                .SetProperty(booking => booking.CompletedAt, utcNow)
-                .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
-    }
-
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 

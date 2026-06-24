@@ -371,12 +371,11 @@ public sealed class BookingsService : IBookingsService
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));
     }
 
-    // Brings time-based lifecycle state up to date before any read or mutation: expires stale
-    // pending requests and auto-completes overdue owner-initiated returns (the 48h fallback).
+    // Brings time-based lifecycle state up to date before any read or mutation by expiring stale
+    // pending requests. (Active bookings are completed only by an explicit owner action.)
     private async Task RefreshLifecycleAsync(DateTime utcNow, CancellationToken cancellationToken)
     {
         await _bookingsStore.ExpirePendingAsync(utcNow, cancellationToken);
-        await _bookingsStore.CompleteOverdueReturnsAsync(utcNow, cancellationToken);
     }
 
     private async Task<ServiceResult<User>> GetCurrentUserAsync(CancellationToken cancellationToken)

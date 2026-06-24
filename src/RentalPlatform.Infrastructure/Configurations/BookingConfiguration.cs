@@ -39,12 +39,10 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.Property(booking => booking.RejectionReason)
             .HasMaxLength(500);
 
-        // Two-sided completion handshake fields (all nullable; populated as the booking progresses).
+        // Lifecycle timestamps (all nullable; populated as the booking progresses).
         builder.Property(booking => booking.ApprovedAt);
-        builder.Property(booking => booking.ReturnInitiatedBy);
-        builder.Property(booking => booking.ReturnMarkedAt);
+        builder.Property(booking => booking.ActiveAt);
         builder.Property(booking => booking.CompletedAt);
-        builder.Property(booking => booking.CompletedVia);
 
         builder.HasOne(booking => booking.Listing)
             .WithMany(listing => listing.Bookings)

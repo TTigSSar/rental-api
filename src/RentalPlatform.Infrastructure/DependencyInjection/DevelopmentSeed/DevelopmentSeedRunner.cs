@@ -490,21 +490,19 @@ internal sealed class DevelopmentSeedRunner
             };
 
             // Lifecycle timestamps so the Booking Details timeline renders for demo data.
-            if (seed.Status is BookingStatus.Approved or BookingStatus.ReturnMarked or BookingStatus.Completed)
+            if (seed.Status is BookingStatus.Approved or BookingStatus.Active or BookingStatus.Completed)
             {
                 booking.ApprovedAt = createdAt;
             }
 
-            if (seed.Status == BookingStatus.ReturnMarked)
+            if (seed.Status is BookingStatus.Active or BookingStatus.Completed)
             {
-                booking.ReturnInitiatedBy = seed.ReturnInitiatedBy ?? BookingParty.Renter;
-                booking.ReturnMarkedAt = now.AddHours(-(seed.ReturnMarkedHoursAgo ?? 2));
+                booking.ActiveAt = startDate.ToDateTime(TimeOnly.MinValue);
             }
 
             if (seed.Status == BookingStatus.Completed)
             {
                 booking.CompletedAt = endDate.ToDateTime(TimeOnly.MinValue);
-                booking.CompletedVia = CompletionMethod.Mutual;
             }
 
             if (seed.Status == BookingStatus.Rejected)

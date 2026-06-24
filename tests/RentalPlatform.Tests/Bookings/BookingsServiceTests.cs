@@ -263,7 +263,7 @@ public sealed class BookingsServiceTests
         Assert.Equal("booking.forbidden", result.Error!.Code);
     }
 
-    // --- Completion handshake: mark / confirm / undo / auto-complete ---
+    // --- Lifecycle: owner activates (hand-over) then completes the rental ---
 
     private async Task<Guid> SeedApprovedReturnableAsync(SqliteTestDatabase db)
     {
@@ -389,69 +389,6 @@ public sealed class BookingsServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("booking.not_completable", result.Error!.Code);
-    }
-
-    [Fact]
-    public async Task GetMine_AutoCompletes_Overdue_Owner_Initiated_Return()
-    {
-        using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
-        var bookingId = Guid.NewGuid();
-        await db.SeedAsync(TestData.Booking(
-            bookingId, ListingId, RenterId,
-            Today.AddDays(-6), Today.AddDays(-2),
-            BookingStatus.ReturnMarked,
-            returnInitiatedBy: BookingParty.Owner,
-            returnMarkedAt: DateTime.UtcNow.AddHours(-49)));
-
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).GetMineAsync();
-
-        Assert.True(result.IsSuccess);
-        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
-        Assert.Equal(BookingStatus.Completed, booking.Status);
-    }
-
-    [Fact]
-    public async Task GetMine_Does_Not_AutoComplete_Renter_Initiated_Return()
-    {
-        using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
-        var bookingId = Guid.NewGuid();
-        await db.SeedAsync(TestData.Booking(
-            bookingId, ListingId, RenterId,
-            Today.AddDays(-6), Today.AddDays(-2),
-            BookingStatus.ReturnMarked,
-            returnInitiatedBy: BookingParty.Renter,
-            returnMarkedAt: DateTime.UtcNow.AddHours(-72)));
-
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).GetMineAsync();
-
-        Assert.True(result.IsSuccess);
-        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
-        Assert.Equal(BookingStatus.ReturnMarked, booking.Status);
-    }
-
-    [Fact]
-    public async Task GetMine_Does_Not_AutoComplete_Owner_Initiated_Within_Window()
-    {
-        using var db = new SqliteTestDatabase();
-        await SeedBaselineAsync(db);
-        var bookingId = Guid.NewGuid();
-        await db.SeedAsync(TestData.Booking(
-            bookingId, ListingId, RenterId,
-            Today.AddDays(-6), Today.AddDays(-2),
-            BookingStatus.ReturnMarked,
-            returnInitiatedBy: BookingParty.Owner,
-            returnMarkedAt: DateTime.UtcNow.AddHours(-10)));
-
-        await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).GetMineAsync();
-
-        Assert.True(result.IsSuccess);
-        var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
-        Assert.Equal(BookingStatus.ReturnMarked, booking.Status);
     }
 
     [Theory]

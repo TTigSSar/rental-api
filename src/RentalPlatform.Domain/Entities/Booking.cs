@@ -27,11 +27,6 @@ public sealed class Booking
     // Set when the booking reaches Completed.
     public DateTime? CompletedAt { get; set; }
 
-    // Legacy handshake fields — retained so existing ReturnMarked rows are not orphaned.
-    public BookingParty? ReturnInitiatedBy { get; set; }
-    public DateTime? ReturnMarkedAt { get; set; }
-    public CompletionMethod? CompletedVia { get; set; }
-
     public Listing Listing { get; set; } = null!;
     public User Renter { get; set; } = null!;
 }

@@ -9,9 +9,7 @@ public enum BookingStatus
     Expired = 4,
     Completed = 5,
 
-    // Legacy — no longer reachable from new transitions. Kept so existing DB rows are not orphaned.
-    ReturnMarked = 6,
-
     // Owner has handed over the toy (Approved → Active). Owner can then complete the rental.
+    // Value 6 (legacy ReturnMarked) is intentionally retired and left unused.
     Active = 7
 }

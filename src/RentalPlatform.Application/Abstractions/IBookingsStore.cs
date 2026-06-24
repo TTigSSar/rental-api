@@ -5,10 +5,6 @@ namespace RentalPlatform.Application.Abstractions;
 public interface IBookingsStore
 {
     Task ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default);
-
-    // Auto-completes owner-initiated returns whose 48h confirmation window has elapsed.
-    // Renter-initiated returns are intentionally never auto-completed.
-    Task CompleteOverdueReturnsAsync(DateTime utcNow, CancellationToken cancellationToken = default);
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default);
 

@@ -41,7 +41,6 @@ public sealed class BookingsService : IBookingsService
         CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -103,9 +102,6 @@ public sealed class BookingsService : IBookingsService
 
     public async Task<ServiceResult<IReadOnlyCollection<BookingResponse>>> GetMineAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
-
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
         {
@@ -124,9 +120,6 @@ public sealed class BookingsService : IBookingsService
     public async Task<ServiceResult<IReadOnlyCollection<BookingRequestResponse>>> GetOwnerRequestsAsync(
         CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
-
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
         {
@@ -151,7 +144,6 @@ public sealed class BookingsService : IBookingsService
     public async Task<ServiceResult<BookingResponse>> CancelAsync(Guid bookingId, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -274,9 +266,6 @@ public sealed class BookingsService : IBookingsService
     private async Task<ServiceResult<BookingDetailContext>> ResolveDetailAsync(
         Guid bookingId, CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
-
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
         {
@@ -316,7 +305,6 @@ public sealed class BookingsService : IBookingsService
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        await RefreshLifecycleAsync(now, cancellationToken);
 
         var userResult = await GetCurrentUserAsync(cancellationToken);
         if (!userResult.IsSuccess || userResult.Value is null)
@@ -369,13 +357,6 @@ public sealed class BookingsService : IBookingsService
         }
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));
-    }
-
-    // Brings time-based lifecycle state up to date before any read or mutation by expiring stale
-    // pending requests. (Active bookings are completed only by an explicit owner action.)
-    private async Task RefreshLifecycleAsync(DateTime utcNow, CancellationToken cancellationToken)
-    {
-        await _bookingsStore.ExpirePendingAsync(utcNow, cancellationToken);
     }
 
     private async Task<ServiceResult<User>> GetCurrentUserAsync(CancellationToken cancellationToken)

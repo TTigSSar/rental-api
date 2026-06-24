@@ -67,6 +67,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReviewsStore, ReviewsStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
+        services.AddHostedService<BookingExpiryBackgroundService>();
+
         return services;
     }
 }

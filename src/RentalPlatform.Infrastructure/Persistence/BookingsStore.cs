@@ -38,9 +38,15 @@ public sealed class BookingsStore : IBookingsStore
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable, cancellationToken);
 
+        // A Pending row only blocks while it is still live: a pending request past its ExpiresAt is
+        // effectively dead even if the background sweep hasn't flipped it to Expired yet. This keeps
+        // create-correctness independent of sweep timing.
+        var now = DateTime.UtcNow;
         var hasBlockingOverlap = await _dbContext.Bookings.AnyAsync(other =>
             other.ListingId == booking.ListingId &&
-            (other.Status == BookingStatus.Pending || other.Status == BookingStatus.Approved || other.Status == BookingStatus.Active) &&
+            ((other.Status == BookingStatus.Pending && other.ExpiresAt > now) ||
+             other.Status == BookingStatus.Approved ||
+             other.Status == BookingStatus.Active) &&
             other.StartDate <= booking.EndDate &&
             other.EndDate >= booking.StartDate,
             cancellationToken);

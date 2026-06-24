@@ -96,6 +96,7 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddApiRateLimiting();
+        services.AddProxyForwardedHeaders(configuration);
         services.AddInfrastructure(configuration);
 
         return services;

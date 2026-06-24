@@ -23,6 +23,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Must run before anything that reads the client IP or scheme (rate limiter, CORS, HTTPS
+// redirect, auth). No-op unless ForwardedHeaders:Enabled is set — see ForwardedHeadersExtensions.
+app.UseForwardedHeaders();
+
 // First: catch any downstream throw and translate to RFC 7807 ProblemDetails.
 app.UseMiddleware<GlobalExceptionMiddleware>();
 

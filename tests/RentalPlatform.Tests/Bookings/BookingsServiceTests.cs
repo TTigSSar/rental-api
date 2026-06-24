@@ -159,6 +159,102 @@ public sealed class BookingsServiceTests
     }
 
     [Fact]
+    public async Task Approve_Rejects_When_Overlapping_Booking_Already_Approved()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        // An already-approved booking holds Today+5..+8.
+        await db.SeedAsync(TestData.Booking(
+            Guid.NewGuid(), ListingId, OtherUserId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Approved));
+
+        // A still-pending request overlaps it. Approving must be blocked (no double-booking).
+        var pendingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            pendingId, ListingId, RenterId,
+            Today.AddDays(6), Today.AddDays(7),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ApproveAsync(pendingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.overlap", result.Error!.Code);
+
+        // And the pending request must remain Pending (not left half-approved).
+        await using var verify = db.CreateContext();
+        var stored = await verify.Bookings.FindAsync(pendingId);
+        Assert.Equal(BookingStatus.Pending, stored!.Status);
+    }
+
+    [Fact]
+    public async Task Approve_Rejects_Pending_Past_Its_Expiry()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        // Pending whose 24h window already elapsed but the background sweep hasn't run yet.
+        var pendingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            pendingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(-1)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ApproveAsync(pendingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.not_pending", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Create_Succeeds_When_Overlapping_Pending_Has_Expired()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        // An expired-but-unswept pending must NOT block a new booking on the same dates.
+        await db.SeedAsync(TestData.Booking(
+            Guid.NewGuid(), ListingId, OtherUserId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(-1)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7)
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingStatus.Pending, result.Value!.Status);
+    }
+
+    [Fact]
+    public async Task Create_Rejects_Booking_Longer_Than_Max_Duration()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(1),
+            EndDate = Today.AddDays(1 + 90) // 91 inclusive days
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.invalid_dates", result.Error!.Code);
+    }
+
+    [Fact]
     public async Task Cancel_Succeeds_For_Pending_Booking_By_Renter()
     {
         using var db = new SqliteTestDatabase();

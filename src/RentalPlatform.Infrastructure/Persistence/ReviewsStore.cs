@@ -77,4 +77,42 @@ public sealed class ReviewsStore : IReviewsStore
             .Include(r => r.Booking)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<RatingAggregate> GetOwnerRatingAggregateAsync(
+        Guid ownerId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.OwnerReviews.AsNoTracking().Where(r => r.OwnerId == ownerId);
+        var count = await query.CountAsync(cancellationToken);
+        if (count == 0)
+        {
+            return new RatingAggregate(0, 0.0);
+        }
+
+        // Mirrors ReviewsService owner overall = avg((Communication + PickupHandover + Friendliness) / 3).
+        var average = await query.AverageAsync(
+            r => (r.CommunicationRating + r.PickupHandoverRating + r.FriendlinessRating) / 3.0,
+            cancellationToken);
+
+        return new RatingAggregate(count, Math.Round(average, 1));
+    }
+
+    public async Task<RatingAggregate> GetRenterRatingAggregateAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.RenterReviews.AsNoTracking().Where(r => r.RenterId == renterId);
+        var count = await query.CountAsync(cancellationToken);
+        if (count == 0)
+        {
+            return new RatingAggregate(0, 0.0);
+        }
+
+        // Mirrors ReviewsService renter overall = avg((Communication + ReturnedOnTime + CareOfToy + WouldRentAgain) / 4).
+        var average = await query.AverageAsync(
+            r => (r.CommunicationRating + r.ReturnedOnTimeRating + r.CareOfToyRating + r.WouldRentAgainRating) / 4.0,
+            cancellationToken);
+
+        return new RatingAggregate(count, Math.Round(average, 1));
+    }
 }

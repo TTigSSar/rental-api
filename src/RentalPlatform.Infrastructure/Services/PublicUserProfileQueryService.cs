@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
 
@@ -9,12 +10,12 @@ namespace RentalPlatform.Infrastructure.Services;
 public sealed class PublicUserProfileQueryService : IPublicUserProfileService
 {
     private readonly AppDbContext _dbContext;
-    private readonly IReviewsService _reviewsService;
+    private readonly IReviewsStore _reviewsStore;
 
-    public PublicUserProfileQueryService(AppDbContext dbContext, IReviewsService reviewsService)
+    public PublicUserProfileQueryService(AppDbContext dbContext, IReviewsStore reviewsStore)
     {
         _dbContext = dbContext;
-        _reviewsService = reviewsService;
+        _reviewsStore = reviewsStore;
     }
 
     public async Task<PublicUserProfileResponse?> GetPublicProfileAsync(
@@ -42,8 +43,12 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
 
         if (user is null) return null;
 
-        var ownerReviews = await _reviewsService.GetOwnerReviewsAsync(userId, cancellationToken);
-        var renterReviews = await _reviewsService.GetRenterReviewsAsync(userId, cancellationToken);
+        // Lightweight DB-side aggregates: the profile only needs counts + overall averages,
+        // not the full comment cards the review-summary endpoints build.
+        var ownerRating = await _reviewsStore.GetOwnerRatingAggregateAsync(userId, cancellationToken);
+        var renterRating = await _reviewsStore.GetRenterRatingAggregateAsync(userId, cancellationToken);
+        var ownerHasAggregate = ownerRating.Count >= ReviewsService.MinReviewsForAggregate;
+        var renterHasAggregate = renterRating.Count >= ReviewsService.MinReviewsForAggregate;
 
         var completedAsOwner = await _dbContext.Bookings
             .AsNoTracking()
@@ -67,8 +72,8 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
             ActiveListingsCount = user.ActiveListingsCount,
 
             // Legacy flat rating — keep backward-compat
-            AverageRating = ownerReviews.HasAggregate ? ownerReviews.OverallAverage : 0,
-            ReviewCount = ownerReviews.ReviewCount,
+            AverageRating = ownerHasAggregate ? ownerRating.Average : 0,
+            ReviewCount = ownerRating.Count,
 
             // Trust surface
             Location = user.Location,
@@ -77,16 +82,16 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
             IsEmailPhoneConfirmed = isEmailPhoneConfirmed,
 
             // As Owner
-            OwnerRating = ownerReviews.HasAggregate ? ownerReviews.OverallAverage : null,
-            OwnerReviewCount = ownerReviews.ReviewCount,
+            OwnerRating = ownerHasAggregate ? ownerRating.Average : null,
+            OwnerReviewCount = ownerRating.Count,
             CompletedRentalsAsOwner = completedAsOwner,
             ResponseRate = null,
             HygieneScore = null,
             HygieneStandards = [],
 
             // As Renter
-            RenterRating = renterReviews.HasAggregate ? renterReviews.OverallAverage : null,
-            RenterReviewCount = renterReviews.ReviewCount,
+            RenterRating = renterHasAggregate ? renterRating.Average : null,
+            RenterReviewCount = renterRating.Count,
             CompletedRentalsAsRenter = completedAsRenter,
             OnTimeReturnRate = null,
             DamageClaims = 0,

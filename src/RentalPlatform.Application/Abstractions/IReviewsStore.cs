@@ -19,4 +19,13 @@ public interface IReviewsStore
     Task<IReadOnlyList<ToyReview>> GetToyReviewsByListingAsync(Guid listingId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<OwnerReview>> GetOwnerReviewsByUserAsync(Guid ownerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RenterReview>> GetRenterReviewsByUserAsync(Guid renterId, CancellationToken cancellationToken = default);
+
+    // Lightweight count + overall-average aggregates computed in the database, without loading
+    // rows, joins, or comment cards — used by surfaces (e.g. public profiles) that only need the
+    // numbers. The averages mirror the composite formulas in ReviewsService.
+    Task<RatingAggregate> GetOwnerRatingAggregateAsync(Guid ownerId, CancellationToken cancellationToken = default);
+    Task<RatingAggregate> GetRenterRatingAggregateAsync(Guid renterId, CancellationToken cancellationToken = default);
 }
+
+// Count of reviews and their rounded overall average (0 when there are none).
+public sealed record RatingAggregate(int Count, double Average);

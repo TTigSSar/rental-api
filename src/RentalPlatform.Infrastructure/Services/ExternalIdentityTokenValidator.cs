@@ -69,11 +69,15 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
                 Audience = _options.Google.ValidAudiences
             });
 
+            // Only trust the email for account creation/linking if Google says it is verified.
+            // An unverified email must not be used to claim or link an existing account.
+            var verifiedEmail = payload.EmailVerified == true ? payload.Email : null;
+
             return ServiceResult<ExternalUserInfo>.Success(new ExternalUserInfo
             {
                 Provider = "google",
                 ProviderUserId = payload.Subject,
-                Email = payload.Email,
+                Email = verifiedEmail,
                 FirstName = payload.GivenName,
                 LastName = payload.FamilyName,
                 AvatarUrl = payload.Picture

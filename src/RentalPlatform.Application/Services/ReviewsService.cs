@@ -10,7 +10,7 @@ public sealed class ReviewsService : IReviewsService
 {
     // Aggregates (averages, distribution) are hidden until a listing/user has at
     // least this many reviews. Comments are always shown.
-    private const int MinReviewsForAggregate = 2;
+    public const int MinReviewsForAggregate = 2;
 
     private static class ErrorCodes
     {

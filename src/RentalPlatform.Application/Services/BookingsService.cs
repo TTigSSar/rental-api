@@ -9,6 +9,10 @@ namespace RentalPlatform.Application.Services;
 
 public sealed class BookingsService : IBookingsService
 {
+    // Upper bound on a single rental window (inclusive days). Guards against absurd requests
+    // (e.g. a multi-year booking) that would lock a listing's calendar and balloon TotalPrice.
+    private const int MaxRentalDays = 90;
+
     private static class ErrorCodes
     {
         public const string Unauthenticated = "booking.unauthenticated";
@@ -391,6 +395,12 @@ public sealed class BookingsService : IBookingsService
         if (startDate < today)
         {
             return "StartDate cannot be in the past.";
+        }
+
+        var inclusiveDays = endDate.DayNumber - startDate.DayNumber + 1;
+        if (inclusiveDays > MaxRentalDays)
+        {
+            return $"A booking cannot exceed {MaxRentalDays} days.";
         }
 
         return null;

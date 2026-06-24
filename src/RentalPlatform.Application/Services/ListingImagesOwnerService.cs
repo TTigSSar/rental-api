@@ -49,6 +49,7 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
         public const string FileTooLarge = "listing.image_too_large";
         public const string ImageNotFound = "listing.image_not_found";
         public const string InvalidReorder = "listing.image_invalid_reorder";
+        public const string ArchivedListing = "listing.invalid_status";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -463,6 +464,17 @@ public sealed class ListingImagesOwnerService : IListingImagesOwnerService
             {
                 Code = ErrorCodes.ListingForbidden,
                 Message = "Only the listing owner can manage images."
+            });
+        }
+
+        // Images cannot be changed on an archived listing. ReplaceAsync in particular would flip the
+        // listing back to PendingApproval, silently un-archiving it — the owner must restore it first.
+        if (listing.Status == ListingStatus.Archived)
+        {
+            return ServiceResult<Listing>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.ArchivedListing,
+                Message = "Archived listings cannot have their images changed. Restore the listing first."
             });
         }
 

@@ -188,8 +188,12 @@ public sealed class ListingsQueryService : IListingsQueryService
                         SortOrder = image.SortOrder
                     })
                     .ToList(),
+                // Both Approved and Active bookings hold the calendar (the booking-create overlap
+                // check blocks all three of Pending/Approved/Active), so the public calendar must
+                // surface Active ranges too — otherwise a date shows free but the request 409s.
                 BookedDateRanges = listing.Bookings
-                    .Where(booking => booking.Status == BookingStatus.Approved)
+                    .Where(booking => booking.Status == BookingStatus.Approved ||
+                                      booking.Status == BookingStatus.Active)
                     .OrderBy(booking => booking.StartDate)
                     .Select(booking => new ListingBookedDateRangeResponse
                     {

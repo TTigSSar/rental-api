@@ -166,10 +166,13 @@ public sealed class ListingsQueryService : IListingsQueryService
                     FirstName = listing.Owner.FirstName,
                     LastName = listing.Owner.LastName,
                     AvatarUrl = listing.Owner.AvatarUrl,
+                    // Reveal the owner's phone only once the renter has a booking that reached at
+                    // least Approved — matching the contact-reveal gate in BookingDetail. A Pending
+                    // request must NOT expose contact details before the owner has accepted it.
                     PhoneNumber = callerId != null && listing.Bookings.Any(booking =>
                         booking.RenterId == callerId &&
-                        (booking.Status == BookingStatus.Pending ||
-                         booking.Status == BookingStatus.Approved ||
+                        (booking.Status == BookingStatus.Approved ||
+                         booking.Status == BookingStatus.Active ||
                          booking.Status == BookingStatus.Completed))
                         ? listing.Owner.PhoneNumber
                         : null

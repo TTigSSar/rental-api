@@ -307,16 +307,24 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
-        if (request.Title is not null) listing.Title = request.Title.Trim();
-        if (request.Description is not null) listing.Description = request.Description.Trim();
+        // Track whether any publicly-visible free-text content changed. Such fields were vetted
+        // during moderation, so altering them on an already-approved listing must re-trigger review
+        // (otherwise an owner could get innocent text approved and then swap in disallowed content).
+        // This mirrors the image-replace path, which always re-moderates.
+        var contentChanged = false;
+
+        if (request.Title is not null) contentChanged |= SetIfChanged(() => listing.Title, v => listing.Title = v!, request.Title.Trim());
+        if (request.Description is not null) contentChanged |= SetIfChanged(() => listing.Description, v => listing.Description = v!, request.Description.Trim());
+        if (request.Condition is not null) contentChanged |= SetIfChanged(() => listing.Condition, v => listing.Condition = v, NormalizeOptional(request.Condition));
+        if (request.HygieneNotes is not null) contentChanged |= SetIfChanged(() => listing.HygieneNotes, v => listing.HygieneNotes = v, NormalizeOptional(request.HygieneNotes));
+        if (request.SafetyNotes is not null) contentChanged |= SetIfChanged(() => listing.SafetyNotes, v => listing.SafetyNotes = v, NormalizeOptional(request.SafetyNotes));
+
+        // Structured, non-content fields — never require re-moderation.
         if (request.PricePerDay is not null) listing.PricePerDay = request.PricePerDay.Value;
         if (request.City is not null) listing.City = request.City.Trim();
         if (request.Country is not null) listing.Country = request.Country.Trim();
         if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
         if (request.AgeToMonths is not null) listing.AgeToMonths = request.AgeToMonths;
-        if (request.Condition is not null) listing.Condition = NormalizeOptional(request.Condition);
-        if (request.HygieneNotes is not null) listing.HygieneNotes = NormalizeOptional(request.HygieneNotes);
-        if (request.SafetyNotes is not null) listing.SafetyNotes = NormalizeOptional(request.SafetyNotes);
         if (request.DepositAmount is not null) listing.DepositAmount = request.DepositAmount;
 
         if (listing.Status == ListingStatus.Rejected)
@@ -324,11 +332,27 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             listing.Status = ListingStatus.PendingApproval;
             listing.RejectionReason = null;
         }
+        else if (listing.Status == ListingStatus.Approved && contentChanged)
+        {
+            listing.Status = ListingStatus.PendingApproval;
+        }
 
         listing.UpdatedAt = DateTime.UtcNow;
         await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<Guid>.Success(listing.Id);
+    }
+
+    // Applies a new value and reports whether it actually differed from the current one.
+    private static bool SetIfChanged(Func<string?> getter, Action<string?> setter, string? newValue)
+    {
+        if (string.Equals(getter(), newValue, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        setter(newValue);
+        return true;
     }
 
     private static string? NormalizeOptional(string? value)

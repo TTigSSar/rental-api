@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RentalPlatform.Api.Serialization;
 using RentalPlatform.Infrastructure.DependencyInjection;
 using RentalPlatform.Infrastructure.Services;
 using System.Security.Claims;
@@ -28,6 +29,8 @@ public static class ServiceCollectionExtensions
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+                options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter());
+                options.JsonSerializerOptions.Converters.Add(new UtcNullableDateTimeJsonConverter());
             });
         services.AddEndpointsApiExplorer();
         services.AddCors(options =>

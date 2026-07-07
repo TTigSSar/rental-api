@@ -23,12 +23,18 @@ public sealed class ChatService : IChatService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IConversationsStore _store;
     private readonly IBookingsStore _bookingsStore;
+    private readonly IChatRealtimeNotifier _realtimeNotifier;
 
-    public ChatService(ICurrentUserContext currentUserContext, IConversationsStore store, IBookingsStore bookingsStore)
+    public ChatService(
+        ICurrentUserContext currentUserContext,
+        IConversationsStore store,
+        IBookingsStore bookingsStore,
+        IChatRealtimeNotifier realtimeNotifier)
     {
         _currentUserContext = currentUserContext;
         _store = store;
         _bookingsStore = bookingsStore;
+        _realtimeNotifier = realtimeNotifier;
     }
 
     public async Task<ServiceResult<IReadOnlyCollection<ChatConversationResponse>>> GetConversationsAsync(
@@ -152,6 +158,10 @@ public sealed class ChatService : IChatService
 
         // A brand-new message cannot yet have been read by the counterpart, so Seen is false.
         var response = MapMessage(message, userId, user, counterpartLastReadAt: null);
+
+        var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
+        await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+
         return ServiceResult<ChatMessageResponse>.Success(response);
     }
 
@@ -174,6 +184,10 @@ public sealed class ChatService : IChatService
         }
 
         await _store.MarkReadAsync(conversationId, userId, cancellationToken);
+
+        var otherUserId = conversation.OwnerId == userId ? conversation.RenterId : conversation.OwnerId;
+        await _realtimeNotifier.ConversationReadAsync(conversationId, userId, otherUserId, DateTime.UtcNow, cancellationToken);
+
         return ServiceResult<bool>.Success(true);
     }
 
@@ -248,6 +262,21 @@ public sealed class ChatService : IChatService
             Seen = seen
         };
     }
+
+    // Viewer-neutral broadcast payload: unlike MapMessage, always carries the real sender
+    // name (both recipients need it — neither is "you" from the broadcast's point of view).
+    private static ChatRealtimeMessage MapRealtimeMessage(ChatMessage message, string? senderName) => new()
+    {
+        Id = message.Id,
+        ConversationId = message.ConversationId,
+        SenderId = message.SenderId,
+        SenderName = message.SenderId is null ? null : senderName,
+        Type = ChatTokens.MessageTypeToken(message.Type),
+        SystemKind = ChatTokens.SystemKindToken(message.SystemKind),
+        Body = message.Body,
+        AttachmentUrl = message.AttachmentUrl,
+        SentAt = message.CreatedAt
+    };
 
     private static string DisplayName(User user) => $"{user.FirstName} {user.LastName}".Trim();
 

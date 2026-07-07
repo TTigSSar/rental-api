@@ -5,7 +5,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RentalPlatform.Api.Hubs;
 using RentalPlatform.Api.Serialization;
+using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Infrastructure.DependencyInjection;
 using RentalPlatform.Infrastructure.Services;
 using System.Security.Claims;
@@ -46,7 +48,11 @@ public static class ServiceCollectionExtensions
                 policyBuilder
                     .SetIsOriginAllowed(origin => IsAllowedOrigin(origin, allowedOrigins, environment.IsDevelopment()))
                     .AllowAnyHeader()
-                    .AllowAnyMethod();
+                    .AllowAnyMethod()
+                    // Required for the SignalR chat hub's WebSocket transport, which needs
+                    // credentialed cross-origin requests. Safe alongside SetIsOriginAllowed
+                    // (unlike AllowAnyOrigin, which AllowCredentials cannot be combined with).
+                    .AllowCredentials();
             });
         });
 
@@ -66,9 +72,31 @@ public static class ServiceCollectionExtensions
                     RoleClaimType = ClaimTypes.Role,
                     ClockSkew = TimeSpan.Zero
                 };
+
+                // Browsers cannot set the Authorization header on the WebSocket handshake used
+                // by the SignalR chat hub, so accept the access token via query string for that
+                // path only. Standard SignalR pattern; see the client's withUrl(..., { accessTokenFactory }).
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        var path = context.HttpContext.Request.Path;
+
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         services.AddAuthorization();
+
+        services.AddSignalR();
+        services.AddScoped<IChatRealtimeNotifier, ChatRealtimeNotifier>();
 
         services.AddSwaggerGen(options =>
         {

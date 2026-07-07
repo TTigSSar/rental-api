@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using RentalPlatform.Api.Extensions;
+using RentalPlatform.Api.Hubs;
 using RentalPlatform.Api.Middleware;
 using RentalPlatform.Infrastructure.DependencyInjection;
 using RentalPlatform.Infrastructure.Services;
@@ -77,6 +78,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();
 

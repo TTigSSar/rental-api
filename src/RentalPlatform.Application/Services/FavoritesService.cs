@@ -41,6 +41,7 @@ public sealed class FavoritesService : IFavoritesService
                 CategoryName = favorite.Listing.Category.Name,
                 Title = favorite.Listing.Title,
                 PricePerDay = favorite.Listing.PricePerDay,
+                PriceUnit = favorite.Listing.PriceUnit,
                 Currency = favorite.Listing.Currency,
                 Country = favorite.Listing.Country,
                 City = favorite.Listing.City,

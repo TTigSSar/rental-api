@@ -14,6 +14,7 @@ public interface IAdminListingsService
 
     Task<ServiceResult<ModerateListingResponse>> RejectAsync(
         Guid listingId,
-        string reason,
+        string reasonCode,
+        string? note,
         CancellationToken cancellationToken = default);
 }

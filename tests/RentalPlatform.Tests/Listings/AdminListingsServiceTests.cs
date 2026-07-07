@@ -26,7 +26,7 @@ public sealed class AdminListingsServiceTests
 
     private static AdminListingsService CreateService(
         AppDbContext context, Guid currentUserId, FakeEmailService email) =>
-        new(new FakeCurrentUserContext(currentUserId), new AdminListingsStore(context), email);
+        new(new FakeCurrentUserContext(currentUserId), new AdminListingsStore(context), email, new FakeNotificationEmitter());
 
     [Fact]
     public async Task Approve_Pending_Listing_Sets_Approved_And_Notifies_Owner()
@@ -56,7 +56,7 @@ public sealed class AdminListingsServiceTests
         var email = new FakeEmailService();
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context, AdminId, email).RejectAsync(ListingId, "  Unsafe small parts.  ");
+        var result = await CreateService(context, AdminId, email).RejectAsync(ListingId, "unsafeItem", "  Small parts.  ");
 
         Assert.True(result.IsSuccess);
         Assert.Equal(ListingStatus.Rejected, result.Value!.Status);
@@ -64,7 +64,9 @@ public sealed class AdminListingsServiceTests
         await using var verify = db.CreateContext();
         var stored = await verify.Listings.FindAsync(ListingId);
         Assert.Equal(ListingStatus.Rejected, stored!.Status);
-        Assert.Equal("Unsafe small parts.", stored.RejectionReason); // trimmed
+        Assert.Equal("unsafeItem", stored.RejectionReasonCode);
+        Assert.Equal("Small parts.", stored.RejectionNote); // trimmed
+        Assert.Equal("Unsafe item: Small parts.", stored.RejectionReason); // composed label + note
         Assert.Single(email.RejectedSent);
     }
 

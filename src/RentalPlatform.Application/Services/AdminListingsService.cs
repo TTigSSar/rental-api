@@ -19,15 +19,18 @@ public sealed class AdminListingsService : IAdminListingsService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IAdminListingsStore _adminListingsStore;
     private readonly IEmailService _emailService;
+    private readonly INotificationEmitter _notificationEmitter;
 
     public AdminListingsService(
         ICurrentUserContext currentUserContext,
         IAdminListingsStore adminListingsStore,
-        IEmailService emailService)
+        IEmailService emailService,
+        INotificationEmitter notificationEmitter)
     {
         _currentUserContext = currentUserContext;
         _adminListingsStore = adminListingsStore;
         _emailService = emailService;
+        _notificationEmitter = notificationEmitter;
     }
 
     public async Task<ServiceResult<IReadOnlyCollection<PendingListingForReviewResponse>>> GetPendingAsync(
@@ -71,6 +74,8 @@ public sealed class AdminListingsService : IAdminListingsService
         var now = DateTime.UtcNow;
         listing.Status = ListingStatus.Approved;
         listing.RejectionReason = null;
+        listing.RejectionReasonCode = null;
+        listing.RejectionNote = null;
         listing.ModeratedAt = now;
         listing.ModeratedByUserId = admin.Id;
         listing.UpdatedAt = now;
@@ -84,6 +89,9 @@ public sealed class AdminListingsService : IAdminListingsService
             listing.Title,
             cancellationToken);
 
+        // Best-effort: notify the owner their listing is live.
+        await _notificationEmitter.ListingApprovedAsync(listing, cancellationToken);
+
         return ServiceResult<ModerateListingResponse>.Success(new ModerateListingResponse
         {
             Id = listing.Id,
@@ -96,7 +104,8 @@ public sealed class AdminListingsService : IAdminListingsService
 
     public async Task<ServiceResult<ModerateListingResponse>> RejectAsync(
         Guid listingId,
-        string reason,
+        string reasonCode,
+        string? note,
         CancellationToken cancellationToken = default)
     {
         var adminResult = await EnsureAdminAsync(cancellationToken);
@@ -118,10 +127,14 @@ public sealed class AdminListingsService : IAdminListingsService
             return Failure<ModerateListingResponse>(ErrorCodes.InvalidStatus, "Only pending listings can be moderated.");
         }
 
-        var trimmedReason = reason.Trim();
+        var trimmedCode = reasonCode.Trim();
+        var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        var trimmedReason = RejectionReasonCatalog.Compose(trimmedCode, trimmedNote);
         var now = DateTime.UtcNow;
         listing.Status = ListingStatus.Rejected;
         listing.RejectionReason = trimmedReason;
+        listing.RejectionReasonCode = trimmedCode;
+        listing.RejectionNote = trimmedNote;
         listing.ModeratedAt = now;
         listing.ModeratedByUserId = admin.Id;
         listing.UpdatedAt = now;
@@ -135,6 +148,9 @@ public sealed class AdminListingsService : IAdminListingsService
             listing.Title,
             trimmedReason,
             cancellationToken);
+
+        // Best-effort: notify the owner that changes are needed.
+        await _notificationEmitter.ListingRejectedAsync(listing, trimmedReason, cancellationToken);
 
         return ServiceResult<ModerateListingResponse>.Success(new ModerateListingResponse
         {

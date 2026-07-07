@@ -10,6 +10,10 @@ public sealed class Listing
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public decimal PricePerDay { get; set; }
+
+    // The rental period the price applies to. Non-nullable; defaults to Daily so existing rows and
+    // omitted requests behave exactly as before. Booking-cost math still treats this as per-day.
+    public PriceUnit PriceUnit { get; set; } = PriceUnit.Daily;
     public string Currency { get; set; } = string.Empty;
     public string Country { get; set; } = string.Empty;
     public string City { get; set; } = string.Empty;
@@ -21,7 +25,12 @@ public sealed class Listing
     public DateTime UpdatedAt { get; set; }
 
     // Moderation fields — populated by admin actions (approve / reject).
+    // RejectionReason is the composed, human-readable reason (label + optional note) used for
+    // email + legacy display; RejectionReasonCode / RejectionNote keep the structured parts so
+    // the owner UI can render a localized reason chip and the moderator's note separately.
     public string? RejectionReason { get; set; }
+    public string? RejectionReasonCode { get; set; }
+    public string? RejectionNote { get; set; }
     public DateTime? ModeratedAt { get; set; }
     public Guid? ModeratedByUserId { get; set; }
 

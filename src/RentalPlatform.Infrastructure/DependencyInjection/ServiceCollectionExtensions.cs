@@ -60,11 +60,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReviewsService, ReviewsService>();
         services.AddScoped<IFavoritesService, FavoritesService>();
         services.AddScoped<IAdminListingsService, AdminListingsService>();
+        services.AddScoped<INotificationsService, NotificationsService>();
+        services.AddScoped<INotificationEmitter, NotificationEmitter>();
+        services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();
         services.AddScoped<IBookingsStore, BookingsStore>();
         services.AddScoped<IFavoritesStore, FavoritesStore>();
         services.AddScoped<IAdminListingsStore, AdminListingsStore>();
         services.AddScoped<IReviewsStore, ReviewsStore>();
+        services.AddScoped<INotificationsStore, NotificationsStore>();
+        services.AddScoped<IConversationsStore, ConversationsStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 
         services.AddHostedService<BookingExpiryBackgroundService>();

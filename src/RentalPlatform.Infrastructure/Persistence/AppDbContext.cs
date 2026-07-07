@@ -18,6 +18,10 @@ public sealed class AppDbContext : DbContext
     public DbSet<ToyReview> ToyReviews => Set<ToyReview>();
     public DbSet<OwnerReview> OwnerReviews => Set<OwnerReview>();
     public DbSet<RenterReview> RenterReviews => Set<RenterReview>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

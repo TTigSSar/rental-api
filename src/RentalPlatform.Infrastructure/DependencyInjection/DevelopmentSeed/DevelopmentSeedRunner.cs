@@ -46,10 +46,11 @@ internal sealed class DevelopmentSeedRunner
         var insertedFavorites = await SeedFavoritesAsync(userByEmail, now, cancellationToken);
         var insertedBookings = await SeedBookingsAsync(userByEmail, today, now, cancellationToken);
         var insertedReviews = await SeedReviewsAsync(userByEmail, now, cancellationToken);
+        var insertedChat = await SeedChatAsync(userByEmail, now, cancellationToken);
 
         var totalInserted =
             insertedCategories + insertedUsers + insertedListings +
-            insertedImages + insertedFavorites + insertedBookings + insertedReviews;
+            insertedImages + insertedFavorites + insertedBookings + insertedReviews + insertedChat;
 
         if (totalInserted == 0)
         {
@@ -643,6 +644,169 @@ internal sealed class DevelopmentSeedRunner
     }
 
     private readonly record struct SeedBookingRef(Guid ListingId, string RenterEmail);
+
+    /// <summary>
+    /// Seeds ONE demo chat thread so the chat vertical is demoable end-to-end. Idempotent by the
+    /// fixed conversation GUID: inserts only when that conversation is absent. The thread hangs off
+    /// the seeded Approved booking (LEGO Duplo Starter Set) between owner@ and renter@, with two
+    /// participant rows and four alternating text messages. The renter's read cursor is left before
+    /// the owner's final message so the renter has exactly one unread and the "Seen" receipt on the
+    /// owner's last message reads as not-yet-seen.
+    /// </summary>
+    private async Task<int> SeedChatAsync(
+        IDictionary<string, User> userByEmail,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var conversationId = new Guid("88888888-0001-4000-9000-000000000001");
+        var bookingId = new Guid("55555555-0002-4000-9000-000000000002"); // Approved: LEGO Duplo, owner@ ↔ renter@
+        var listingId = DevelopmentSeedData.ListingIds.LegoDuploStarterSet;
+
+        // Idempotent: only insert when this fixed conversation is missing.
+        var alreadyPresent = await _dbContext.Conversations
+            .AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+        if (alreadyPresent)
+        {
+            return 0;
+        }
+
+        if (!userByEmail.TryGetValue(NormalizeEmail(DevelopmentSeedCredentials.OwnerEmail), out var owner) ||
+            !userByEmail.TryGetValue(NormalizeEmail(DevelopmentSeedCredentials.RenterEmail), out var renter))
+        {
+            _logger.LogWarning("Skipping seed chat: owner or renter demo user is missing.");
+            return 0;
+        }
+
+        // The Approved booking backing this thread must exist (in the DB or queued in this same run).
+        var bookingPresent = await _dbContext.Bookings.AnyAsync(booking => booking.Id == bookingId, cancellationToken)
+            || _dbContext.ChangeTracker.Entries<Booking>()
+                .Any(entry => entry.State == EntityState.Added && entry.Entity.Id == bookingId);
+        if (!bookingPresent)
+        {
+            _logger.LogWarning("Skipping seed chat: approved booking {BookingId} is missing.", bookingId);
+            return 0;
+        }
+
+        var toyTitle = DevelopmentSeedData.Listings.First(listing => listing.Id == listingId).Title;
+        var toyImageUrl = await ResolveSeedPrimaryImageUrlAsync(listingId, cancellationToken);
+
+        var conversation = new Conversation
+        {
+            Id = conversationId,
+            BookingId = bookingId,
+            OwnerId = owner.Id,
+            RenterId = renter.Id,
+            ToyTitle = toyTitle,
+            ToyImageUrl = toyImageUrl,
+            ClosedAt = null,
+            CreatedAt = now.AddMinutes(-45)
+        };
+
+        // Four alternating text messages, oldest → newest. The LAST message is from the owner and
+        // is left unread by the renter (see read cursors below).
+        var messages = new[]
+        {
+            new ChatMessage
+            {
+                Id = new Guid("88888888-0003-4000-9000-000000000001"),
+                ConversationId = conversationId,
+                SenderId = renter.Id,
+                Type = MessageType.Text,
+                Body = "Hi! Is the LEGO Duplo set still available for those dates?",
+                CreatedAt = now.AddMinutes(-40)
+            },
+            new ChatMessage
+            {
+                Id = new Guid("88888888-0003-4000-9000-000000000002"),
+                ConversationId = conversationId,
+                SenderId = owner.Id,
+                Type = MessageType.Text,
+                Body = "Yes, it's set aside for you and freshly sanitized.",
+                CreatedAt = now.AddMinutes(-30)
+            },
+            new ChatMessage
+            {
+                Id = new Guid("88888888-0003-4000-9000-000000000003"),
+                ConversationId = conversationId,
+                SenderId = renter.Id,
+                Type = MessageType.Text,
+                Body = "Perfect, thank you! Where should we meet for pickup?",
+                CreatedAt = now.AddMinutes(-20)
+            },
+            new ChatMessage
+            {
+                Id = new Guid("88888888-0003-4000-9000-000000000004"),
+                ConversationId = conversationId,
+                SenderId = owner.Id,
+                Type = MessageType.Text,
+                Body = "Let's meet at 8 Saryan St around 6pm. See you then!",
+                CreatedAt = now.AddMinutes(-10)
+            }
+        };
+
+        var lastMessage = messages[^1];
+        var renterLastRead = messages[^2]; // renter has read up to the message before the owner's final one
+
+        // Denormalised inbox preview from the newest message.
+        conversation.LastMessageId = lastMessage.Id;
+        conversation.LastMessageSnippet = lastMessage.Body;
+        conversation.LastMessageAt = lastMessage.CreatedAt;
+
+        var participants = new[]
+        {
+            // Owner has read everything ⇒ 0 unread; their final message shows as not-yet-seen by the renter.
+            new ConversationParticipant
+            {
+                Id = new Guid("88888888-0002-4000-9000-000000000001"),
+                ConversationId = conversationId,
+                UserId = owner.Id,
+                LastReadMessageId = lastMessage.Id,
+                LastReadAt = now
+            },
+            // Renter has read up to the second-to-last message ⇒ exactly 1 unread (the owner's final message).
+            new ConversationParticipant
+            {
+                Id = new Guid("88888888-0002-4000-9000-000000000002"),
+                ConversationId = conversationId,
+                UserId = renter.Id,
+                LastReadMessageId = renterLastRead.Id,
+                LastReadAt = renterLastRead.CreatedAt
+            }
+        };
+
+        await _dbContext.Conversations.AddAsync(conversation, cancellationToken);
+        await _dbContext.ChatMessages.AddRangeAsync(messages, cancellationToken);
+        await _dbContext.ConversationParticipants.AddRangeAsync(participants, cancellationToken);
+
+        _logger.LogInformation(
+            "Demo seed: created 1 chat conversation with {MessageCount} messages (renter has 1 unread).",
+            messages.Length);
+
+        return 1 + messages.Length + participants.Length;
+    }
+
+    private async Task<string?> ResolveSeedPrimaryImageUrlAsync(Guid listingId, CancellationToken cancellationToken)
+    {
+        var url = await _dbContext.ListingImages
+            .Where(image => image.ListingId == listingId && image.IsPrimary)
+            .OrderBy(image => image.SortOrder)
+            .Select(image => image.Url)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (url is not null)
+        {
+            return url;
+        }
+
+        // On a fresh database the image is queued for insert in this same run (not yet persisted).
+        return _dbContext.ChangeTracker.Entries<ListingImage>()
+            .Where(entry => entry.State == EntityState.Added
+                && entry.Entity.ListingId == listingId
+                && entry.Entity.IsPrimary)
+            .OrderBy(entry => entry.Entity.SortOrder)
+            .Select(entry => entry.Entity.Url)
+            .FirstOrDefault();
+    }
 
     private async Task<string> ResolveImageUrlAsync(
         string sourceUrl, Guid listingId, string fallbackUrl, CancellationToken cancellationToken)

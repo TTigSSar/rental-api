@@ -91,6 +91,7 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
             CategoryName = listing.Category.Name,
             Title = listing.Title,
             PricePerDay = listing.PricePerDay,
+            PriceUnit = listing.PriceUnit,
             Currency = listing.Currency,
             Country = listing.Country,
             City = listing.City,

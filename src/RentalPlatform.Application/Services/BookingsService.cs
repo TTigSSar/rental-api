@@ -33,11 +33,16 @@ public sealed class BookingsService : IBookingsService
 
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IBookingsStore _bookingsStore;
+    private readonly INotificationEmitter _notificationEmitter;
 
-    public BookingsService(ICurrentUserContext currentUserContext, IBookingsStore bookingsStore)
+    public BookingsService(
+        ICurrentUserContext currentUserContext,
+        IBookingsStore bookingsStore,
+        INotificationEmitter notificationEmitter)
     {
         _currentUserContext = currentUserContext;
         _bookingsStore = bookingsStore;
+        _notificationEmitter = notificationEmitter;
     }
 
     public async Task<ServiceResult<BookingResponse>> CreateAsync(
@@ -83,6 +88,9 @@ public sealed class BookingsService : IBookingsService
             RenterId = renter.Id,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
+            // NOTE: assumes a per-DAY rate. Listings now carry a PriceUnit (Hourly/Daily/Weekly/
+            // Monthly/Yearly); once non-daily units are bookable this multiplication must convert
+            // the window to the listing's unit instead of multiplying inclusive days by the amount.
             TotalPrice = inclusiveDays * listing.PricePerDay,
             Status = BookingStatus.Pending,
             ExpiresAt = now.AddHours(24),
@@ -101,6 +109,10 @@ public sealed class BookingsService : IBookingsService
         // Attach the already-loaded listing so MapBooking can read listing fields without a second DB query.
         // listing.Images is an empty collection here (not included), so PrimaryImageUrl will be null.
         booking.Listing = listing;
+
+        // Best-effort: notify the owner of the new request (never breaks the booking).
+        await _notificationEmitter.BookingRequestedAsync(booking, renter, listing, cancellationToken);
+
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
 
@@ -358,6 +370,16 @@ public sealed class BookingsService : IBookingsService
                 booking.RejectionReason = string.IsNullOrEmpty(trimmed) ? null : trimmed;
             }
             await _bookingsStore.SaveChangesAsync(cancellationToken);
+        }
+
+        // Best-effort: notify the renter of the owner's decision.
+        if (decision == BookingStatus.Approved)
+        {
+            await _notificationEmitter.BookingApprovedAsync(booking, owner, cancellationToken);
+        }
+        else if (decision == BookingStatus.Rejected)
+        {
+            await _notificationEmitter.BookingDeclinedAsync(booking, owner, cancellationToken);
         }
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));

@@ -1,3 +1,5 @@
+using RentalPlatform.Domain.Enums;
+
 namespace RentalPlatform.Application.DTOs;
 
 public sealed class ListingDetailsResponse
@@ -6,6 +8,7 @@ public sealed class ListingDetailsResponse
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public decimal PricePerDay { get; init; }
+    public PriceUnit PriceUnit { get; init; }
     public string Currency { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;

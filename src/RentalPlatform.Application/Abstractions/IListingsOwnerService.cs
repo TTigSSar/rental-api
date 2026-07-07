@@ -24,4 +24,8 @@ public interface IListingsOwnerService
         Guid listingId,
         UpdateListingRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<ServiceResult<bool>> ResubmitAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default);
 }

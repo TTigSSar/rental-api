@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.DTOs;
 
@@ -17,6 +18,11 @@ public sealed class CreateListingRequest
 
     [Range(typeof(decimal), "0.01", "999999999999.99", ErrorMessage = "Price per day must be greater than zero.")]
     public decimal PricePerDay { get; init; }
+
+    // The rental period the price applies to (Hourly/Daily/Weekly/Monthly/Yearly).
+    // Optional: defaults to Daily when omitted. Validated to be a defined enum value.
+    [EnumDataType(typeof(PriceUnit), ErrorMessage = "Price unit must be one of Hourly, Daily, Weekly, Monthly, Yearly.")]
+    public PriceUnit? PriceUnit { get; init; }
 
     // Optional: 3-letter ISO code. Defaults to USD when omitted.
     [StringLength(3, MinimumLength = 3, ErrorMessage = "Currency must be a 3-letter ISO code (e.g. USD, AMD).")]

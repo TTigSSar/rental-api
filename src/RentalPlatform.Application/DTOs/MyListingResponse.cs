@@ -10,6 +10,7 @@ public sealed class MyListingResponse
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public decimal PricePerDay { get; init; }
+    public PriceUnit PriceUnit { get; init; }
     public string Currency { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;
@@ -21,6 +22,7 @@ public sealed class MyListingResponse
     public decimal? DepositAmount { get; init; }
     public ListingStatus Status { get; init; }
     public string? RejectionReason { get; init; }
+    public ListingRejectionResponse? Rejection { get; init; }
     public string? PrimaryImageUrl { get; init; }
     public DateTime? ModeratedAt { get; init; }
     public DateTime CreatedAt { get; init; }

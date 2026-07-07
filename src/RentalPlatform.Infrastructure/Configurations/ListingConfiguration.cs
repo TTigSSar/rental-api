@@ -24,6 +24,15 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
             .HasPrecision(18, 2)
             .IsRequired();
 
+        // Persisted as int like the project's other enums (ListingStatus, BookingStatus).
+        // DB default Daily (1) backfills existing rows when the column is added. The sentinel is
+        // Daily (matching the entity initializer) so the store default is only substituted for an
+        // unset/Daily value — an explicitly chosen Hourly (CLR default 0) is still persisted.
+        builder.Property(listing => listing.PriceUnit)
+            .IsRequired()
+            .HasDefaultValue(Domain.Enums.PriceUnit.Daily)
+            .HasSentinel(Domain.Enums.PriceUnit.Daily);
+
         builder.Property(listing => listing.Currency)
             .IsRequired()
             .HasMaxLength(3);
@@ -56,6 +65,12 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
 
         // Moderation fields — all nullable; populated only when an admin acts on the listing.
         builder.Property(listing => listing.RejectionReason)
+            .HasMaxLength(1000);
+
+        builder.Property(listing => listing.RejectionReasonCode)
+            .HasMaxLength(64);
+
+        builder.Property(listing => listing.RejectionNote)
             .HasMaxLength(1000);
 
         builder.Property(listing => listing.ModeratedAt);

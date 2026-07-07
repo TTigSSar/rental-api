@@ -90,6 +90,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             Title = request.Title.Trim(),
             Description = request.Description.Trim(),
             PricePerDay = request.PricePerDay,
+            // Default to Daily when the period is omitted (kept in sync with the entity/DB default).
+            PriceUnit = request.PriceUnit ?? PriceUnit.Daily,
             Currency = string.IsNullOrWhiteSpace(request.Currency) ? "USD" : request.Currency.Trim().ToUpperInvariant(),
             Country = request.Country.Trim(),
             City = request.City.Trim(),
@@ -162,6 +164,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 Title = listing.Title,
                 Description = listing.Description,
                 PricePerDay = listing.PricePerDay,
+                PriceUnit = listing.PriceUnit,
                 Currency = listing.Currency,
                 Country = listing.Country,
                 City = listing.City,
@@ -173,6 +176,16 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 DepositAmount = listing.DepositAmount,
                 Status = listing.Status,
                 RejectionReason = listing.RejectionReason,
+                Rejection = listing.Status == ListingStatus.Rejected && listing.RejectionReasonCode is { } code
+                    ? new ListingRejectionResponse
+                    {
+                        ReasonCode = code,
+                        ReasonLabel = RejectionReasonCatalog.LabelFor(code),
+                        Note = listing.RejectionNote,
+                        ModeratorName = null,
+                        ModeratedAt = listing.ModeratedAt
+                    }
+                    : null,
                 PrimaryImageUrl = listing.Images
                     .OrderByDescending(image => image.IsPrimary)
                     .ThenBy(image => image.SortOrder)
@@ -321,6 +334,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
 
         // Structured, non-content fields — never require re-moderation.
         if (request.PricePerDay is not null) listing.PricePerDay = request.PricePerDay.Value;
+        if (request.PriceUnit is not null) listing.PriceUnit = request.PriceUnit.Value;
         if (request.City is not null) listing.City = request.City.Trim();
         if (request.Country is not null) listing.Country = request.Country.Trim();
         if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
@@ -331,6 +345,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         {
             listing.Status = ListingStatus.PendingApproval;
             listing.RejectionReason = null;
+            listing.RejectionReasonCode = null;
+            listing.RejectionNote = null;
         }
         else if (listing.Status == ListingStatus.Approved && contentChanged)
         {
@@ -341,6 +357,56 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<Guid>.Success(listing.Id);
+    }
+
+    public async Task<ServiceResult<bool>> ResubmitAsync(
+        Guid listingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } ownerId)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
+        if (listing is null)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.NotFound,
+                Message = "Listing not found."
+            });
+        }
+
+        // The wizard saves edits via PATCH (which already flips a rejected listing back to pending)
+        // and then calls resubmit as the explicit "send back for review" step. Treat an
+        // already-pending listing as a successful no-op so that flow is idempotent.
+        if (listing.Status == ListingStatus.PendingApproval)
+        {
+            return ServiceResult<bool>.Success(true);
+        }
+
+        if (listing.Status != ListingStatus.Rejected)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidStatus,
+                Message = "Only rejected listings can be resubmitted for review."
+            });
+        }
+
+        listing.Status = ListingStatus.PendingApproval;
+        listing.RejectionReason = null;
+        listing.RejectionReasonCode = null;
+        listing.RejectionNote = null;
+        listing.UpdatedAt = DateTime.UtcNow;
+        await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<bool>.Success(true);
     }
 
     // Applies a new value and reports whether it actually differed from the current one.

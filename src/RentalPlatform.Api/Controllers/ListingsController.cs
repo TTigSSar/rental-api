@@ -262,6 +262,24 @@ public sealed class ListingsController : ControllerBase
         return FromOwnerError(result.Error);
     }
 
+    [HttpPost("{id:guid}/resubmit")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Resubmit(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await _listingsOwnerService.ResubmitAsync(id, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromOwnerError(result.Error);
+    }
+
     [HttpDelete("{listingId:guid}/images/{imageId:guid}")]
     [Authorize]
     [ProducesResponseType(typeof(IReadOnlyCollection<ListingImageResponse>), StatusCodes.Status200OK)]

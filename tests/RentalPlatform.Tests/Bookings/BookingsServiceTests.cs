@@ -32,7 +32,7 @@ public sealed class BookingsServiceTests
     }
 
     private static BookingsService CreateService(AppDbContext context, Guid currentUserId) =>
-        new(new FakeCurrentUserContext(currentUserId), new BookingsStore(context));
+        new(new FakeCurrentUserContext(currentUserId), new BookingsStore(context), new FakeNotificationEmitter());
 
     [Fact]
     public async Task Create_Rejects_Overlap_With_Pending_Booking()

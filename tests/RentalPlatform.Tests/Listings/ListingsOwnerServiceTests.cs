@@ -28,12 +28,14 @@ public sealed class ListingsOwnerServiceTests
     private static CreateListingRequest ValidCreate(
         Guid? categoryId = null,
         int? ageFromMonths = null,
-        int? ageToMonths = null) => new()
+        int? ageToMonths = null,
+        PriceUnit? priceUnit = null) => new()
     {
         CategoryId = categoryId ?? CategoryId,
         Title = "Wooden Train Set",
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
+        PriceUnit = priceUnit,
         Country = "Armenia",
         City = "Yerevan",
         AgeFromMonths = ageFromMonths,
@@ -56,6 +58,84 @@ public sealed class ListingsOwnerServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(ListingStatus.PendingApproval, result.Value!.Status);
+    }
+
+    [Fact]
+    public async Task Create_Defaults_PriceUnit_To_Daily_When_Omitted()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).CreateAsync(ValidCreate(priceUnit: null));
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(result.Value!.Id);
+        Assert.Equal(PriceUnit.Daily, stored!.PriceUnit);
+    }
+
+    [Fact]
+    public async Task Create_Persists_Explicit_PriceUnit()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        // Hourly is the CLR default (0); persisting it proves the configured store default does not
+        // silently overwrite an explicit choice.
+        var result = await CreateService(context, OwnerId).CreateAsync(ValidCreate(priceUnit: PriceUnit.Hourly));
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(result.Value!.Id);
+        Assert.Equal(PriceUnit.Hourly, stored!.PriceUnit);
+    }
+
+    [Fact]
+    public async Task Update_Changes_PriceUnit_Without_Re_Moderation()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await SeedApprovedListingAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            PriceUnit = PriceUnit.Weekly
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        // Price/unit are structured fields, so an approved listing stays approved.
+        Assert.Equal(ListingStatus.Approved, stored!.Status);
+        Assert.Equal(PriceUnit.Weekly, stored.PriceUnit);
+    }
+
+    [Fact]
+    public async Task Update_Leaves_PriceUnit_Unchanged_When_Omitted()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        // TestData.Listing leaves PriceUnit at the entity default (Daily); the migration's store
+        // default backfills the column to the same value for existing rows.
+        await SeedApprovedListingAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            PricePerDay = 50m
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(PriceUnit.Daily, stored!.PriceUnit);
     }
 
     [Fact]
@@ -180,6 +260,74 @@ public sealed class ListingsOwnerServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("listing.invalid_status", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Resubmit_Moves_Rejected_Listing_Back_To_Pending_And_Clears_Reason()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Rejected);
+        listing.RejectionReason = "Unsafe parts.";
+        listing.RejectionReasonCode = "safety";
+        listing.RejectionNote = "Small detachable wheels.";
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ResubmitAsync(ListingId);
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(ListingStatus.PendingApproval, stored!.Status);
+        Assert.Null(stored.RejectionReason);
+        Assert.Null(stored.RejectionReasonCode);
+        Assert.Null(stored.RejectionNote);
+    }
+
+    [Fact]
+    public async Task Resubmit_Is_Idempotent_When_Already_Pending()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.PendingApproval));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ResubmitAsync(ListingId);
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(ListingStatus.PendingApproval, stored!.Status);
+    }
+
+    [Fact]
+    public async Task Resubmit_Fails_On_Approved_Listing()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await SeedApprovedListingAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ResubmitAsync(ListingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("listing.invalid_status", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Resubmit_Fails_When_Listing_Not_Found()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ResubmitAsync(Guid.NewGuid());
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("listing.not_found", result.Error!.Code);
     }
 
     [Fact]

@@ -66,7 +66,7 @@ public sealed class AdminListingsController : ControllerBase
         [FromBody] RejectListingRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await _adminListingsService.RejectAsync(id, request.Reason, cancellationToken);
+        var result = await _adminListingsService.RejectAsync(id, request.ReasonCode, request.Note, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);

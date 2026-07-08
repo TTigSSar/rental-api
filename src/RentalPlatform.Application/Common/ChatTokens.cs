@@ -40,7 +40,7 @@ public static class ChatTokens
             BookingStatus.Pending => "requested",
             BookingStatus.Approved => "approved",
             BookingStatus.Active => endDate < today ? "return_due" : "active",
-            BookingStatus.Completed => "active",
+            BookingStatus.Completed => "closed",
             // Rejected / Cancelled / Expired have no dedicated pill in the design;
             // fall back to the "requested" token rather than inventing one.
             _ => "requested"

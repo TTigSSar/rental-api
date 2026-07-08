@@ -72,6 +72,39 @@ public static class TestData
         UpdatedAt = DateTime.UtcNow
     };
 
+    public static Conversation Conversation(
+        Guid id,
+        Guid bookingId,
+        Guid ownerId,
+        Guid renterId,
+        Guid? lastMessageId = null,
+        DateTime? lastMessageAt = null) => new()
+    {
+        Id = id,
+        BookingId = bookingId,
+        OwnerId = ownerId,
+        RenterId = renterId,
+        ToyTitle = "LEGO Duplo Starter Set",
+        LastMessageId = lastMessageId,
+        LastMessageAt = lastMessageAt,
+        CreatedAt = DateTime.UtcNow
+    };
+
+    public static ChatMessage ChatMessage(
+        Guid id,
+        Guid conversationId,
+        Guid? senderId,
+        string? body = "Hello",
+        MessageType type = MessageType.Text) => new()
+    {
+        Id = id,
+        ConversationId = conversationId,
+        SenderId = senderId,
+        Type = type,
+        Body = body,
+        CreatedAt = DateTime.UtcNow
+    };
+
     public static ListingImage Image(Guid id, Guid listingId, bool isPrimary, int sortOrder) => new()
     {
         Id = id,

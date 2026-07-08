@@ -153,12 +153,31 @@ public sealed class ConversationsStore : IConversationsStore
             select new { ConversationId = grouped.Key, Count = grouped.Count() })
             .ToDictionaryAsync(row => row.ConversationId, row => row.Count, cancellationToken);
 
+        // Resolve the last message's sender query-time (Conversation only denormalises the
+        // snippet/timestamp, not the sender) so the inbox can flag "You: ..." previews without
+        // adding a denormalised column.
+        var lastMessageIds = conversations
+            .Where(conversation => conversation.LastMessageId != null)
+            .Select(conversation => conversation.LastMessageId!.Value)
+            .ToList();
+
+        var lastMessageSenders = lastMessageIds.Count == 0
+            ? new Dictionary<Guid, Guid?>()
+            : await _dbContext.ChatMessages
+                .AsNoTracking()
+                .Where(message => lastMessageIds.Contains(message.Id))
+                .ToDictionaryAsync(message => message.Id, message => message.SenderId, cancellationToken);
+
         return conversations
             .Select(conversation =>
             {
                 var counterpart = conversation.OwnerId == userId ? conversation.Renter : conversation.Owner;
                 var unread = unreadCounts.TryGetValue(conversation.Id, out var count) ? count : 0;
-                return new ChatConversationListItem(conversation, counterpart, conversation.Booking, unread);
+                var lastMessageSenderId = conversation.LastMessageId is { } lastMessageId
+                    && lastMessageSenders.TryGetValue(lastMessageId, out var senderId)
+                        ? senderId
+                        : null;
+                return new ChatConversationListItem(conversation, counterpart, conversation.Booking, unread, lastMessageSenderId);
             })
             .ToList();
     }

@@ -5,6 +5,10 @@ public sealed class ChatConversationDetailsResponse
 {
     public Guid Id { get; init; }
     public Guid BookingId { get; init; }
+
+    /// <summary>Id of the "other" participant (owner if viewer is renter, renter if viewer is owner).</summary>
+    public Guid CounterpartId { get; init; }
+
     public string CounterpartName { get; init; } = string.Empty;
     public string? CounterpartAvatarUrl { get; init; }
     public bool CounterpartVerified { get; init; }

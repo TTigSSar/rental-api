@@ -47,7 +47,7 @@ public sealed class ChatService : IChatService
 
         var now = DateTime.UtcNow;
         var items = await _store.ListForUserAsync(userId, cancellationToken);
-        var response = items.Select(item => MapListItem(item, now)).ToList();
+        var response = items.Select(item => MapListItem(item, userId, now)).ToList();
 
         return ServiceResult<IReadOnlyCollection<ChatConversationResponse>>.Success(response);
     }
@@ -194,7 +194,7 @@ public sealed class ChatService : IChatService
     private static bool IsParticipant(Conversation conversation, Guid userId) =>
         conversation.OwnerId == userId || conversation.RenterId == userId;
 
-    private static ChatConversationResponse MapListItem(ChatConversationListItem item, DateTime utcNow) => new()
+    private static ChatConversationResponse MapListItem(ChatConversationListItem item, Guid userId, DateTime utcNow) => new()
     {
         Id = item.Conversation.Id,
         BookingId = item.Conversation.BookingId,
@@ -205,6 +205,7 @@ public sealed class ChatService : IChatService
         Status = ChatTokens.StatusToken(item.Booking.Status, item.Booking.EndDate, item.Conversation.ClosedAt, utcNow),
         LastMessageSnippet = item.Conversation.LastMessageSnippet,
         LastMessageAt = item.Conversation.LastMessageAt,
+        LastMessageIsMine = item.LastMessageSenderId == userId,
         UnreadCount = item.UnreadCount
     };
 
@@ -212,6 +213,7 @@ public sealed class ChatService : IChatService
     {
         Id = details.Conversation.Id,
         BookingId = details.Conversation.BookingId,
+        CounterpartId = details.Conversation.OwnerId == userId ? details.Conversation.RenterId : details.Conversation.OwnerId,
         CounterpartName = DisplayName(details.Counterpart),
         CounterpartAvatarUrl = details.Counterpart.AvatarUrl,
         CounterpartVerified = details.Counterpart.IsEmailConfirmed && details.Counterpart.IsPhoneConfirmed,

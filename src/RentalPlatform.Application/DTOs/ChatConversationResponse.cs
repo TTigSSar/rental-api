@@ -15,5 +15,9 @@ public sealed class ChatConversationResponse
 
     public string? LastMessageSnippet { get; init; }
     public DateTime? LastMessageAt { get; init; }
+
+    /// <summary>True when the conversation's last message was sent by the current user (false if none, or a system message).</summary>
+    public bool LastMessageIsMine { get; init; }
+
     public int UnreadCount { get; init; }
 }

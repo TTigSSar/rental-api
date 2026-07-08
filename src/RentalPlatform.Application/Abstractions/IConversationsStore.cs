@@ -4,11 +4,16 @@ using RentalPlatform.Domain.Enums;
 namespace RentalPlatform.Application.Abstractions;
 
 /// <summary>An inbox row: a conversation plus the current user's view of it.</summary>
+/// <param name="LastMessageSenderId">
+/// Sender of the conversation's last message. Null when there is no last message, or it was a
+/// system message (system messages have a null sender).
+/// </param>
 public sealed record ChatConversationListItem(
     Conversation Conversation,
     User Counterpart,
     Booking Booking,
-    int UnreadCount);
+    int UnreadCount,
+    Guid? LastMessageSenderId);
 
 /// <summary>Full conversation view: the thread, its context, and a page of messages.</summary>
 public sealed record ChatConversationDetails(

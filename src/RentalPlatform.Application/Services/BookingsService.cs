@@ -34,15 +34,18 @@ public sealed class BookingsService : IBookingsService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IBookingsStore _bookingsStore;
     private readonly INotificationEmitter _notificationEmitter;
+    private readonly IChatSystemMessageEmitter _chatSystemMessageEmitter;
 
     public BookingsService(
         ICurrentUserContext currentUserContext,
         IBookingsStore bookingsStore,
-        INotificationEmitter notificationEmitter)
+        INotificationEmitter notificationEmitter,
+        IChatSystemMessageEmitter chatSystemMessageEmitter)
     {
         _currentUserContext = currentUserContext;
         _bookingsStore = bookingsStore;
         _notificationEmitter = notificationEmitter;
+        _chatSystemMessageEmitter = chatSystemMessageEmitter;
     }
 
     public async Task<ServiceResult<BookingResponse>> CreateAsync(
@@ -112,6 +115,9 @@ public sealed class BookingsService : IBookingsService
 
         // Best-effort: notify the owner of the new request (never breaks the booking).
         await _notificationEmitter.BookingRequestedAsync(booking, renter, listing, cancellationToken);
+
+        // Best-effort: drop a "Booking requested." system line into the booking's chat thread.
+        await _chatSystemMessageEmitter.BookingRequestedAsync(booking, cancellationToken);
 
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
@@ -244,6 +250,9 @@ public sealed class BookingsService : IBookingsService
         booking.UpdatedAt = now;
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
+        // Best-effort: drop a "Toy handed over…" system line into the booking's chat thread.
+        await _chatSystemMessageEmitter.BookingHandedOverAsync(booking, cancellationToken);
+
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
     }
 
@@ -273,6 +282,9 @@ public sealed class BookingsService : IBookingsService
         booking.CompletedAt = now;
         booking.UpdatedAt = now;
         await _bookingsStore.SaveChangesAsync(cancellationToken);
+
+        // Best-effort: drop a "The rental is complete." system line into the booking's chat thread.
+        await _chatSystemMessageEmitter.BookingCompletedAsync(booking, cancellationToken);
 
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
     }
@@ -376,6 +388,10 @@ public sealed class BookingsService : IBookingsService
         if (decision == BookingStatus.Approved)
         {
             await _notificationEmitter.BookingApprovedAsync(booking, owner, cancellationToken);
+
+            // Best-effort: drop an "approved" system line into the booking's chat thread.
+            // (Declined has no ChatSystemKind — no system message on rejection.)
+            await _chatSystemMessageEmitter.BookingApprovedAsync(booking, cancellationToken);
         }
         else if (decision == BookingStatus.Rejected)
         {

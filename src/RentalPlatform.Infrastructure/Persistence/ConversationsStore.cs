@@ -46,10 +46,39 @@ public sealed class ConversationsStore : IConversationsStore
             return null;
         }
 
+        return existing ?? await CreateConversationAsync(booking, cancellationToken);
+    }
+
+    public async Task<Conversation?> GetOrCreateForBookingSystemAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await _dbContext.Conversations
+            .FirstOrDefaultAsync(conversation => conversation.BookingId == bookingId, cancellationToken);
         if (existing is not null)
         {
             return existing;
         }
+
+        var booking = await _dbContext.Bookings
+            .Include(entity => entity.Listing)
+                .ThenInclude(listing => listing.Images)
+            .FirstOrDefaultAsync(entity => entity.Id == bookingId, cancellationToken);
+
+        if (booking is null)
+        {
+            return null;
+        }
+
+        return await CreateConversationAsync(booking, cancellationToken);
+    }
+
+    // Shared by both get-or-create entry points once each has resolved (and, where relevant,
+    // participant-checked) the booking: builds the conversation + its two participant rows.
+    private async Task<Conversation> CreateConversationAsync(Booking booking, CancellationToken cancellationToken)
+    {
+        var ownerId = booking.Listing.OwnerId;
+        var renterId = booking.RenterId;
 
         var primaryImage = booking.Listing.Images
             .OrderByDescending(image => image.IsPrimary)
@@ -60,7 +89,7 @@ public sealed class ConversationsStore : IConversationsStore
         var conversation = new Conversation
         {
             Id = Guid.NewGuid(),
-            BookingId = bookingId,
+            BookingId = booking.Id,
             OwnerId = ownerId,
             RenterId = renterId,
             ToyTitle = booking.Listing.Title,
@@ -205,6 +234,53 @@ public sealed class ConversationsStore : IConversationsStore
         conversation.LastMessageSnippet = content.Length > SnippetMaxLength
             ? content[..SnippetMaxLength]
             : content;
+        conversation.LastMessageAt = now;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return message;
+    }
+
+    public async Task<ChatMessage?> AddSystemMessageAsync(
+        Guid conversationId,
+        ChatSystemKind kind,
+        string body,
+        CancellationToken cancellationToken = default)
+    {
+        // Idempotency: a booking transition fires once, but guard against a retry re-inserting
+        // the same system line by checking for an existing message of this kind in the thread.
+        var alreadyExists = await _dbContext.ChatMessages
+            .AnyAsync(
+                message => message.ConversationId == conversationId
+                    && message.Type == MessageType.System
+                    && message.SystemKind == kind,
+                cancellationToken);
+
+        if (alreadyExists)
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        var message = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            SenderId = null,
+            Type = MessageType.System,
+            SystemKind = kind,
+            Body = body,
+            CreatedAt = now
+        };
+
+        await _dbContext.ChatMessages.AddAsync(message, cancellationToken);
+
+        var conversation = await _dbContext.Conversations
+            .FirstAsync(entity => entity.Id == conversationId, cancellationToken);
+        conversation.LastMessageId = message.Id;
+        conversation.LastMessageSnippet = body.Length > SnippetMaxLength
+            ? body[..SnippetMaxLength]
+            : body;
         conversation.LastMessageAt = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);

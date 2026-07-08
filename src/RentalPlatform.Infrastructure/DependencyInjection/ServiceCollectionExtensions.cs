@@ -63,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INotificationsService, NotificationsService>();
         services.AddScoped<INotificationEmitter, NotificationEmitter>();
         services.AddScoped<IChatService, ChatService>();
+        services.AddScoped<IChatSystemMessageEmitter, ChatSystemMessageEmitter>();
         services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();
         services.AddScoped<IBookingsStore, BookingsStore>();
         services.AddScoped<IFavoritesStore, FavoritesStore>();

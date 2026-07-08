@@ -1,4 +1,5 @@
 using RentalPlatform.Domain.Entities;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Abstractions;
 
@@ -28,6 +29,14 @@ public interface IConversationsStore
     /// </summary>
     Task<Conversation?> GetOrCreateForBookingAsync(Guid bookingId, Guid currentUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// System-context get-or-create: returns the conversation for a booking, creating it (and the
+    /// two participant rows) on first access, WITHOUT a caller-participant check — used by booking
+    /// lifecycle events (see <see cref="IChatSystemMessageEmitter"/>), which are authoritative and
+    /// have no acting "current user". Null only when the booking does not exist.
+    /// </summary>
+    Task<Conversation?> GetOrCreateForBookingSystemAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
     /// <summary>Conversations where the user is owner or renter, newest activity first (nulls last).</summary>
     Task<IReadOnlyList<ChatConversationListItem>> ListForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
@@ -44,6 +53,14 @@ public interface IConversationsStore
 
     /// <summary>Inserts a Text message and refreshes the conversation's denormalised preview fields.</summary>
     Task<ChatMessage> AddTextMessageAsync(Guid conversationId, Guid senderId, string content, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Inserts a System message (null sender) for the given kind and refreshes the conversation's
+    /// denormalised preview fields, unless a System message of that same kind already exists in
+    /// this conversation — a booking transition fires once, but the emit is made idempotent against
+    /// retries. Returns null when skipped as a duplicate.
+    /// </summary>
+    Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, CancellationToken cancellationToken = default);
 
     /// <summary>Advances this participant's read cursor to the latest message. False when not a participant.</summary>
     Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default);

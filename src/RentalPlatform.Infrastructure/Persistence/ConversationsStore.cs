@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
@@ -10,10 +11,12 @@ public sealed class ConversationsStore : IConversationsStore
     private const int SnippetMaxLength = 500;
 
     private readonly AppDbContext _dbContext;
+    private readonly ILogger<ConversationsStore> _logger;
 
-    public ConversationsStore(AppDbContext dbContext)
+    public ConversationsStore(AppDbContext dbContext, ILogger<ConversationsStore> logger)
     {
         _dbContext = dbContext;
+        _logger = logger;
     }
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
@@ -339,5 +342,36 @@ public sealed class ConversationsStore : IConversationsStore
 
         await _dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<bool> CloseForBookingAsync(
+        Guid bookingId,
+        DateTime closedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var conversation = await _dbContext.Conversations
+                .FirstOrDefaultAsync(conversation => conversation.BookingId == bookingId, cancellationToken);
+
+            if (conversation is null || conversation.ClosedAt is not null)
+            {
+                return false;
+            }
+
+            conversation.ClosedAt = closedAtUtc;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            // Best-effort, mirrors IChatSystemMessageEmitter: never let a failure here break the
+            // review submission or booking completion that triggered it.
+            _logger.LogError(
+                exception,
+                "Failed to close chat conversation for booking {BookingId}.",
+                bookingId);
+            return false;
+        }
     }
 }

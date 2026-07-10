@@ -23,11 +23,16 @@ public sealed class ReviewsService : IReviewsService
 
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IReviewsStore _reviewsStore;
+    private readonly IConversationsStore _conversationsStore;
 
-    public ReviewsService(ICurrentUserContext currentUserContext, IReviewsStore reviewsStore)
+    public ReviewsService(
+        ICurrentUserContext currentUserContext,
+        IReviewsStore reviewsStore,
+        IConversationsStore conversationsStore)
     {
         _currentUserContext = currentUserContext;
         _reviewsStore = reviewsStore;
+        _conversationsStore = conversationsStore;
     }
 
     public async Task<ServiceResult<BookingReviewStatusResponse>> SubmitToyReviewAsync(
@@ -96,6 +101,8 @@ public sealed class ReviewsService : IReviewsService
             CreatedAt = DateTime.UtcNow
         }, cancellationToken);
 
+        await CloseConversationIfBothReviewsInAsync(booking, cancellationToken);
+
         return await BuildStatusAsync(callerId, booking, cancellationToken);
     }
 
@@ -129,6 +136,8 @@ public sealed class ReviewsService : IReviewsService
             Comment = NormalizeComment(request.Comment),
             CreatedAt = DateTime.UtcNow
         }, cancellationToken);
+
+        await CloseConversationIfBothReviewsInAsync(booking, cancellationToken);
 
         return await BuildStatusAsync(callerId, booking, cancellationToken);
     }
@@ -285,6 +294,28 @@ public sealed class ReviewsService : IReviewsService
             CanReviewOwner = completed && isRenter && !hasOwner,
             CanReviewRenter = completed && isOwner && !hasRenter
         });
+    }
+
+    // ADR-001 read-only chat lock: a booking's conversation closes once the booking is Completed
+    // AND both party reviews (renter's review of the owner + owner's review of the renter) are
+    // in. The toy review does not gate this. Called after each of those two review submissions —
+    // whichever lands second is the one that actually closes it. Best-effort: the store call
+    // never throws (see IConversationsStore.CloseForBookingAsync), so no try/catch is needed here.
+    private async Task CloseConversationIfBothReviewsInAsync(Booking booking, CancellationToken cancellationToken)
+    {
+        if (booking.Status != BookingStatus.Completed)
+        {
+            return;
+        }
+
+        var hasOwner = await _reviewsStore.HasOwnerReviewAsync(booking.Id, cancellationToken);
+        var hasRenter = await _reviewsStore.HasRenterReviewAsync(booking.Id, cancellationToken);
+        if (!hasOwner || !hasRenter)
+        {
+            return;
+        }
+
+        await _conversationsStore.CloseForBookingAsync(booking.Id, DateTime.UtcNow, cancellationToken);
     }
 
     private static ReviewCommentResponse MapComment(

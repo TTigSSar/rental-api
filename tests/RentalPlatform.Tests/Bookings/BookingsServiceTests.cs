@@ -1,5 +1,8 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Application.Services;
+using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
 using RentalPlatform.Tests.TestSupport;
@@ -36,7 +39,9 @@ public sealed class BookingsServiceTests
             new FakeCurrentUserContext(currentUserId),
             new BookingsStore(context),
             new FakeNotificationEmitter(),
-            new FakeChatSystemMessageEmitter());
+            new FakeChatSystemMessageEmitter(),
+            new ReviewsStore(context),
+            new ConversationsStore(context, NullLogger<ConversationsStore>.Instance));
 
     [Fact]
     public async Task Create_Rejects_Overlap_With_Pending_Booking()
@@ -489,6 +494,57 @@ public sealed class BookingsServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("booking.not_completable", result.Error!.Code);
+    }
+
+    // ADR-001 read-only chat lock, completion-side ordering: normally ReviewsService closes the
+    // conversation on the last review submission (reviews require the booking to already be
+    // Completed). This covers the defensive "somehow already in" ordering by pre-seeding both
+    // party reviews before completion runs, so CompleteAsync's own both-reviews-in check is what
+    // closes the conversation.
+    [Fact]
+    public async Task Complete_Closes_Conversation_When_Both_Reviews_Already_Recorded()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = await SeedApprovedReturnableAsync(db);
+        var conversationId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Conversation(conversationId, bookingId, OwnerId, RenterId));
+        await db.SeedAsync(
+            new OwnerReview
+            {
+                Id = Guid.NewGuid(),
+                BookingId = bookingId,
+                OwnerId = OwnerId,
+                ReviewerId = RenterId,
+                CommunicationRating = 5,
+                PickupHandoverRating = 5,
+                FriendlinessRating = 5,
+                CreatedAt = DateTime.UtcNow
+            },
+            new RenterReview
+            {
+                Id = Guid.NewGuid(),
+                BookingId = bookingId,
+                RenterId = RenterId,
+                ReviewerId = OwnerId,
+                CommunicationRating = 5,
+                ReturnedOnTimeRating = 5,
+                CareOfToyRating = 5,
+                WouldRentAgainRating = 5,
+                CreatedAt = DateTime.UtcNow
+            });
+
+        await using (var activateContext = db.CreateContext())
+        {
+            await CreateService(activateContext, OwnerId).MarkActiveAsync(bookingId);
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).CompleteAsync(bookingId);
+        Assert.True(result.IsSuccess);
+
+        var conversation = await context.Conversations.SingleAsync(c => c.Id == conversationId);
+        Assert.NotNull(conversation.ClosedAt);
     }
 
     [Theory]

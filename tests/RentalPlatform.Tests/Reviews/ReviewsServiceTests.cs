@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
@@ -35,7 +37,10 @@ public sealed class ReviewsServiceTests
     }
 
     private static ReviewsService CreateService(AppDbContext context, Guid? callerId) =>
-        new(new FakeCurrentUserContext(callerId), new ReviewsStore(context));
+        new(
+            new FakeCurrentUserContext(callerId),
+            new ReviewsStore(context),
+            new ConversationsStore(context, NullLogger<ConversationsStore>.Instance));
 
     private static CreateToyReviewRequest ToyRequest(Guid bookingId, int overall = 5, string? comment = null) => new()
     {
@@ -318,5 +323,96 @@ public sealed class ReviewsServiceTests
 
         // PastEnd - PastStart inclusive = 8 days.
         Assert.Equal(PastEnd.DayNumber - PastStart.DayNumber + 1, summary.Comments.First().RentedDays);
+    }
+
+    // --- ADR-001: read-only chat lock (Conversation.ClosedAt) ---
+    // "Both reviews in" = the two-party pair (renter's review of the owner + owner's review of
+    // the renter) tracked by HasOwnerReviewAsync/HasRenterReviewAsync — the toy review does not
+    // gate this (see ReviewsService.CloseConversationIfBothReviewsInAsync).
+
+    [Fact]
+    public async Task Submitting_Both_Party_Reviews_Closes_Conversation()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        var conversationId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Conversation(conversationId, bookingId, OwnerId, RenterId));
+
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitOwnerReviewAsync(OwnerRequest(bookingId));
+
+        await using (var mid = db.CreateContext())
+        {
+            var stillOpen = await mid.Conversations.SingleAsync(c => c.Id == conversationId);
+            Assert.Null(stillOpen.ClosedAt); // only one of the two party reviews is in so far
+        }
+
+        await using (var ctx2 = db.CreateContext())
+            await CreateService(ctx2, OwnerId).SubmitRenterReviewAsync(RenterRequest(bookingId));
+
+        await using var read = db.CreateContext();
+        var conversation = await read.Conversations.SingleAsync(c => c.Id == conversationId);
+        Assert.NotNull(conversation.ClosedAt);
+
+        var chatService = new ChatService(
+            new FakeCurrentUserContext(RenterId),
+            new ConversationsStore(read, NullLogger<ConversationsStore>.Instance),
+            new BookingsStore(read),
+            new FakeChatRealtimeNotifier());
+        var details = await chatService.GetConversationAsync(conversationId, page: null, pageSize: null);
+
+        Assert.True(details.IsSuccess);
+        Assert.True(details.Value!.IsClosed);
+    }
+
+    [Fact]
+    public async Task Submitting_Only_One_Party_Review_Leaves_Conversation_Open()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        var conversationId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Conversation(conversationId, bookingId, OwnerId, RenterId));
+
+        await using (var ctx1 = db.CreateContext())
+            await CreateService(ctx1, RenterId).SubmitOwnerReviewAsync(OwnerRequest(bookingId));
+
+        // Toy review is deliberately not part of the gate — submitting it too should not close
+        // the conversation while the renter-review side of the pair is still missing.
+        await using (var ctx2 = db.CreateContext())
+            await CreateService(ctx2, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
+
+        await using var read = db.CreateContext();
+        var conversation = await read.Conversations.SingleAsync(c => c.Id == conversationId);
+        Assert.Null(conversation.ClosedAt);
+    }
+
+    [Fact]
+    public async Task CloseForBookingAsync_Is_Idempotent_And_Does_Not_Move_An_Already_Set_ClosedAt()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        var conversationId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Conversation(conversationId, bookingId, OwnerId, RenterId));
+
+        var firstClosedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var secondClosedAt = firstClosedAt.AddHours(1);
+
+        await using (var ctx1 = db.CreateContext())
+        {
+            var closedNow = await new ConversationsStore(ctx1, NullLogger<ConversationsStore>.Instance)
+                .CloseForBookingAsync(bookingId, firstClosedAt);
+            Assert.True(closedNow);
+        }
+
+        await using (var ctx2 = db.CreateContext())
+        {
+            var closedAgain = await new ConversationsStore(ctx2, NullLogger<ConversationsStore>.Instance)
+                .CloseForBookingAsync(bookingId, secondClosedAt);
+            Assert.False(closedAgain); // already closed — second trigger is a no-op
+        }
+
+        await using var read = db.CreateContext();
+        var conversation = await read.Conversations.SingleAsync(c => c.Id == conversationId);
+        Assert.Equal(firstClosedAt, conversation.ClosedAt);
     }
 }

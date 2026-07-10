@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
@@ -39,7 +40,7 @@ public sealed class ChatServiceTests
     private static ChatService CreateService(AppDbContext context, Guid currentUserId) =>
         new(
             new FakeCurrentUserContext(currentUserId),
-            new ConversationsStore(context),
+            new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
             new BookingsStore(context),
             new FakeChatRealtimeNotifier());
 

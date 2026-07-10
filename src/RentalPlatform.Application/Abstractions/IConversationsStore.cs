@@ -69,4 +69,14 @@ public interface IConversationsStore
 
     /// <summary>Advances this participant's read cursor to the latest message. False when not a participant.</summary>
     Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes the booking's conversation (sets <c>ClosedAt</c>) for the read-only chat lock — per
+    /// ADR-001, triggered once a booking is Completed AND both party reviews (owner review + renter
+    /// review) are in. Idempotent: a no-op when the conversation does not exist or is already closed.
+    /// Best-effort like <see cref="IChatSystemMessageEmitter"/>: implementations MUST NOT throw —
+    /// failures are logged internally and swallowed so this can never break review submission or
+    /// booking completion. Returns true only when this call is the one that closed it.
+    /// </summary>
+    Task<bool> CloseForBookingAsync(Guid bookingId, DateTime closedAtUtc, CancellationToken cancellationToken = default);
 }

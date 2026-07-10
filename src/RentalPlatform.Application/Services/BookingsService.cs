@@ -35,17 +35,23 @@ public sealed class BookingsService : IBookingsService
     private readonly IBookingsStore _bookingsStore;
     private readonly INotificationEmitter _notificationEmitter;
     private readonly IChatSystemMessageEmitter _chatSystemMessageEmitter;
+    private readonly IReviewsStore _reviewsStore;
+    private readonly IConversationsStore _conversationsStore;
 
     public BookingsService(
         ICurrentUserContext currentUserContext,
         IBookingsStore bookingsStore,
         INotificationEmitter notificationEmitter,
-        IChatSystemMessageEmitter chatSystemMessageEmitter)
+        IChatSystemMessageEmitter chatSystemMessageEmitter,
+        IReviewsStore reviewsStore,
+        IConversationsStore conversationsStore)
     {
         _currentUserContext = currentUserContext;
         _bookingsStore = bookingsStore;
         _notificationEmitter = notificationEmitter;
         _chatSystemMessageEmitter = chatSystemMessageEmitter;
+        _reviewsStore = reviewsStore;
+        _conversationsStore = conversationsStore;
     }
 
     public async Task<ServiceResult<BookingResponse>> CreateAsync(
@@ -285,6 +291,16 @@ public sealed class BookingsService : IBookingsService
 
         // Best-effort: drop a "The rental is complete." system line into the booking's chat thread.
         await _chatSystemMessageEmitter.BookingCompletedAsync(booking, cancellationToken);
+
+        // Covers the (unusual) ordering where both party reviews were already submitted before
+        // completion — normally the last review submission (ReviewsService) is what closes the
+        // conversation for the ADR-001 read-only lock. Best-effort, mirrors the emitter above.
+        var hasOwnerReview = await _reviewsStore.HasOwnerReviewAsync(booking.Id, cancellationToken);
+        var hasRenterReview = await _reviewsStore.HasRenterReviewAsync(booking.Id, cancellationToken);
+        if (hasOwnerReview && hasRenterReview)
+        {
+            await _conversationsStore.CloseForBookingAsync(booking.Id, now, cancellationToken);
+        }
 
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
     }

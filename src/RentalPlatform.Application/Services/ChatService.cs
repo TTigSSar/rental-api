@@ -9,6 +9,7 @@ public sealed class ChatService : IChatService
 {
     private const int DefaultPageSize = 50;
     private const int MaxPageSize = 100;
+    public const int MaxContentLength = 4000;
 
     private static class ErrorCodes
     {
@@ -18,6 +19,7 @@ public sealed class ChatService : IChatService
         public const string ConversationNotFound = "chat.conversation_not_found";
         public const string BookingNotFound = "chat.booking_not_found";
         public const string ConversationClosed = "chat.conversation_closed";
+        public const string MessageTooLong = "chat.message_too_long";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -136,6 +138,11 @@ public sealed class ChatService : IChatService
         if (user.IsBlocked)
         {
             return Failure<ChatMessageResponse>(ErrorCodes.UserBlocked, "Blocked users cannot send messages.");
+        }
+
+        if (request.Content.Length > MaxContentLength)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.MessageTooLong, "Message content must be 4000 characters or fewer.");
         }
 
         var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);

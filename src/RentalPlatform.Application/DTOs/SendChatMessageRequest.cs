@@ -9,6 +9,5 @@ public sealed class SendChatMessageRequest
     public Guid ConversationId { get; init; }
 
     [Required]
-    [MaxLength(4000)]
     public string Content { get; init; } = string.Empty;
 }

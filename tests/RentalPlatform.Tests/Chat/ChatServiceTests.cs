@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using RentalPlatform.Application.DTOs;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
@@ -154,5 +156,49 @@ public sealed class ChatServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(OwnerId, result.Value!.CounterpartId);
+    }
+
+    [Fact]
+    public async Task SendMessage_Fails_When_Content_Exceeds_MaxContentLength()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var request = new SendChatMessageRequest
+        {
+            ConversationId = ConversationId,
+            Content = new string('a', ChatService.MaxContentLength + 1)
+        };
+
+        var result = await service.SendMessageAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.message_too_long", result.Error!.Code);
+
+        await using var verifyContext = db.CreateContext();
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task SendMessage_Succeeds_When_Content_Is_Exactly_MaxContentLength()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var request = new SendChatMessageRequest
+        {
+            ConversationId = ConversationId,
+            Content = new string('a', ChatService.MaxContentLength)
+        };
+
+        var result = await service.SendMessageAsync(request);
+
+        Assert.True(result.IsSuccess);
     }
 }

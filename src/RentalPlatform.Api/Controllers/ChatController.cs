@@ -119,6 +119,7 @@ public sealed class ChatController : ControllerBase
             "chat.conversation_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "chat.booking_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "chat.conversation_closed" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
+            "chat.message_too_long" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

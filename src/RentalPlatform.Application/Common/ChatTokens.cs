@@ -6,6 +6,11 @@ namespace RentalPlatform.Application.Common;
 // renders. The conversation status pill is DERIVED (ADR-001): it is not stored, but
 // computed from the linked booking's status + the conversation's ClosedAt. Kept here
 // so the contract lives in one place.
+//
+// Derived pill progression: requested -> approved -> active -> return_due -> completed -> closed.
+// "completed" means the booking is Completed but the conversation hasn't locked yet
+// (ClosedAt is still null, e.g. both party reviews aren't in yet per M-010); "closed"
+// is the terminal, read-only state and is produced ONLY by the ClosedAt override below.
 public static class ChatTokens
 {
     public static string MessageTypeToken(MessageType type) => type switch
@@ -40,7 +45,7 @@ public static class ChatTokens
             BookingStatus.Pending => "requested",
             BookingStatus.Approved => "approved",
             BookingStatus.Active => endDate < today ? "return_due" : "active",
-            BookingStatus.Completed => "closed",
+            BookingStatus.Completed => "completed",
             // Rejected / Cancelled / Expired have no dedicated pill in the design;
             // fall back to the "requested" token rather than inventing one.
             _ => "requested"

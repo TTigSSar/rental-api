@@ -6,7 +6,8 @@ namespace RentalPlatform.Tests.Chat;
 
 // StatusToken derives the chat thread's booking-context status pill (ADR-001) from the
 // linked booking's status + the conversation's ClosedAt override. See M-007: Completed
-// bookings must resolve to the terminal "closed" pill, not "active".
+// bookings must resolve to a dedicated "completed" pill (not "active", and not "closed"
+// either — the conversation only truly closes once ClosedAt is set, per M-010).
 public sealed class ChatTokensTests
 {
     private static readonly DateTime UtcNow = new(2026, 7, 8, 12, 0, 0, DateTimeKind.Utc);
@@ -45,19 +46,31 @@ public sealed class ChatTokensTests
     }
 
     [Fact]
-    public void Completed_Maps_To_Closed()
+    public void Completed_With_Null_ClosedAt_Maps_To_Completed()
     {
         // M-007 regression: Completed previously mapped to "active", leaving the chat
-        // header pill stuck on "Active" forever after the booking finished.
+        // header pill stuck on "Active" forever after the booking finished. It now maps
+        // to its own "completed" token (not "closed") until the conversation actually
+        // locks (ClosedAt set once both party reviews are in — see M-010).
         var token = ChatTokens.StatusToken(BookingStatus.Completed, Today.AddDays(-10), closedAt: null, UtcNow);
 
-        Assert.Equal("closed", token);
+        Assert.Equal("completed", token);
     }
 
     [Fact]
     public void NonNull_ClosedAt_Overrides_To_Closed_Regardless_Of_Booking_Status()
     {
         var token = ChatTokens.StatusToken(BookingStatus.Active, Today.AddDays(5), closedAt: UtcNow, UtcNow);
+
+        Assert.Equal("closed", token);
+    }
+
+    [Fact]
+    public void Completed_With_NonNull_ClosedAt_Still_Maps_To_Closed()
+    {
+        // The ClosedAt override wins even for a Completed booking — "completed" only
+        // applies while ClosedAt is still null.
+        var token = ChatTokens.StatusToken(BookingStatus.Completed, Today.AddDays(-10), closedAt: UtcNow, UtcNow);
 
         Assert.Equal("closed", token);
     }

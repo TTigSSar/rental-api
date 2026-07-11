@@ -2,6 +2,7 @@ using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Entities;
+using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Services;
 
@@ -25,20 +26,27 @@ public sealed class ChatService : IChatService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IConversationsStore _store;
     private readonly IBookingsStore _bookingsStore;
+    private readonly IReviewsStore _reviewsStore;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
 
     public ChatService(
         ICurrentUserContext currentUserContext,
         IConversationsStore store,
         IBookingsStore bookingsStore,
+        IReviewsStore reviewsStore,
         IChatRealtimeNotifier realtimeNotifier)
     {
         _currentUserContext = currentUserContext;
         _store = store;
         _bookingsStore = bookingsStore;
+        _reviewsStore = reviewsStore;
         _realtimeNotifier = realtimeNotifier;
     }
 
+    // Note: this inbox list intentionally does NOT run the TryLazyCloseAsync self-heal per row —
+    // that would be N booking/review lookups for a list endpoint. A stale "completed" pill here
+    // (instead of "closed") self-heals as soon as the user opens that thread (GetConversationAsync)
+    // or tries to send into it (SendMessageAsync), both of which do run it.
     public async Task<ServiceResult<IReadOnlyCollection<ChatConversationResponse>>> GetConversationsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -77,6 +85,14 @@ public sealed class ChatService : IChatService
         if (!IsParticipant(details.Conversation, userId))
         {
             return Failure<ChatConversationDetailsResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
+        }
+
+        if (details.Conversation.ClosedAt is null && await TryLazyCloseAsync(details.Conversation, cancellationToken))
+        {
+            // Rare path (only when this call is the one that just closed it): re-fetch so the
+            // mapped response carries IsClosed/status "closed" instead of a stale snapshot.
+            details = await _store.GetDetailsAsync(conversationId, userId, normalizedPage, normalizedPageSize, cancellationToken)
+                ?? details;
         }
 
         return ServiceResult<ChatConversationDetailsResponse>.Success(MapDetails(details, userId, DateTime.UtcNow));
@@ -161,6 +177,11 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
         }
 
+        if (await TryLazyCloseAsync(conversation, cancellationToken))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
+        }
+
         var message = await _store.AddTextMessageAsync(request.ConversationId, userId, request.Content, cancellationToken);
 
         // A brand-new message cannot yet have been read by the counterpart, so Seen is false.
@@ -200,6 +221,39 @@ public sealed class ChatService : IChatService
 
     private static bool IsParticipant(Conversation conversation, Guid userId) =>
         conversation.OwnerId == userId || conversation.RenterId == userId;
+
+    // Opportunistic self-heal for the ADR-001 read-only chat lock. Normally a conversation closes
+    // the moment both party reviews land (ReviewsService.CloseConversationIfBothReviewsInAsync) or,
+    // defensively, when a booking completes with both reviews already in (BookingsService.CompleteAsync).
+    // If either of those close events fired while the process was running an older build that
+    // predated the M-010 fix, ClosedAt is never set and nothing else ever re-checks it — the
+    // conversation stays open forever even though the booking/reviews already satisfy the close
+    // condition. This re-derives that condition on the next chat read/write touching the
+    // conversation, mirroring the opportunistic IBookingsStore.ExpirePendingAsync pattern (no
+    // background job). Cheap in the common case: returns immediately once already closed or the
+    // booking isn't Completed, so no review queries run on the hot path.
+    private async Task<bool> TryLazyCloseAsync(Conversation conversation, CancellationToken cancellationToken)
+    {
+        if (conversation.ClosedAt is not null)
+        {
+            return false;
+        }
+
+        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(conversation.BookingId, cancellationToken);
+        if (booking is null || booking.Status != BookingStatus.Completed)
+        {
+            return false;
+        }
+
+        var hasOwnerReview = await _reviewsStore.HasOwnerReviewAsync(conversation.BookingId, cancellationToken);
+        var hasRenterReview = await _reviewsStore.HasRenterReviewAsync(conversation.BookingId, cancellationToken);
+        if (!hasOwnerReview || !hasRenterReview)
+        {
+            return false;
+        }
+
+        return await _store.CloseForBookingAsync(conversation.BookingId, DateTime.UtcNow, cancellationToken);
+    }
 
     private static ChatConversationResponse MapListItem(ChatConversationListItem item, Guid userId, DateTime utcNow) => new()
     {

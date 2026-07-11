@@ -358,6 +358,7 @@ public sealed class ReviewsServiceTests
             new FakeCurrentUserContext(RenterId),
             new ConversationsStore(read, NullLogger<ConversationsStore>.Instance),
             new BookingsStore(read),
+            new ReviewsStore(read),
             new FakeChatRealtimeNotifier());
         var details = await chatService.GetConversationAsync(conversationId, page: null, pageSize: null);
 

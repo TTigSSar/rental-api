@@ -12,6 +12,27 @@ public sealed class ChatService : IChatService
     private const int MaxPageSize = 100;
     public const int MaxContentLength = 4000;
 
+    // Reused verbatim from ListingImagesOwnerService: same per-file size ceiling and
+    // whitelisted image types, applied here to chat image attachments.
+    public const long MaxAttachmentBytes = 5L * 1024 * 1024;
+
+    private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif"
+    };
+
+    private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif"
+    };
+
     private static class ErrorCodes
     {
         public const string Unauthenticated = "chat.unauthenticated";
@@ -21,6 +42,8 @@ public sealed class ChatService : IChatService
         public const string BookingNotFound = "chat.booking_not_found";
         public const string ConversationClosed = "chat.conversation_closed";
         public const string MessageTooLong = "chat.message_too_long";
+        public const string AttachmentTooLarge = "chat.attachment_too_large";
+        public const string AttachmentInvalidType = "chat.attachment_invalid_type";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -28,19 +51,22 @@ public sealed class ChatService : IChatService
     private readonly IBookingsStore _bookingsStore;
     private readonly IReviewsStore _reviewsStore;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
+    private readonly IFileStorageService _fileStorageService;
 
     public ChatService(
         ICurrentUserContext currentUserContext,
         IConversationsStore store,
         IBookingsStore bookingsStore,
         IReviewsStore reviewsStore,
-        IChatRealtimeNotifier realtimeNotifier)
+        IChatRealtimeNotifier realtimeNotifier,
+        IFileStorageService fileStorageService)
     {
         _currentUserContext = currentUserContext;
         _store = store;
         _bookingsStore = bookingsStore;
         _reviewsStore = reviewsStore;
         _realtimeNotifier = realtimeNotifier;
+        _fileStorageService = fileStorageService;
     }
 
     // Note: this inbox list intentionally does NOT run the TryLazyCloseAsync self-heal per row —
@@ -193,6 +219,113 @@ public sealed class ChatService : IChatService
         return ServiceResult<ChatMessageResponse>.Success(response);
     }
 
+    public async Task<ServiceResult<ChatMessageResponse>> SendImageMessageAsync(
+        SendChatImageMessageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
+        }
+
+        var user = await _store.FindUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
+        }
+
+        if (user.IsBlocked)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.UserBlocked, "Blocked users cannot send messages.");
+        }
+
+        // File validation happens here, in the same guard slot the text path uses for its
+        // length check — before touching the conversation at all. The bytes are only fully
+        // buffered/inspected here; the actual disk write is deferred until every remaining
+        // guard (participant/closed) has passed, mirroring ListingImagesOwnerService's
+        // validate-then-persist passes so a rejected send never orphans a file on disk.
+        if (request.Length > MaxAttachmentBytes)
+        {
+            return Failure<ChatMessageResponse>(
+                ErrorCodes.AttachmentTooLarge,
+                $"File exceeds the {MaxAttachmentBytes / (1024 * 1024)} MB limit.");
+        }
+
+        var extension = Path.GetExtension(request.FileName);
+        if (string.IsNullOrEmpty(extension)
+            || !AllowedExtensions.Contains(extension)
+            || !AllowedContentTypes.Contains(request.ContentType))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.AttachmentInvalidType, "File is not a supported image type.");
+        }
+
+        var buffer = new MemoryStream();
+        try
+        {
+            await request.Content.CopyToAsync(buffer, cancellationToken);
+
+            if (buffer.Length > MaxAttachmentBytes)
+            {
+                return Failure<ChatMessageResponse>(
+                    ErrorCodes.AttachmentTooLarge,
+                    $"File exceeds the {MaxAttachmentBytes / (1024 * 1024)} MB limit.");
+            }
+
+            // Magic-byte check: the bytes themselves must look like a whitelisted image,
+            // regardless of what the filename extension or content-type header claim.
+            var header = new byte[ImageContentValidator.HeaderBytesRequired];
+            buffer.Position = 0;
+            var read = await buffer.ReadAsync(header, cancellationToken);
+            buffer.Position = 0;
+
+            if (!ImageContentValidator.TryDetectMimeType(header.AsSpan(0, read), out var detectedMime)
+                || !AllowedContentTypes.Contains(detectedMime))
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.AttachmentInvalidType, "File is not a valid or supported image.");
+            }
+
+            var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);
+            if (conversation is null)
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
+            }
+
+            if (!IsParticipant(conversation, userId))
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
+            }
+
+            if (conversation.ClosedAt is not null)
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
+            }
+
+            if (await TryLazyCloseAsync(conversation, cancellationToken))
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
+            }
+
+            buffer.Position = 0;
+            var attachmentUrl = await _fileStorageService.SaveChatAttachmentAsync(
+                buffer, request.FileName, request.ContentType, request.ConversationId, cancellationToken);
+
+            var message = await _store.AddImageMessageAsync(
+                request.ConversationId, userId, request.Caption, attachmentUrl, cancellationToken);
+
+            // A brand-new message cannot yet have been read by the counterpart, so Seen is false.
+            var response = MapMessage(message, userId, user, counterpartLastReadAt: null);
+
+            var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
+            await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+
+            return ServiceResult<ChatMessageResponse>.Success(response);
+        }
+        finally
+        {
+            await buffer.DisposeAsync();
+        }
+    }
+
     public async Task<ServiceResult<bool>> MarkReadAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         if (_currentUserContext.UserId is not { } userId)
@@ -267,6 +400,7 @@ public sealed class ChatService : IChatService
         LastMessageSnippet = item.Conversation.LastMessageSnippet,
         LastMessageAt = item.Conversation.LastMessageAt,
         LastMessageIsMine = item.LastMessageSenderId == userId,
+        LastMessageType = item.LastMessageType is { } type ? ChatTokens.MessageTypeToken(type) : null,
         UnreadCount = item.UnreadCount
     };
 

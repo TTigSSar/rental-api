@@ -26,5 +26,10 @@ public interface IChatService
         SendChatMessageRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Sends an image message (with an optional caption) into a conversation.</summary>
+    Task<ServiceResult<ChatMessageResponse>> SendImageMessageAsync(
+        SendChatImageMessageRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<ServiceResult<bool>> MarkReadAsync(Guid conversationId, CancellationToken cancellationToken = default);
 }

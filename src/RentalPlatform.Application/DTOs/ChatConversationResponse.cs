@@ -16,6 +16,14 @@ public sealed class ChatConversationResponse
     public string? LastMessageSnippet { get; init; }
     public DateTime? LastMessageAt { get; init; }
 
+    /// <summary>
+    /// "text" | "image" | "system" token for the conversation's last message (see
+    /// <c>ChatTokens.MessageTypeToken</c>), or null when there is no last message yet. Lets the
+    /// client render a localized placeholder (e.g. "Photo") when <c>LastMessageSnippet</c> is
+    /// null for an image message — the server never bakes in a literal display string.
+    /// </summary>
+    public string? LastMessageType { get; init; }
+
     /// <summary>True when the conversation's last message was sent by the current user (false if none, or a system message).</summary>
     public bool LastMessageIsMine { get; init; }
 

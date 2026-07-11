@@ -9,6 +9,7 @@ public sealed class FakeFileStorageService : IFileStorageService
 {
     public List<string> SavedUrls { get; } = new();
     public List<string> DeletedUrls { get; } = new();
+    public List<string> SavedChatUrls { get; } = new();
 
     public Task<string> SaveListingImageAsync(
         Stream content,
@@ -27,5 +28,18 @@ public sealed class FakeFileStorageService : IFileStorageService
     {
         DeletedUrls.Add(url);
         return Task.FromResult(true);
+    }
+
+    public Task<string> SaveChatAttachmentAsync(
+        Stream content,
+        string fileName,
+        string contentType,
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var extension = Path.GetExtension(fileName);
+        var url = $"/uploads/chat/{conversationId:N}/{Guid.NewGuid():N}{extension}";
+        SavedChatUrls.Add(url);
+        return Task.FromResult(url);
     }
 }

@@ -31,9 +31,12 @@ RUN addgroup --system --gid 1001 appgroup \
 # Copy published output from the build stage.
 COPY --from=build /app/publish .
 
-# The app writes uploaded listing images under wwwroot/uploads/listings.
-# Creating the directory here ensures it exists and is owned by appuser.
-RUN mkdir -p wwwroot/uploads/listings \
+# The app writes uploaded listing images under wwwroot/uploads/listings and
+# chat attachments under wwwroot/uploads/chat. Creating both directories here
+# ensures they exist and are owned by appuser *before* the corresponding
+# volumes are mounted over them — otherwise Docker auto-creates the missing
+# mount point as root:root and the appuser process gets Permission denied.
+RUN mkdir -p wwwroot/uploads/listings wwwroot/uploads/chat \
  && chown -R appuser:appgroup wwwroot
 
 USER appuser

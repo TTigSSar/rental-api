@@ -30,8 +30,10 @@ services:
       Jwt__Issuer: "RentalPlatform"
       Jwt__Audience: "RentalPlatform.Api"
       FileStorage__ListingsImagesPath: "uploads/listings"
+      FileStorage__ChatAttachmentsPath: "uploads/chat"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
+      - chat-uploads:/app/wwwroot/uploads/chat
 
   ui:
     build: ../Rental-Ui
@@ -43,3 +45,4 @@ services:
 volumes:
   sqldata:
   uploads:
+  chat-uploads:

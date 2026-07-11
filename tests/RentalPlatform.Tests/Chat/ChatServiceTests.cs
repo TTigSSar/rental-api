@@ -40,13 +40,18 @@ public sealed class ChatServiceTests
         await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
     }
 
-    private static ChatService CreateService(AppDbContext context, Guid currentUserId) =>
+    private static ChatService CreateService(
+        AppDbContext context,
+        Guid currentUserId,
+        FakeFileStorageService? fileStorageService = null,
+        FakeChatRealtimeNotifier? realtimeNotifier = null) =>
         new(
             new FakeCurrentUserContext(currentUserId),
             new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
             new BookingsStore(context),
             new ReviewsStore(context),
-            new FakeChatRealtimeNotifier());
+            realtimeNotifier ?? new FakeChatRealtimeNotifier(),
+            fileStorageService ?? new FakeFileStorageService());
 
     // Seeds a Completed booking + its conversation (ClosedAt still null, as if the M-010 close
     // event was missed by an older build) plus 0/1/2 of the party reviews that gate the ADR-001
@@ -331,5 +336,214 @@ public sealed class ChatServiceTests
         Assert.True(detailsResult.IsSuccess);
         Assert.False(detailsResult.Value!.IsClosed);
         Assert.Equal("completed", detailsResult.Value!.Status);
+    }
+
+    private static SendChatImageMessageRequest ImageRequest(
+        byte[]? content = null,
+        string fileName = "photo.png",
+        string contentType = "image/png",
+        long? declaredLength = null,
+        string? caption = null) => new()
+    {
+        ConversationId = ConversationId,
+        FileName = fileName,
+        ContentType = contentType,
+        Length = declaredLength ?? (content ?? TestData.PngBytes()).Length,
+        Content = new MemoryStream(content ?? TestData.PngBytes()),
+        Caption = caption
+    };
+
+    [Fact]
+    public async Task SendImageMessage_Succeeds_Persists_Image_Updates_Preview_And_Broadcasts()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        var fileStorage = new FakeFileStorageService();
+        var realtimeNotifier = new FakeChatRealtimeNotifier();
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId, fileStorage, realtimeNotifier);
+
+        var result = await service.SendImageMessageAsync(ImageRequest(caption: "Check this out"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("image", result.Value!.Type);
+        Assert.NotNull(result.Value.AttachmentUrl);
+        Assert.Equal("Check this out", result.Value.Body);
+
+        var savedUrl = Assert.Single(fileStorage.SavedChatUrls);
+        Assert.Equal(savedUrl, result.Value.AttachmentUrl);
+
+        await using var verifyContext = db.CreateContext();
+        var message = await verifyContext.ChatMessages.SingleAsync();
+        Assert.Equal(MessageType.Image, message.Type);
+        Assert.Equal(savedUrl, message.AttachmentUrl);
+        Assert.Equal("Check this out", message.Body);
+
+        var conversation = await verifyContext.Conversations.SingleAsync(c => c.Id == ConversationId);
+        Assert.Equal(message.Id, conversation.LastMessageId);
+        Assert.NotNull(conversation.LastMessageAt);
+        Assert.Equal("Check this out", conversation.LastMessageSnippet);
+
+        var call = Assert.Single(realtimeNotifier.MessageSentCalls);
+        Assert.Equal(savedUrl, call.Message.AttachmentUrl);
+        Assert.Equal("image", call.Message.Type);
+        Assert.Equal(OwnerId, call.OwnerId);
+        Assert.Equal(RenterId, call.RenterId);
+    }
+
+    [Fact]
+    public async Task SendImageMessage_Preview_Snippet_Is_Null_When_No_Caption()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.SendImageMessageAsync(ImageRequest());
+
+        Assert.True(result.IsSuccess);
+
+        await using var verifyContext = db.CreateContext();
+        var conversation = await verifyContext.Conversations.SingleAsync(c => c.Id == ConversationId);
+        Assert.Null(conversation.LastMessageSnippet);
+    }
+
+    [Fact]
+    public async Task SendImageMessage_Fails_When_Conversation_Closed()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using (var closeContext = db.CreateContext())
+        {
+            var conversation = await closeContext.Conversations.SingleAsync(c => c.Id == ConversationId);
+            conversation.ClosedAt = DateTime.UtcNow;
+            await closeContext.SaveChangesAsync();
+        }
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.SendImageMessageAsync(ImageRequest());
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.conversation_closed", result.Error!.Code);
+
+        await using var verifyContext = db.CreateContext();
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task SendImageMessage_Fails_When_Not_Participant()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        var strangerId = Guid.NewGuid();
+        await db.SeedAsync(TestData.User(strangerId, "stranger@test.local"));
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, strangerId);
+
+        var result = await service.SendImageMessageAsync(ImageRequest());
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.not_participant", result.Error!.Code);
+
+        await using var verifyContext = db.CreateContext();
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task SendImageMessage_Fails_When_File_Exceeds_Size_Limit()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var oversized = TestData.PngBytes((int)ChatService.MaxAttachmentBytes + 1);
+        var result = await service.SendImageMessageAsync(ImageRequest(content: oversized));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.attachment_too_large", result.Error!.Code);
+
+        await using var verifyContext = db.CreateContext();
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
+    }
+
+    // Bytes served under an image Content-Type whose magic bytes disagree with the claim —
+    // the second validation layer (ImageContentValidator) must catch what the header lies about.
+    [Fact]
+    public async Task SendImageMessage_Fails_When_Magic_Bytes_Disagree_With_Claimed_Content_Type()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.SendImageMessageAsync(ImageRequest(content: TestData.NonImageBytes()));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.attachment_invalid_type", result.Error!.Code);
+
+        await using var verifyContext = db.CreateContext();
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task List_LastMessageType_Is_Text_Token_For_Text_Last_Message()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await AddLastMessageAsync(db, senderId: OwnerId, type: MessageType.Text);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.GetConversationsAsync();
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Equal("text", item.LastMessageType);
+    }
+
+    [Fact]
+    public async Task List_LastMessageType_Is_Image_Token_For_Image_Last_Message()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await AddLastMessageAsync(db, senderId: OwnerId, type: MessageType.Image);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.GetConversationsAsync();
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Equal("image", item.LastMessageType);
+    }
+
+    [Fact]
+    public async Task List_LastMessageType_Is_Null_When_No_Last_Message()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        // No message added: Conversation.LastMessageId stays null.
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.GetConversationsAsync();
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Null(item.LastMessageType);
     }
 }

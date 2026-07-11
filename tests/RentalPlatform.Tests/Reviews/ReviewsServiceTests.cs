@@ -359,7 +359,8 @@ public sealed class ReviewsServiceTests
             new ConversationsStore(read, NullLogger<ConversationsStore>.Instance),
             new BookingsStore(read),
             new ReviewsStore(read),
-            new FakeChatRealtimeNotifier());
+            new FakeChatRealtimeNotifier(),
+            new FakeFileStorageService());
         var details = await chatService.GetConversationAsync(conversationId, page: null, pageSize: null);
 
         Assert.True(details.IsSuccess);

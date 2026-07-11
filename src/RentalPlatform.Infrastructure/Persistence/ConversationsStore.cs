@@ -10,6 +10,10 @@ public sealed class ConversationsStore : IConversationsStore
 {
     private const int SnippetMaxLength = 500;
 
+    // Projection-only shape for ListForUserAsync's last-message lookup (sender + type),
+    // resolved query-time since Conversation only denormalises the snippet/timestamp.
+    private sealed record LastMessageInfo(Guid Id, Guid? SenderId, MessageType Type);
+
     private readonly AppDbContext _dbContext;
     private readonly ILogger<ConversationsStore> _logger;
 
@@ -156,31 +160,38 @@ public sealed class ConversationsStore : IConversationsStore
             select new { ConversationId = grouped.Key, Count = grouped.Count() })
             .ToDictionaryAsync(row => row.ConversationId, row => row.Count, cancellationToken);
 
-        // Resolve the last message's sender query-time (Conversation only denormalises the
-        // snippet/timestamp, not the sender) so the inbox can flag "You: ..." previews without
-        // adding a denormalised column.
+        // Resolve the last message's sender + type query-time (Conversation only denormalises
+        // the snippet/timestamp) so the inbox can flag "You: ..." previews and pick an image
+        // placeholder token without adding more denormalised columns.
         var lastMessageIds = conversations
             .Where(conversation => conversation.LastMessageId != null)
             .Select(conversation => conversation.LastMessageId!.Value)
             .ToList();
 
-        var lastMessageSenders = lastMessageIds.Count == 0
-            ? new Dictionary<Guid, Guid?>()
+        var lastMessageInfos = lastMessageIds.Count == 0
+            ? new Dictionary<Guid, LastMessageInfo>()
             : await _dbContext.ChatMessages
                 .AsNoTracking()
                 .Where(message => lastMessageIds.Contains(message.Id))
-                .ToDictionaryAsync(message => message.Id, message => message.SenderId, cancellationToken);
+                .Select(message => new LastMessageInfo(message.Id, message.SenderId, message.Type))
+                .ToDictionaryAsync(info => info.Id, cancellationToken);
 
         return conversations
             .Select(conversation =>
             {
                 var counterpart = conversation.OwnerId == userId ? conversation.Renter : conversation.Owner;
                 var unread = unreadCounts.TryGetValue(conversation.Id, out var count) ? count : 0;
-                var lastMessageSenderId = conversation.LastMessageId is { } lastMessageId
-                    && lastMessageSenders.TryGetValue(lastMessageId, out var senderId)
-                        ? senderId
+                var lastMessageInfo = conversation.LastMessageId is { } lastMessageId
+                    && lastMessageInfos.TryGetValue(lastMessageId, out var info)
+                        ? info
                         : null;
-                return new ChatConversationListItem(conversation, counterpart, conversation.Booking, unread, lastMessageSenderId);
+                return new ChatConversationListItem(
+                    conversation,
+                    counterpart,
+                    conversation.Booking,
+                    unread,
+                    lastMessageInfo?.SenderId,
+                    lastMessageInfo?.Type);
             })
             .ToList();
     }
@@ -256,6 +267,45 @@ public sealed class ConversationsStore : IConversationsStore
         conversation.LastMessageSnippet = content.Length > SnippetMaxLength
             ? content[..SnippetMaxLength]
             : content;
+        conversation.LastMessageAt = now;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return message;
+    }
+
+    public async Task<ChatMessage> AddImageMessageAsync(
+        Guid conversationId,
+        Guid senderId,
+        string? caption,
+        string attachmentUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var message = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            SenderId = senderId,
+            Type = MessageType.Image,
+            Body = caption,
+            AttachmentUrl = attachmentUrl,
+            CreatedAt = now
+        };
+
+        await _dbContext.ChatMessages.AddAsync(message, cancellationToken);
+
+        var conversation = await _dbContext.Conversations
+            .FirstAsync(entity => entity.Id == conversationId, cancellationToken);
+        conversation.LastMessageId = message.Id;
+        // No text body to preview for a bare image: leave the snippet null so the client
+        // renders its own localized placeholder off LastMessageType instead of the server
+        // baking in a non-localizable string like "Photo" (see IConversationsStore doc).
+        conversation.LastMessageSnippet = string.IsNullOrEmpty(caption)
+            ? null
+            : caption.Length > SnippetMaxLength
+                ? caption[..SnippetMaxLength]
+                : caption;
         conversation.LastMessageAt = now;
 
         await _dbContext.SaveChangesAsync(cancellationToken);

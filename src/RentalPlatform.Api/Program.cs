@@ -73,6 +73,38 @@ Directory.CreateDirectory(uploadsPhysicalRoot);
     });
 }
 
+// Same treatment for chat image attachments, from FileStorage:ChatAttachmentsPath — without
+// this, LocalFileStorageService.SaveChatAttachmentAsync would persist files nothing can ever
+// serve over HTTP, the same "write path with no readable output" defect this feature exists
+// to close (a message would carry an AttachmentUrl that 404s in the client).
+var chatUploadsRelPath = fileStorageOptions.ChatAttachmentsPath.Trim().TrimStart('/', '\\');
+var chatUploadsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", chatUploadsRelPath);
+var chatUploadsRequestPath = "/" + chatUploadsRelPath.Replace("\\", "/", StringComparison.Ordinal).Trim('/');
+Directory.CreateDirectory(chatUploadsPhysicalRoot);
+{
+    var imageContentTypeProvider = new FileExtensionContentTypeProvider();
+    imageContentTypeProvider.Mappings.Clear();
+    imageContentTypeProvider.Mappings[".jpg"] = "image/jpeg";
+    imageContentTypeProvider.Mappings[".jpeg"] = "image/jpeg";
+    imageContentTypeProvider.Mappings[".png"] = "image/png";
+    imageContentTypeProvider.Mappings[".webp"] = "image/webp";
+    imageContentTypeProvider.Mappings[".gif"] = "image/gif";
+
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        RequestPath = chatUploadsRequestPath,
+        FileProvider = new PhysicalFileProvider(chatUploadsPhysicalRoot),
+        ContentTypeProvider = imageContentTypeProvider,
+        ServeUnknownFileTypes = false,
+        OnPrepareResponse = static context =>
+        {
+            var headers = context.Context.Response.Headers;
+            headers.CacheControl = "public, max-age=31536000, immutable";
+            headers.ContentDisposition = "inline";
+        }
+    });
+}
+
 app.UseCors(RentalPlatform.Api.Extensions.ServiceCollectionExtensions.FrontendCorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();

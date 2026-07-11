@@ -17,4 +17,15 @@ public interface IFileStorageService
     // remote, missing, or points outside the storage root — safe to call for seed
     // data that references external image hosts.
     Task<bool> DeleteListingImageAsync(string url, CancellationToken cancellationToken = default);
+
+    // Persists a chat image attachment under a conversation-scoped subdirectory and
+    // returns the URL clients should use. Implementations must generate the on-disk
+    // filename and never trust the user-supplied name. conversationId scopes the
+    // storage namespace, mirroring how listingId scopes SaveListingImageAsync.
+    Task<string> SaveChatAttachmentAsync(
+        Stream content,
+        string fileName,
+        string contentType,
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
 }

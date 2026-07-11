@@ -8,12 +8,16 @@ namespace RentalPlatform.Application.Abstractions;
 /// Sender of the conversation's last message. Null when there is no last message, or it was a
 /// system message (system messages have a null sender).
 /// </param>
+/// <param name="LastMessageType">
+/// Type of the conversation's last message. Null when there is no last message yet.
+/// </param>
 public sealed record ChatConversationListItem(
     Conversation Conversation,
     User Counterpart,
     Booking Booking,
     int UnreadCount,
-    Guid? LastMessageSenderId);
+    Guid? LastMessageSenderId,
+    MessageType? LastMessageType = null);
 
 /// <summary>Full conversation view: the thread, its context, and a page of messages.</summary>
 public sealed record ChatConversationDetails(
@@ -58,6 +62,21 @@ public interface IConversationsStore
 
     /// <summary>Inserts a Text message and refreshes the conversation's denormalised preview fields.</summary>
     Task<ChatMessage> AddTextMessageAsync(Guid conversationId, Guid senderId, string content, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Inserts an Image message (with its caption and stored attachment URL) and refreshes the
+    /// conversation's denormalised preview fields. <paramref name="caption"/> becomes
+    /// <c>LastMessageSnippet</c> when present (truncated like the text path); when absent,
+    /// <c>LastMessageSnippet</c> is set to null so the client renders its own localized
+    /// "photo" placeholder off <c>ChatConversationResponse.LastMessageType</c> rather than the
+    /// server baking in a non-localizable string.
+    /// </summary>
+    Task<ChatMessage> AddImageMessageAsync(
+        Guid conversationId,
+        Guid senderId,
+        string? caption,
+        string attachmentUrl,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Inserts a System message (null sender) for the given kind and refreshes the conversation's

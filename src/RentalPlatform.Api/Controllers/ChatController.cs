@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using RentalPlatform.Api.Controllers.Requests;
+using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -11,6 +14,11 @@ namespace RentalPlatform.Api.Controllers;
 [Authorize]
 public sealed class ChatController : ControllerBase
 {
+    // 7 MB cap on the multipart upload body: the service-layer per-file limit is 5 MB
+    // (ChatService.MaxAttachmentBytes, reused from ListingImagesOwnerService), plus headroom
+    // for multipart boundary/header overhead and the optional caption field.
+    private const long MaxChatImageUploadBytes = 7L * 1024 * 1024;
+
     private readonly IChatService _chatService;
 
     public ChatController(IChatService chatService)
@@ -88,6 +96,55 @@ public sealed class ChatController : ControllerBase
         return FromError(result.Error);
     }
 
+    [HttpPost("conversations/{id:guid}/messages/image")]
+    [EnableRateLimiting(RateLimiterExtensions.ImageUploadPolicy)]
+    [RequestSizeLimit(MaxChatImageUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxChatImageUploadBytes)]
+    [ProducesResponseType(typeof(ChatMessageResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> SendImageMessage(
+        Guid id,
+        [FromForm] UploadChatImageRequest request,
+        CancellationToken cancellationToken)
+    {
+        Stream? stream = null;
+
+        try
+        {
+            stream = request.Image.OpenReadStream();
+
+            var serviceRequest = new SendChatImageMessageRequest
+            {
+                ConversationId = id,
+                FileName = request.Image.FileName,
+                ContentType = request.Image.ContentType,
+                Length = request.Image.Length,
+                Content = stream,
+                Caption = request.Caption
+            };
+
+            var result = await _chatService.SendImageMessageAsync(serviceRequest, cancellationToken);
+            if (result.IsSuccess && result.Value is not null)
+            {
+                return Ok(result.Value);
+            }
+
+            return FromError(result.Error);
+        }
+        finally
+        {
+            if (stream is not null)
+            {
+                await stream.DisposeAsync();
+            }
+        }
+    }
+
     [HttpPost("conversations/{id:guid}/read")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -120,6 +177,8 @@ public sealed class ChatController : ControllerBase
             "chat.booking_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
             "chat.conversation_closed" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
             "chat.message_too_long" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "chat.attachment_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
+            "chat.attachment_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
             _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
         };
     }

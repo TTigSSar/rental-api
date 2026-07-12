@@ -136,7 +136,8 @@ public sealed class ReviewsHttpTests
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("review.already_submitted", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("urn:rental:error:review.already_submitted", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("review.already_submitted", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]

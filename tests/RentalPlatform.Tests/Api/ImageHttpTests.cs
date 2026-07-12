@@ -81,7 +81,8 @@ public sealed class ImageHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal("listing.image_invalid_type", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("urn:rental:error:listing.image_invalid_type", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("listing.image_invalid_type", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]
@@ -101,7 +102,8 @@ public sealed class ImageHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal("listing.image_invalid_type", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("urn:rental:error:listing.image_invalid_type", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("listing.image_invalid_type", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]

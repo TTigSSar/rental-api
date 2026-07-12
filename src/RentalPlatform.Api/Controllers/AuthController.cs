@@ -102,19 +102,12 @@ public sealed class AuthController : ControllerBase
 
         return error.Code switch
         {
-            "auth.duplicate_email" => Conflict(CreateProblemDetails(StatusCodes.Status409Conflict, error)),
-            "auth.invalid_credentials" => Unauthorized(CreateProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "auth.unauthenticated" => Unauthorized(CreateProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, CreateProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "auth.external_link_conflict" => Conflict(CreateProblemDetails(StatusCodes.Status409Conflict, error)),
-            _ => BadRequest(CreateProblemDetails(StatusCodes.Status400BadRequest, error))
+            "auth.duplicate_email" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.invalid_credentials" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "auth.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "auth.external_link_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private ProblemDetails CreateProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

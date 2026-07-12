@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -120,19 +121,12 @@ public sealed class ReviewsController : ControllerBase
 
         return error.Code switch
         {
-            "review.unauthenticated"       => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "review.booking_not_found"     => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "review.forbidden"             => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "review.booking_not_completed" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "review.already_submitted"     => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+            "review.unauthenticated"       => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "review.booking_not_found"     => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "review.forbidden"             => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "review.booking_not_completed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "review.already_submitted"     => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

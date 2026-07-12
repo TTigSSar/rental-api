@@ -330,28 +330,21 @@ public sealed class ListingsController : ControllerBase
 
         return error.Code switch
         {
-            "listing.unauthenticated" => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "listing.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "listing.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "listing.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "listing.category_not_found" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.invalid_age_range" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_empty" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_too_many" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_listing_limit" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.image_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "listing.image_invalid_reorder" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "listing.invalid_status" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+            "listing.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "listing.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "listing.forbidden" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "listing.not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "listing.category_not_found" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.invalid_age_range" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_empty" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_invalid_type" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_too_many" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_listing_limit" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_too_large" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.image_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "listing.image_invalid_reorder" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "listing.invalid_status" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

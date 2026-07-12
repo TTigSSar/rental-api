@@ -170,23 +170,16 @@ public sealed class ChatController : ControllerBase
 
         return error.Code switch
         {
-            "chat.unauthenticated" => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "chat.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "chat.not_participant" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "chat.conversation_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "chat.booking_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "chat.conversation_closed" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "chat.message_too_long" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "chat.attachment_too_large" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "chat.attachment_invalid_type" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+            "chat.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "chat.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "chat.not_participant" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "chat.conversation_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "chat.booking_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "chat.conversation_closed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "chat.message_too_long" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "chat.attachment_too_large" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "chat.attachment_invalid_type" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

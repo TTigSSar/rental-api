@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -84,18 +85,11 @@ public sealed class AdminListingsController : ControllerBase
 
         return error.Code switch
         {
-            "admin.unauthenticated" => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "admin.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "admin.listing_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "admin.invalid_listing_status" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+            "admin.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "admin.forbidden" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "admin.listing_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "admin.invalid_listing_status" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

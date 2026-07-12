@@ -94,7 +94,8 @@ public sealed class BookingHttpTests
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         // Verify RFC 7807 structure.
-        Assert.Equal("booking.overlap", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("urn:rental:error:booking.overlap", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("booking.overlap", doc.RootElement.GetProperty("errorCode").GetString());
         Assert.Equal(409, doc.RootElement.GetProperty("status").GetInt32());
         Assert.Equal("application/problem+json",
             response.Content.Headers.ContentType?.MediaType);
@@ -147,7 +148,8 @@ public sealed class BookingHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal("booking.not_cancellable", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("urn:rental:error:booking.not_cancellable", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("booking.not_cancellable", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]

@@ -185,28 +185,21 @@ public sealed class BookingsController : ControllerBase
 
         return error.Code switch
         {
-            "booking.unauthenticated" => Unauthorized(ToProblemDetails(StatusCodes.Status401Unauthorized, error)),
-            "booking.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "booking.own_listing_forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "booking.forbidden" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "booking.listing_not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "booking.not_found" => NotFound(ToProblemDetails(StatusCodes.Status404NotFound, error)),
-            "booking.overlap" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_pending" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_cancellable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_activatable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.not_completable" => Conflict(ToProblemDetails(StatusCodes.Status409Conflict, error)),
-            "booking.owner_only" => StatusCode(StatusCodes.Status403Forbidden, ToProblemDetails(StatusCodes.Status403Forbidden, error)),
-            "booking.listing_not_approved" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            "booking.invalid_dates" => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error)),
-            _ => BadRequest(ToProblemDetails(StatusCodes.Status400BadRequest, error))
+            "booking.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "booking.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "booking.own_listing_forbidden" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "booking.forbidden" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "booking.listing_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "booking.not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
+            "booking.overlap" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.not_pending" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.not_cancellable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.not_activatable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.not_completable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.owner_only" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "booking.listing_not_approved" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "booking.invalid_dates" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }
-
-    private static ProblemDetails ToProblemDetails(int statusCode, ServiceError error) => new()
-    {
-        Status = statusCode,
-        Title = error.Message,
-        Type = error.Code
-    };
 }

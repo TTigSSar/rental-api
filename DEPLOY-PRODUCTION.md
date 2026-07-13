@@ -310,48 +310,99 @@ docker compose -f docker-compose.production.yml up -d
 
 ## i. Резервное копирование
 
-Минимальный вариант: ежедневный бэкап через `sqlcmd` внутри контейнера `db`
-в bind-mount `/opt/dorent/backups`, плюс архив томов с загруженными файлами.
+Автоматизировано скриптом `deploy/backup-production.sh` (версионирован в
+репозитории `rental-api`). Работает из любого текущего каталога — сам
+находит `docker-compose.production.yml` и `.env` рядом со своим
+расположением (`<repo>/deploy/backup-production.sh` → compose-файл в
+`<repo>/`).
+
+### Что делает ежедневный запуск (без аргументов)
+
+1. Читает `MSSQL_SA_PASSWORD` из `/opt/dorent/rental-api/.env` (построчным
+   парсингом, без `source` — файл `.env` никогда не исполняется как shell-код).
+2. `BACKUP DATABASE [RentalPlatformDb] ... WITH COMPRESSION, INIT` внутри
+   контейнера `db`. Пароль передаётся через переменную окружения
+   `SQLCMDPASSWORD` самого `sqlcmd`-процесса (`-U sa`, без `-P`) — так он не
+   попадает в вывод `ps` внутри контейнера.
+3. `.bak` копируется наружу через `docker cp` в `/opt/dorent/backups/`, копия
+   внутри контейнера удаляется.
+4. Загруженные файлы (`rental-api_uploads`, `rental-api_chat-uploads`)
+   архивируются в `/opt/dorent/backups/uploads_<штамп>.tgz` одноразовым
+   `alpine`-контейнером — **не** вторым SQL Server контейнером: на 2 ГБ RAM
+   с уже занятым SQL Server (`MSSQL_MEMORY_LIMIT_MB=1024`) второй такой
+   контейнер не поместится.
+5. Ротация: `.bak`/`.tgz` в `/opt/dorent/backups` старше 7 дней удаляются.
+6. Одна строка результата (время, имена файлов, размеры, OK/FAIL)
+   добавляется в `/opt/dorent/backups/backup.log`. Любая ошибка на любом шаге
+   → ненулевой код возврата и `FAIL`-строка с причиной в этом же логе.
+
+Ручной запуск:
 
 ```bash
-mkdir -p /opt/dorent/backups
-cd /opt/dorent/rental-api
-
-# Бэкап базы (sqlcmd уже есть в образе mssql/server)
-docker compose -f docker-compose.production.yml exec -T db \
-  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
-  "BACKUP DATABASE RentalPlatformDb TO DISK = N'/var/opt/mssql/backup_$(date +%Y%m%d).bak'"
-
-# .bak остаётся внутри тома db — скопировать его наружу, в bind-mount:
-docker compose -f docker-compose.production.yml cp \
-  db:/var/opt/mssql/backup_$(date +%Y%m%d).bak \
-  /opt/dorent/backups/backup_$(date +%Y%m%d).bak
-
-# Загруженные файлы — архивом из именованных томов
-docker run --rm \
-  -v rental-api_uploads:/uploads \
-  -v rental-api_chat-uploads:/chat-uploads \
-  -v /opt/dorent/backups:/backup \
-  alpine tar czf /backup/uploads_$(date +%Y%m%d).tar.gz /uploads /chat-uploads
-
-# Хранить последние 7 дней, удалять более старые
-find /opt/dorent/backups -name '*.bak' -mtime +7 -delete
-find /opt/dorent/backups -name '*.tar.gz' -mtime +7 -delete
+/opt/dorent/rental-api/deploy/backup-production.sh
+tail -1 /opt/dorent/backups/backup.log
 ```
 
-Оформить это как ежедневную cron-задачу (`crontab -e` под `dorent`), либо
-как systemd timer — выбор оставлен на усмотрение того, кто разворачивает.
-
-**Восстановление обязательно проверить, прежде чем полагаться на бэкап** —
-непроверенный бэкап нельзя считать бэкапом. Проверка на отдельном стенде
-(например staging), не на production:
+### Cron
 
 ```bash
-# Скопировать .bak на стенд, затем внутри контейнера db:
-docker compose -f docker-compose.staging.yml exec -T db \
-  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
-  "RESTORE DATABASE RentalPlatformDb FROM DISK = N'/var/opt/mssql/backup_YYYYMMDD.bak' WITH REPLACE"
+crontab -e   # под пользователем dorent
 ```
+
+```cron
+# У cron минимальный PATH (обычно без /usr/local/bin) — скрипт сам добавляет
+# /usr/local/bin:/usr/bin:/bin в начало PATH, поэтому вызывать его по
+# абсолютному пути достаточно, отдельно чинить PATH в crontab не нужно.
+30 3 * * * /opt/dorent/rental-api/deploy/backup-production.sh >> /opt/dorent/backups/backup.log 2>&1
+```
+
+(Скрипт и так пишет результат в `backup.log` сам — перенаправление в cron
+дополнительно ловит любой вывод/трассировку, которая по какой-то причине
+не попала в лог штатным путём, например падение до того, как скрипт
+успел сам начать логировать.)
+
+### Проверка восстановления (`--verify`)
+
+**Непроверенный бэкап нельзя считать бэкапом.** `--verify` копирует САМЫЙ
+СВЕЖИЙ локальный `.bak` обратно в тот же контейнер `db`, разворачивает его
+как отдельную базу `RentalPlatformDb_verify` (уникальные имена `.mdf`/`.ldf`,
+вычисленные из `RESTORE FILELISTONLY` самого бэкапа — рядом с боевой базой,
+без конфликта имён файлов), выполняет проверочный запрос
+(`SELECT COUNT(*) FROM [RentalPlatformDb_verify].dbo.Users`) и печатает
+результат, затем **дропает** `RentalPlatformDb_verify` и удаляет временную
+копию `.bak` внутри контейнера — в любом случае, даже если что-то по пути
+упало (safety-net cleanup).
+
+Специально сделано как отдельная база **внутри существующего контейнера
+`db`**, а не второй контейнер SQL Server — на этом сервере (2 ГБ RAM,
+SQL Server уже занял отведённый ему 1 ГБ) второй полноценный экземпляр
+SQL Server просто не запустится.
+
+```bash
+/opt/dorent/rental-api/deploy/backup-production.sh --verify
+```
+
+Ожидаемый вывод: `VERIFY PASS: restored <file>.bak as RentalPlatformDb_verify,
+dbo.Users COUNT(*) = <N>` — и `N` должно быть правдоподобным (не ноль, если в
+базе реально есть пользователи). Запускать периодически (не только один раз
+после написания скрипта) — бэкап, который проверялся полгода назад, снова
+превращается в непроверенный, если формат/схема успели измениться.
+
+### Off-site копия — пока не сделано
+
+Сейчас `/opt/dorent/backups` — это тот же физический сервер, что и сами
+данные: пожар/диск/провайдер убьёт и то, и другое одновременно. Это
+осознанный временный пробел, а не забытый пункт. Варианты на выбор, когда
+дойдут руки:
+
+- **Backblaze B2 (free tier) через `rclone`** — `rclone sync
+  /opt/dorent/backups b2:<bucket>/dorent-backups` отдельной cron-задачей
+  после `backup-production.sh`;
+- периодический `rsync`/`scp` `/opt/dorent/backups` на локальную машину или
+  другой сервер, вне Hetzner.
+
+До тех пор бэкапы защищают только от «сломали руками/багом», а не от отказа
+сервера целиком.
 
 ## Обновление стенда
 

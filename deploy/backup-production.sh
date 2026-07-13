@@ -104,23 +104,29 @@ load_sa_password() {
 # as a -P argument, so it never shows up in a process listing (e.g. `ps aux` run
 # inside the container) — only -U sa is passed on the command line.
 
+# -b (on error batch abort) on every call site below: without it, sqlcmd exits 0 even
+# after a Msg-level SQL error (e.g. permission denied, RESTORE failure) and the error
+# text ends up wherever the output was headed — e.g. silently "parsed" as query results
+# instead of failing loudly. With -b, a SQL error fails the sqlcmd process (and, via
+# set -e / the ERR trap, the whole script) immediately, with the real message on stderr.
+
 # Runs a statement for its side effect (BACKUP / RESTORE / DROP DATABASE / mkdir).
 sqlcmd_exec() {
     "${COMPOSE[@]}" exec -T -e SQLCMDPASSWORD="${MSSQL_SA_PASSWORD}" db \
-        "${SQLCMD}" -S localhost -U sa -C -Q "$1"
+        "${SQLCMD}" -S localhost -U sa -C -b -Q "$1"
 }
 
 # Runs a query for a single scalar value: no headers, no row-count banner, trimmed.
 sqlcmd_query() {
     "${COMPOSE[@]}" exec -T -e SQLCMDPASSWORD="${MSSQL_SA_PASSWORD}" db \
-        "${SQLCMD}" -S localhost -U sa -C -h -1 -W -Q "$1"
+        "${SQLCMD}" -S localhost -U sa -C -b -h -1 -W -Q "$1"
 }
 
 # Runs a query with pipe-separated columns, for parsing multi-column result sets
 # (used for RESTORE FILELISTONLY).
 sqlcmd_query_piped() {
     "${COMPOSE[@]}" exec -T -e SQLCMDPASSWORD="${MSSQL_SA_PASSWORD}" db \
-        "${SQLCMD}" -S localhost -U sa -C -h -1 -W -s '|' -Q "$1"
+        "${SQLCMD}" -S localhost -U sa -C -b -h -1 -W -s '|' -Q "$1"
 }
 
 db_container_id() {
@@ -194,6 +200,12 @@ run_verify() {
 
     cid="$(db_container_id)"
     docker cp "${latest_bak}" "${cid}:${bak_in_container}"
+    # docker cp preserves host ownership (typically the deploy user, e.g. uid 1000),
+    # but sqlservr inside the container runs as mssql (uid 10001) and can't read a file
+    # it doesn't own — RESTORE FILELISTONLY/RESTORE DATABASE would fail with OS error 5
+    # (Access is denied). The container's default exec user is mssql itself, which can't
+    # chown, so this needs -u root.
+    "${COMPOSE[@]}" exec -T -u root db chown mssql:mssql "${bak_in_container}"
 
     # Safety net: whatever happens below, always try to drop the throwaway database
     # and remove the temp .bak copy inside the container. Idempotent (IF EXISTS / -f),

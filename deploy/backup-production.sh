@@ -139,6 +139,23 @@ db_container_id() {
     printf '%s' "${cid}"
 }
 
+# Safety-net cleanup for --verify: drops the throwaway database and removes the temp
+# .bak copy inside the container. Idempotent (IF EXISTS / -f), so it's harmless to run
+# even when the happy path already cleaned up.
+#
+# Takes the in-container .bak path as an explicit argument ($1) rather than closing
+# over a caller's `local` variable. This function is registered against the EXIT trap
+# from inside run_verify(), and EXIT fires after run_verify() has already returned (once
+# the whole script is exiting) — by then any `local` of run_verify's is out of scope,
+# and under `set -u` merely referencing it would itself be a fatal "unbound variable"
+# error that happens during word expansion, before the command even runs, so `|| true`
+# can't rescue it either. See the trap registration in run_verify for how $1 is bound.
+cleanup_verify() {
+    local temp_bak_in_container="$1"
+    sqlcmd_exec "IF DB_ID(N'${VERIFY_DB_NAME}') IS NOT NULL DROP DATABASE [${VERIFY_DB_NAME}];" || true
+    "${COMPOSE[@]}" exec -T db rm -f "${temp_bak_in_container}" || true
+}
+
 # --- Daily backup -------------------------------------------------------------------
 
 run_backup() {
@@ -207,14 +224,10 @@ run_verify() {
     # chown, so this needs -u root.
     "${COMPOSE[@]}" exec -T -u root db chown mssql:mssql "${bak_in_container}"
 
-    # Safety net: whatever happens below, always try to drop the throwaway database
-    # and remove the temp .bak copy inside the container. Idempotent (IF EXISTS / -f),
-    # so it's harmless to run even when the happy path already cleaned up.
-    cleanup_verify() {
-        sqlcmd_exec "IF DB_ID(N'${VERIFY_DB_NAME}') IS NOT NULL DROP DATABASE [${VERIFY_DB_NAME}];" || true
-        "${COMPOSE[@]}" exec -T db rm -f "${bak_in_container}" || true
-    }
-    trap cleanup_verify EXIT
+    # Bind the current value of bak_in_container into the trap command NOW (double-quoted
+    # trap string → expanded at registration time), not as a variable reference resolved
+    # later — see cleanup_verify's comment for why that distinction matters here.
+    trap "cleanup_verify '${bak_in_container}'" EXIT
 
     # Read the backup's own logical file names rather than assuming fixed ones, so
     # this keeps working even if the database was ever created/restored differently.

@@ -23,6 +23,13 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+else
+{
+    // Development has seed data (including an admin account); every other environment
+    // starts from an empty database and would otherwise have no admin at all. No-op unless
+    // Bootstrap:AdminEmail / Bootstrap:AdminPassword are both configured.
+    await app.Services.BootstrapAdminAsync(app.Configuration);
+}
 
 // Must run before anything that reads the client IP or scheme (rate limiter, CORS, HTTPS
 // redirect, auth). No-op unless ForwardedHeaders:Enabled is set — see ForwardedHeadersExtensions.
@@ -111,6 +118,12 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
+
+// Pure liveness probe for the docker healthcheck — anonymous, no DB access. A DB check
+// here would flap the healthcheck during SQL Server warmup / restarts, since the app
+// would be reported unhealthy for reasons outside its own control.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+    .AllowAnonymous();
 
 app.Run();
 

@@ -48,6 +48,19 @@ sudo ufw enable
 sudo ufw status
 ```
 
+Стенд рассчитан на VPS с 2 ГБ RAM (Hetzner CPX12) — этого мало для
+одновременной сборки образов и работы SQL Server, поэтому обязателен файл
+подкачки (swap) на 4 ГБ:
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h
+```
+
 ## b. Получение кода на сервере
 
 `ui` собирается из `../Rental-Ui` относительно `docker-compose.staging.yml`,
@@ -156,3 +169,9 @@ docker compose -f docker-compose.staging.yml logs -f api
   ```bash
   docker compose -f docker-compose.staging.yml down -v
   ```
+- **Память**: стенд рассчитан на 2 ГБ RAM (Hetzner CPX12), поэтому на сервере
+  обязателен файл подкачки (swap) на 4 ГБ — настраивается на этапе подготовки
+  сервера (пункт a). SQL Server ограничен 1 ГБ через переменную
+  `MSSQL_MEMORY_LIMIT_MB` в `docker-compose.staging.yml`. Первый запуск
+  `docker compose ... up --build` на таком объёме памяти медленный
+  (10–20+ минут) — это ожидаемо, не зависание.

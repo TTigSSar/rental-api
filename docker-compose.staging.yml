@@ -6,6 +6,10 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: "Developer"
+      # The stand runs on a 2 GB RAM VPS; uncapped, SQL Server would grab most of
+      # it (~80% of system memory by default). Remove this cap if the server is
+      # ever rescaled to 4 GB+ RAM.
+      MSSQL_MEMORY_LIMIT_MB: "1024"
     volumes:
       - sqldata:/var/opt/mssql
     # No host port mapping — the tunnel is outbound-only and nothing outside the

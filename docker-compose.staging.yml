@@ -1,0 +1,68 @@
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: "Developer"
+    volumes:
+      - sqldata:/var/opt/mssql
+    # No host port mapping — the tunnel is outbound-only and nothing outside the
+    # compose network needs to reach SQL Server directly.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -C -b"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Loopback-only — reachable from the server itself (e.g. `curl localhost:8080`,
+    # SSH tunnel) but not exposed to the internet. Public access goes through the
+    # Cloudflare Tunnel -> ui's nginx reverse proxy instead.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Deliberately "Development" for this test stand: it enables the idempotent
+      # dev seed data and Swagger UI, which are useful while validating the stand.
+      # TODO: switch to "Production" once this stops being a throwaway test stand.
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ConnectionStrings__DefaultConnection: "Server=db,1433;Database=RentalPlatformDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;"
+      Jwt__SecretKey: ${JWT_SECRET_KEY}
+      Jwt__Issuer: "RentalPlatform"
+      Jwt__Audience: "RentalPlatform.Api"
+      FileStorage__ListingsImagesPath: "uploads/listings"
+      FileStorage__ChatAttachmentsPath: "uploads/chat"
+    volumes:
+      - uploads:/app/wwwroot/uploads/listings
+      - chat-uploads:/app/wwwroot/uploads/chat
+
+  ui:
+    build: ../Rental-Ui
+    restart: unless-stopped
+    depends_on:
+      - api
+    # Loopback-only, same rationale as api's port mapping above.
+    ports:
+      - "127.0.0.1:4200:80"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - ui
+      - api
+
+volumes:
+  sqldata:
+  uploads:
+  chat-uploads:

@@ -1,10 +1,13 @@
 # Развёртывание тестового стенда (staging) на VPS
 
 Пошаговая инструкция по развёртыванию `test.dorent.am` на дешёвом VPS
-(Ubuntu, IP `91.98.170.128`, пользователь `dorent`) через Cloudflare Tunnel.
+(Ubuntu, IP `<SERVER_IP>`, пользователь `<SSH_USER>`) через Cloudflare Tunnel.
 Домен `dorent.am` уже подключён к Cloudflare. Входящие порты на сервере
 **не открываются** — весь трафик идёт через исходящее (outbound) соединение
 `cloudflared`.
+
+> Репозиторий публичный — реальные IP сервера и SSH-логин намеренно не
+> хранятся здесь. Подставьте свои значения вместо `<SERVER_IP>` и `<SSH_USER>`.
 
 Файлы стенда: `docker-compose.staging.yml`, `.env.staging.example` — оба
 лежат в корне репозитория `rental-api`.
@@ -16,7 +19,7 @@
 Подключиться по SSH:
 
 ```bash
-ssh dorent@91.98.170.128
+ssh <SSH_USER>@<SERVER_IP>
 ```
 
 Установить Docker (официальный скрипт) и плагин compose:
@@ -79,8 +82,8 @@ git checkout dev   # или нужную ветку/тег для стенда
 машины через `scp`/`rsync`:
 
 ```bash
-rsync -avz --exclude .git rental-api/  dorent@91.98.170.128:~/apps/rental/rental-api/
-rsync -avz --exclude .git Rental-Ui/   dorent@91.98.170.128:~/apps/rental/Rental-Ui/
+rsync -avz --exclude .git rental-api/  <SSH_USER>@<SERVER_IP>:~/apps/rental/rental-api/
+rsync -avz --exclude .git Rental-Ui/   <SSH_USER>@<SERVER_IP>:~/apps/rental/Rental-Ui/
 ```
 
 ## c. Файл окружения

@@ -261,12 +261,32 @@ check_backups() {
         report_warn "backup-freshness" "${BACKUPS_DIR} does not exist"
     fi
 
-    # Last backup.log line must be a success ('OK ...' or 'VERIFY PASS ...').
+    # backup.log carries TWO interleaved streams:
+    #   1. canonical entries written by backup-production.sh's log():
+    #        "<ts> OK db=...(...) uploads=...(...)"      daily backup succeeded
+    #        "<ts> VERIFY PASS file=... users=N"         --verify restore succeeded
+    #        "<ts> FAIL ..."                             any failure (incl. 'FAIL verify: ...')
+    #   2. raw stdout/stderr of the cron job, because the crontab entry appends
+    #      the script's own console output to the same file ('>> backup.log 2>&1'):
+    #      sqlcmd chatter ("Processed 592 pages...") and the human-readable
+    #      summary ("Backup OK: <file> (612K), ...").
+    # So the LAST PHYSICAL LINE is whatever happened to print last — normally the
+    # human-readable summary — not the outcome. Checking it with tail -n 1 made
+    # this check WARN on every successful backup (a permanently-firing warning
+    # teaches everyone to ignore warnings). Evaluate the last CANONICAL entry.
+    local canonical_re='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4} (OK|VERIFY PASS|VERIFY FAIL|FAIL) '
     if [[ -s "${BACKUP_LOG}" ]]; then
-        if tail -n 1 "${BACKUP_LOG}" | grep -qE ' (OK|VERIFY PASS)( |$)'; then
-            report_pass "backup-log" "last ${BACKUP_LOG} line is a success entry"
-        else
-            report_warn "backup-log" "last ${BACKUP_LOG} line is not OK/VERIFY PASS: $(tail -n 1 "${BACKUP_LOG}" | cut -c1-120)"
+        local last_entry level
+        last_entry="$(grep -E "${canonical_re}" "${BACKUP_LOG}" | tail -n 1 || true)"
+        if [[ -z "${last_entry}" ]]; then
+            report_warn "backup-log" "${BACKUP_LOG} has no canonical backup-production.sh entries yet (no backup has logged an outcome)"
+        elif [[ "${last_entry}" =~ ${canonical_re} ]]; then
+            level="${BASH_REMATCH[1]}"
+            if [[ "${level}" == "OK" || "${level}" == "VERIFY PASS" ]]; then
+                report_pass "backup-log" "last backup-production.sh entry is a success (${level}): $(printf '%s' "${last_entry}" | cut -c1-100)"
+            else
+                report_warn "backup-log" "last backup-production.sh entry is a failure (${level}): $(printf '%s' "${last_entry}" | cut -c1-120)"
+            fi
         fi
     else
         report_warn "backup-log" "${BACKUP_LOG} missing or empty (no backup has logged yet)"

@@ -45,6 +45,18 @@ COMPOSE=(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" --proj
 
 # --- Logging / error handling -------------------------------------------------------
 
+# CONTRACT (consumed by deploy/smoke.sh, check 'backup-log'): every line written by
+# log() is a canonical, machine-readable outcome entry of the form
+#
+#     <YYYY-MM-DD HH:MM:SS+ZZZZ> <LEVEL> <details>
+#     LEVEL ∈ { OK | VERIFY PASS | FAIL }
+#
+# smoke.sh evaluates the LAST canonical entry in backup.log. Note that backup.log
+# also receives this script's raw stdout/stderr, because the crontab entry appends
+# it there ('... backup-production.sh >> /opt/dorent/backups/backup.log 2>&1'):
+# sqlcmd chatter and the human-readable "Backup OK: ..." summary. Those lines are
+# deliberately NOT in the canonical form and smoke.sh ignores them. If you change
+# the format below, update smoke.sh's canonical_re in the same commit.
 log() {
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S%z')" "$1" >>"${BACKUP_LOG}"
 }

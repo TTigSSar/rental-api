@@ -14,9 +14,14 @@
 Файлы стенда: `docker-compose.production.yml`, `.env.production.example` —
 оба лежат в корне репозитория `rental-api`.
 
-Это первое production-развёртывание — база данных стартует пустой (в отличие
-от staging, dev-сид в Production не запускается). См. раздел **e** про
+Это первое production-развёртывание — база данных стартует пустой (dev-сид
+гейтится на `IsDevelopment()` и в Production не запускается; засеянные данные
+есть только в локальном `docker-compose.yml`). См. раздел **e** про
 bootstrap-администратора и раздел **h** про предупреждения перед запуском.
+
+> На VPS работает **только** этот production-стек. Staging-стенда не существует:
+> `test.dorent.am` не резолвится, `docker-compose.staging.yml` никогда не
+> запускался. См. ADR-004 в `knowledge/decisions.md`.
 
 ---
 

@@ -1,3 +1,27 @@
+# ============================================================================
+# NOT DEPLOYED — this file describes a stand that does not exist.
+#
+# No staging stand has ever been run. `test.dorent.am` does NOT resolve
+# (NXDOMAIN): the Cloudflare Tunnel publishes only `dorent.am` and
+# `www.dorent.am` -> http://ui:80. There is no staging route.
+# The VPS runs production only (docker-compose.production.yml,
+# ASPNETCORE_ENVIRONMENT=Production).
+#
+# A staging stand does not fit alongside production on the current 2 GB VPS
+# (Hetzner CPX12): it is a second full stack including a second SQL Server
+# (~1 GB, on top of production's 1 GB cap) — the OOM killer would likely take
+# down the PRODUCTION database. It would also collide on the host ports
+# 127.0.0.1:8080 and 127.0.0.1:4200, which production already binds.
+#
+# The seeded test environment is the local `docker-compose.yml` in this repo,
+# not a remote stand.
+#
+# Reviving this needs a second VPS or a rescale to 4 GB RAM — see ADR-004 in
+# `knowledge/decisions.md`. Kept (not deleted) as a legitimate starting point
+# if a stand is ever funded. Everything below is a PLAN, not a description of
+# anything that runs.
+# ============================================================================
+
 services:
   db:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -6,9 +30,10 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: "Developer"
-      # The stand runs on a 2 GB RAM VPS; uncapped, SQL Server would grab most of
-      # it (~80% of system memory by default). Remove this cap if the server is
-      # ever rescaled to 4 GB+ RAM.
+      # The stand was designed for a 2 GB RAM VPS; uncapped, SQL Server would grab
+      # most of it (~80% of system memory by default). Remove this cap if the stand
+      # is ever built on a 4 GB+ RAM server. (Note: on the CURRENT 2 GB VPS this cap
+      # is not enough to make staging coexist with production — see the banner.)
       MSSQL_MEMORY_LIMIT_MB: "1024"
     volumes:
       - sqldata:/var/opt/mssql

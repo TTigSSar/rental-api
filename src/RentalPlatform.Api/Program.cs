@@ -29,6 +29,11 @@ else
     // starts from an empty database and would otherwise have no admin at all. No-op unless
     // Bootstrap:AdminEmail / Bootstrap:AdminPassword are both configured.
     await app.Services.BootstrapAdminAsync(app.Configuration);
+
+    // Same idea for the public catalogue: Development gets its listings from the dev seed,
+    // every other environment starts with zero categories/listings. No-op unless
+    // Bootstrap:DemoContentEnabled is true and the owner email/password are both configured.
+    await app.Services.BootstrapDemoContentAsync(app.Configuration);
 }
 
 // Must run before anything that reads the client IP or scheme (rate limiter, CORS, HTTPS

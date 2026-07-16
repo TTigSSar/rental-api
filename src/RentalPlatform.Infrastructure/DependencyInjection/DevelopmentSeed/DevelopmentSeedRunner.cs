@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
+using RentalPlatform.Infrastructure.DependencyInjection.SeedSupport;
 using RentalPlatform.Infrastructure.Persistence;
 
 namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
@@ -808,42 +809,9 @@ internal sealed class DevelopmentSeedRunner
             .FirstOrDefault();
     }
 
-    private async Task<string> ResolveImageUrlAsync(
-        string sourceUrl, Guid listingId, string fallbackUrl, CancellationToken cancellationToken)
-    {
-        if (!sourceUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            return sourceUrl;
-
-        try
-        {
-            using var response = await _http.GetAsync(sourceUrl, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Seed image download returned {Status} for {Url}", response.StatusCode, sourceUrl);
-                return string.IsNullOrEmpty(fallbackUrl) ? sourceUrl : fallbackUrl;
-            }
-
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-            var ext = contentType switch
-            {
-                "image/png"  => ".png",
-                "image/webp" => ".webp",
-                "image/gif"  => ".gif",
-                _            => ".jpg"
-            };
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            var localUrl = await _fileStorage.SaveListingImageAsync(
-                stream, $"seed{ext}", contentType, listingId, cancellationToken);
-            _logger.LogInformation("Seed image saved locally as {LocalUrl}", localUrl);
-            return localUrl;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to download seed image from {Url}", sourceUrl);
-            return string.IsNullOrEmpty(fallbackUrl) ? sourceUrl : fallbackUrl;
-        }
-    }
+    private Task<string> ResolveImageUrlAsync(
+        string sourceUrl, Guid listingId, string fallbackUrl, CancellationToken cancellationToken) =>
+        SeedImageResolver.ResolveImageUrlAsync(_http, _fileStorage, _logger, sourceUrl, listingId, fallbackUrl, cancellationToken);
 
     private async Task<HashSet<Guid>> ResolvePresentListingIdsAsync(
         Guid[] ids,

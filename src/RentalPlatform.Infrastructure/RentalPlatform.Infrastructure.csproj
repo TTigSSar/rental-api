@@ -11,6 +11,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lets the test project exercise internal seed/bootstrap runners (DemoContentBootstrapRunner,
+         DevelopmentSeedData) directly with a fake HttpClient handler, instead of going through the
+         public DI-wiring extension methods where the real HttpClient would attempt real network
+         calls to Unsplash. -->
+    <InternalsVisibleTo Include="RentalPlatform.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

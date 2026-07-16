@@ -52,6 +52,23 @@ services:
       # idempotent, and a no-op if the account already exists. See DEPLOY-PRODUCTION.md.
       Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL}
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD}
+      # Initial public catalogue (DemoContentBootstrapRunner): one showcase owner account
+      # plus the curated Approved listings. Idempotent and additive-only — safe to leave
+      # enabled. See DEPLOY-PRODUCTION.md.
+      #
+      # The `:-false` default is load-bearing, not cosmetic. Compose interpolates an unset
+      # or empty .env var to an empty string and STILL sets the key ("" is not "absent"),
+      # and the app reads this one via configuration.GetValue<bool>(), which THROWS
+      # InvalidOperationException on "" instead of defaulting to false — that is a startup
+      # crashloop, and since ui/cloudflared gate on api's `service_healthy`, it would take
+      # the whole site down. `:-false` substitutes when the var is unset OR empty, which is
+      # exactly the state .env.production.example ships. Must be exactly true/false —
+      # other truthy spellings ("yes", "1") throw the same way.
+      Bootstrap__DemoContentEnabled: ${BOOTSTRAP_DEMO_CONTENT_ENABLED:-false}
+      # Plain strings, so empty is harmless: the runner no-ops when either is blank
+      # (same contract as the admin pair above).
+      Bootstrap__DemoOwnerEmail: ${BOOTSTRAP_DEMO_OWNER_EMAIL}
+      Bootstrap__DemoOwnerPassword: ${BOOTSTRAP_DEMO_OWNER_PASSWORD}
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat

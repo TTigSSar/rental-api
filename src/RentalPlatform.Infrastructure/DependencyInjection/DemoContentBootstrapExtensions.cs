@@ -9,6 +9,8 @@ namespace RentalPlatform.Infrastructure.DependencyInjection;
 
 public static class DemoContentBootstrapExtensions
 {
+    internal const string DemoContentEnabledKey = "Bootstrap:DemoContentEnabled";
+
     // Reads Bootstrap:DemoContentEnabled / Bootstrap:DemoOwnerEmail / Bootstrap:DemoOwnerPassword
     // from configuration and, if enabled and both owner values are set, idempotently ensures a
     // showcase owner account and the catalogue's Approved listings (+ images) exist. Intended for
@@ -20,7 +22,6 @@ public static class DemoContentBootstrapExtensions
         IConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
-        var enabled = configuration.GetValue<bool>("Bootstrap:DemoContentEnabled");
         var ownerEmail = configuration["Bootstrap:DemoOwnerEmail"];
         var ownerPassword = configuration["Bootstrap:DemoOwnerPassword"];
 
@@ -32,10 +33,54 @@ public static class DemoContentBootstrapExtensions
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger<DemoContentBootstrapRunner>();
 
+        var enabled = ParseDemoContentEnabled(configuration, logger);
+
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RentalPlatform-DemoContentBootstrap/1.0");
 
         var runner = new DemoContentBootstrapRunner(dbContext, passwordHasher, fileStorage, http, logger);
         await runner.RunAsync(enabled, ownerEmail, ownerPassword, cancellationToken);
+    }
+
+    // Bootstrap:DemoContentEnabled drives a purely optional, cosmetic feature (an initial public
+    // catalogue) — a bad value for it must degrade to "feature off", never to "app dead". This
+    // matters because Docker Compose does not omit unset .env variables: it maps them to an empty
+    // string and still sets the key, so a plain `configuration.GetValue<bool>(...)` (or the
+    // `TypeConverter`-based conversion `GetValue` does internally) throws InvalidOperationException
+    // on "" just as it would on a typo like "yes" — and since this runs on the startup path before
+    // the app is marked healthy, that throw is a full-site crashloop, not a degraded feature.
+    //
+    // Accepted values are exactly "true"/"false" (case-insensitive, via bool.TryParse) — the same
+    // contract .env.production.example documents. A wider truthy set ("1"/"yes"/"on") was
+    // considered and rejected: it would silently multiply the ways to spell "enabled", inviting the
+    // exact typo-tolerance illusion that caused this bug in the first place (e.g. "no" reads as a
+    // sensible "false" spelling but wouldn't match "yes"/"1"/"on" as true's counterpart, so the
+    // symmetry breaks down fast). Keeping the accepted set to two exact spellings keeps this
+    // WARNING's guidance unambiguous.
+    //
+    // Empty/absent is the expected, silent steady state (most deployments never set this key).
+    // Anything else that isn't "true"/"false" is almost certainly an operator typo, so it gets a
+    // WARNING naming the bad value and the fact that demo content is therefore disabled — silently
+    // ignoring a typo would leave Tigran wondering why nothing happened.
+    internal static bool ParseDemoContentEnabled(IConfiguration configuration, ILogger logger)
+    {
+        var raw = configuration[DemoContentEnabledKey];
+
+        if (string.IsNullOrEmpty(raw))
+        {
+            return false;
+        }
+
+        if (bool.TryParse(raw, out var parsed))
+        {
+            return parsed;
+        }
+
+        logger.LogWarning(
+            "Configuration key '{ConfigKey}' has an unrecognized value '{ConfigValue}' — only 'true' or " +
+            "'false' (case-insensitive) are accepted. Demo content bootstrap is DISABLED for this run.",
+            DemoContentEnabledKey,
+            raw);
+        return false;
     }
 }

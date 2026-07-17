@@ -20,6 +20,8 @@ public sealed class MyListingResponse
     public string? HygieneNotes { get; init; }
     public string? SafetyNotes { get; init; }
     public decimal? DepositAmount { get; init; }
+    public int? MinRentalDays { get; init; }
+    public DeliveryType? DeliveryType { get; init; }
     public ListingStatus Status { get; init; }
     public string? RejectionReason { get; init; }
     public ListingRejectionResponse? Rejection { get; init; }

@@ -42,6 +42,8 @@ public sealed class Listing
     public string? HygieneNotes { get; set; }
     public string? SafetyNotes { get; set; }
     public decimal? DepositAmount { get; set; }
+    public int? MinRentalDays { get; set; }
+    public DeliveryType? DeliveryType { get; set; }
 
     public User Owner { get; set; } = null!;
     public Category Category { get; set; } = null!;

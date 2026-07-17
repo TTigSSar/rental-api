@@ -104,6 +104,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             HygieneNotes = NormalizeOptional(request.HygieneNotes),
             SafetyNotes = NormalizeOptional(request.SafetyNotes),
             DepositAmount = request.DepositAmount,
+            MinRentalDays = request.MinRentalDays,
+            DeliveryType = request.DeliveryType,
             Status = ListingStatus.PendingApproval,
             CreatedAt = now,
             UpdatedAt = now
@@ -174,6 +176,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 HygieneNotes = listing.HygieneNotes,
                 SafetyNotes = listing.SafetyNotes,
                 DepositAmount = listing.DepositAmount,
+                MinRentalDays = listing.MinRentalDays,
+                DeliveryType = listing.DeliveryType,
                 Status = listing.Status,
                 RejectionReason = listing.RejectionReason,
                 Rejection = listing.Status == ListingStatus.Rejected && listing.RejectionReasonCode is { } code
@@ -340,6 +344,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
         if (request.AgeToMonths is not null) listing.AgeToMonths = request.AgeToMonths;
         if (request.DepositAmount is not null) listing.DepositAmount = request.DepositAmount;
+        if (request.MinRentalDays is not null) listing.MinRentalDays = request.MinRentalDays;
+        if (request.DeliveryType is not null) listing.DeliveryType = request.DeliveryType;
 
         if (listing.Status == ListingStatus.Rejected)
         {

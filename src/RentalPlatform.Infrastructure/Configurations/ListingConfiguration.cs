@@ -94,6 +94,13 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.DepositAmount)
             .HasPrecision(18, 2);
 
+        builder.Property(listing => listing.MinRentalDays);
+
+        // Nullable, persisted as int like the project's other enums (ListingStatus, PriceUnit).
+        // No default/sentinel: unlike PriceUnit, an unset delivery method is a real "not specified"
+        // state, not a value with an implied fallback.
+        builder.Property(listing => listing.DeliveryType);
+
         builder.HasOne(listing => listing.Owner)
             .WithMany(user => user.Listings)
             .HasForeignKey(listing => listing.OwnerId)

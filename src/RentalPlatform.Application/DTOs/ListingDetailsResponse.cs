@@ -24,6 +24,8 @@ public sealed class ListingDetailsResponse
     public string? HygieneNotes { get; init; }
     public string? SafetyNotes { get; init; }
     public decimal? DepositAmount { get; init; }
+    public int? MinRentalDays { get; init; }
+    public DeliveryType? DeliveryType { get; init; }
 
     /// <summary>Average toy rating, or null when below the aggregate threshold.</summary>
     public double? Rating { get; init; }

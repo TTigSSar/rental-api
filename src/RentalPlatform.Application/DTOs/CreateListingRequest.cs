@@ -63,4 +63,12 @@ public sealed class CreateListingRequest
 
     [Range(typeof(decimal), "0", "999999999999.99", ErrorMessage = "Deposit amount cannot be negative.")]
     public decimal? DepositAmount { get; init; }
+
+    // Optional: shortest number of days a renter may book for. Omitted when the owner doesn't set one.
+    [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]
+    public int? MinRentalDays { get; init; }
+
+    // Optional: how the toy is handed over (Pickup/Courier). Validated to be a defined enum value.
+    [EnumDataType(typeof(DeliveryType), ErrorMessage = "Delivery type must be one of Pickup, Courier.")]
+    public DeliveryType? DeliveryType { get; init; }
 }

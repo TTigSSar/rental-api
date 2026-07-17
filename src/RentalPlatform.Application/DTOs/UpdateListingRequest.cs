@@ -42,4 +42,13 @@ public sealed class UpdateListingRequest
 
     [Range(typeof(decimal), "0", "999999999999.99", ErrorMessage = "Deposit amount cannot be negative.")]
     public decimal? DepositAmount { get; init; }
+
+    // Optional: shortest number of days a renter may book for. Null leaves the existing value unchanged.
+    [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]
+    public int? MinRentalDays { get; init; }
+
+    // Optional: how the toy is handed over. Null leaves the existing value unchanged; when supplied
+    // it must be a defined enum value.
+    [EnumDataType(typeof(DeliveryType), ErrorMessage = "Delivery type must be one of Pickup, Courier.")]
+    public DeliveryType? DeliveryType { get; init; }
 }

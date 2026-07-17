@@ -150,6 +150,8 @@ public sealed class ListingsQueryService : IListingsQueryService
                 HygieneNotes = listing.HygieneNotes,
                 SafetyNotes = listing.SafetyNotes,
                 DepositAmount = listing.DepositAmount,
+                MinRentalDays = listing.MinRentalDays,
+                DeliveryType = listing.DeliveryType,
                 ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
                 // Aggregate hidden until the minimum number of reviews (2).
                 Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id) >= 2

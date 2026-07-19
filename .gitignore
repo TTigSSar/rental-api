@@ -4,3 +4,7 @@ obj/
 *.user
 *.suo
 .env
+
+# Codex local tooling (mirrors .claude; kept machine-local)
+/AGENTS.md
+/.codex/

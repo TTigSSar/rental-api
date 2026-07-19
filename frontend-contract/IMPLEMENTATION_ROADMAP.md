@@ -1,6 +1,6 @@
 # IMPLEMENTATION_ROADMAP.md
 
-> **Permanent implementation strategy** for ToyRent — child toys rental marketplace MVP (Angular + NgRx + ASP.NET Core).
+> **Permanent implementation strategy** for DoRent — child toys rental marketplace MVP (Angular + NgRx + ASP.NET Core).
 
 | | |
 |---|---|
@@ -1015,7 +1015,7 @@ Verify: npm run build + mobile 375px
 
 ### What this product should become
 
-ToyRent is a **trust-first, mobile-first rental marketplace** where Armenian families safely share child toys — expanding later to sports gear and general rentable consumer items — without becoming a complex enterprise platform.
+DoRent is a **trust-first, mobile-first rental marketplace** where Armenian families safely share child toys — expanding later to sports gear and general rentable consumer items — without becoming a complex enterprise platform.
 
 ### Why mobile-first matters
 
@@ -1051,5 +1051,5 @@ A parent in Yerevan can find a toy, trust what they see, request a rental on mob
 
 ---
 
-*Last updated: May 2026 — ToyRent MVP (child toys rental, Armenia)*  
+*Last updated: May 2026 — DoRent MVP (child toys rental, Armenia)*  
 *Visual direction: Direction A — Refined Warm (`DESIGN_RULES.md`)*

@@ -1,6 +1,6 @@
 # DESIGN_RULES.md
 
-> **Permanent UI/UX source of truth** for the ToyRent rental marketplace (Angular + NgRx + ASP.NET Core).
+> **Permanent UI/UX source of truth** for the DoRent rental marketplace (Angular + NgRx + ASP.NET Core).
 
 | | |
 |---|---|
@@ -793,4 +793,4 @@ Read this file + `src/styles.css` first; reuse shared UI; match NgRx + standalon
 
 ---
 
-*Last updated: May 2026 — ToyRent MVP (child toys rental, Armenia)*
+*Last updated: May 2026 — DoRent MVP (child toys rental, Armenia)*

@@ -12,9 +12,9 @@ namespace RentalPlatform.Infrastructure.Services;
 /// </summary>
 public sealed class NotificationEmitter : INotificationEmitter
 {
-    private const string SystemPlatformName = "ToyRent";
+    private const string SystemPlatformName = "DoRent";
     private const string SystemPlatformIcon = "heart";
-    private const string SystemModeratorName = "ToyRent Moderator";
+    private const string SystemModeratorName = "DoRent Moderator";
     private const string SystemModeratorIcon = "shield";
 
     private readonly INotificationsStore _store;

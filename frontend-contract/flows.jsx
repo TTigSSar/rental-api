@@ -18,7 +18,7 @@ function AuthScreen({ mode = 'signin', dir = 'A' }) {
           <Icon name="heart" size={28} color="#fff" />
         </div>
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: t.text, letterSpacing: '-0.02em' }}>
-          {isSignIn ? 'Welcome back' : 'Join ToyRent'}
+          {isSignIn ? 'Welcome back' : 'Join DoRent'}
         </h1>
         <p style={{ margin: '6px 0 24px', fontSize: 13, color: t.textMute, lineHeight: 1.5 }}>
           {isSignIn ? 'Sign in to manage rentals and list toys.' : 'Free for parents. List up to 3 toys to start.'}

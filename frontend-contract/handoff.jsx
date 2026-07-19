@@ -232,7 +232,7 @@ export const tokens = {
 
         <div>
           <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>Cursor / Claude rules — drop in .cursor/rules</h3>
-          <CodeBlock title=".cursor/rules/toyrent-design.md" lang="md">{`# ToyRent design rules
+          <CodeBlock title=".cursor/rules/dorent-design.md" lang="md">{`# DoRent design rules
 
 ## Tokens
 - Never use literal hex codes. Only var(--color-*).

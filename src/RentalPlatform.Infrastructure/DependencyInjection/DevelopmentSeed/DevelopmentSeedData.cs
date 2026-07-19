@@ -156,7 +156,7 @@ internal static class DevelopmentSeedData
         new(
             new Guid("11111111-0006-4000-9000-000000000006"),
             DevelopmentSeedCredentials.DemoAdminEmail,
-            "Admin", "ToyRent",
+            "Admin", "DoRent",
             UserRole.Admin, IsBlocked: false, PhoneNumber: "+374 55 200 001"),
         new(
             new Guid("11111111-0007-4000-9000-000000000007"),

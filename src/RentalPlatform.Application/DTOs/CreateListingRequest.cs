@@ -24,7 +24,7 @@ public sealed class CreateListingRequest
     [EnumDataType(typeof(PriceUnit), ErrorMessage = "Price unit must be one of Hourly, Daily, Weekly, Monthly, Yearly.")]
     public PriceUnit? PriceUnit { get; init; }
 
-    // Optional: 3-letter ISO code. Defaults to USD when omitted.
+    // Optional: 3-letter ISO code. Defaults to AMD when omitted.
     [StringLength(3, MinimumLength = 3, ErrorMessage = "Currency must be a 3-letter ISO code (e.g. USD, AMD).")]
     public string? Currency { get; init; }
 

@@ -92,7 +92,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             PricePerDay = request.PricePerDay,
             // Default to Daily when the period is omitted (kept in sync with the entity/DB default).
             PriceUnit = request.PriceUnit ?? PriceUnit.Daily,
-            Currency = string.IsNullOrWhiteSpace(request.Currency) ? "USD" : request.Currency.Trim().ToUpperInvariant(),
+            Currency = string.IsNullOrWhiteSpace(request.Currency) ? "AMD" : request.Currency.Trim().ToUpperInvariant(),
             Country = request.Country.Trim(),
             City = request.City.Trim(),
             AddressLine = NormalizeOptional(request.AddressLine),

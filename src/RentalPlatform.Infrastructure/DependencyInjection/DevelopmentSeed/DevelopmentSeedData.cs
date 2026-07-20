@@ -185,7 +185,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wiped down with child-safe disinfectant after every return. Complete piece count verified.",
             SafetyNotes: "All pieces are large enough to comply with EN 71-1 small-parts requirements. No loose batteries.",
-            DepositAmount: 30m),
+            DepositAmount: 12000m),
         new(
             ListingIds.MontessoriWoodenToySet,
             "Montessori Wooden Toy Set",
@@ -198,7 +198,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Wood pieces wiped with a damp cloth and left to fully air-dry between rentals.",
             SafetyNotes: "Smooth, splinter-free finish. Non-toxic water-based stain. No magnets, no detachable small parts.",
-            DepositAmount: 35m),
+            DepositAmount: 14000m),
         new(
             ListingIds.BabyActivityGym,
             "Baby Activity Gym",
@@ -211,7 +211,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Removable mat is machine-washed at 60 °C between rentals. Hanging toys are surface-sanitized.",
             SafetyNotes: "All attachments are double-stitched and torque-tested. Suitable for supervised tummy time.",
-            DepositAmount: 25m),
+            DepositAmount: 10000m),
         new(
             ListingIds.KidsBalanceBike,
             "Kids Balance Bike",
@@ -224,7 +224,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Frame and grips wiped with disinfectant; saddle cover wiped with antibacterial spray.",
             SafetyNotes: "Helmet not included. Owner recommends a fitted helmet and supervised use on flat surfaces.",
-            DepositAmount: 40m),
+            DepositAmount: 16000m),
         new(
             ListingIds.OutdoorBackyardSlide,
             "Outdoor Backyard Slide",
@@ -237,7 +237,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Surfaces wiped with mild soap and water after every rental, then dried.",
             SafetyNotes: "Must be placed on level ground. Owner provides anti-slip pads. Max user weight 25 kg.",
-            DepositAmount: 50m),
+            DepositAmount: 20000m),
         new(
             ListingIds.ChildrensPuzzleBundle,
             "Children's Puzzle Bundle",
@@ -250,7 +250,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Pieces wiped with a slightly damp cloth and air-dried between rentals.",
             SafetyNotes: "Smallest pieces are above the 3-year-old small-parts threshold. Not recommended under 36 months.",
-            DepositAmount: 20m),
+            DepositAmount: 8000m),
         new(
             ListingIds.ToyKitchenSet,
             "Wooden Toy Kitchen Set",
@@ -263,7 +263,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wood surfaces wiped with food-safe cleaner; small accessories washed in soapy water.",
             SafetyNotes: "Rounded edges. No glass, no magnets, no detachable small parts under 36 months.",
-            DepositAmount: 40m),
+            DepositAmount: 16000m),
 
         // ---- PendingApproval (admin moderation queue) ----
         new(
@@ -278,7 +278,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Cards and pieces wiped down between rentals; boxes inspected for completeness.",
             SafetyNotes: "Contains small parts; not suitable under 36 months without supervision.",
-            DepositAmount: 25m),
+            DepositAmount: 10000m),
         new(
             ListingIds.BirthdayPartyToyPack,
             "Birthday Party Toy Pack",
@@ -291,7 +291,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Balls and fabric items washed; foam darts wiped with antibacterial wipes.",
             SafetyNotes: "Foam darts only. No projectile toys. Adult supervision recommended.",
-            DepositAmount: 30m),
+            DepositAmount: 12000m),
 
         // ---- Rejected ----
         new(
@@ -306,7 +306,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: null,
             SafetyNotes: null,
-            DepositAmount: 25m,
+            DepositAmount: 10000m,
             RejectionReason: "Hygiene notes are required. Please describe how the item is cleaned between rentals."),
 
         // ---- Additional approved listings owned by demo_owner@toyrent.am (listings 8–12 approved) ----
@@ -322,7 +322,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Single-use chemical sachets replaced after each rental. Trays and tools washed with soapy water.",
             SafetyNotes: "Adult supervision required for all experiments. No open flames. Includes safety goggles.",
-            DepositAmount: 20m),
+            DepositAmount: 8000m),
         new(
             ListingIds.ClassicBoardGameTrio,
             "Classic Board Game Trio",
@@ -335,7 +335,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Cards and tokens wiped with a dry cloth before return; boxes sealed with elastic for storage.",
             SafetyNotes: "Contains small pieces; not suitable for children under 3 years without supervision.",
-            DepositAmount: 15m),
+            DepositAmount: 6000m),
         new(
             ListingIds.PartyFunActivityPack,
             "Party Fun Activity Pack",
@@ -348,7 +348,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Fabric items machine-washed after every rental. Hard plastic items wiped with antibacterial spray.",
             SafetyNotes: "Parachute activity requires adult supervision. Clear a flat open area of at least 4 × 4 m.",
-            DepositAmount: 30m),
+            DepositAmount: 12000m),
         new(
             ListingIds.WoodenTrainSet,
             "Wooden Train Set & Track (56 pcs)",
@@ -361,7 +361,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Track pieces and rolling stock wiped with a damp cloth and dried before packing. Piece count verified.",
             SafetyNotes: "No small detachable parts below 3-year-old threshold. Supervised use recommended under 24 months.",
-            DepositAmount: 35m),
+            DepositAmount: 14000m),
         new(
             ListingIds.KidsArtEasel,
             "Kids Double-Sided Art Easel",
@@ -374,7 +374,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Whiteboard and blackboard surfaces wiped clean before handover. Markers capped and tested.",
             SafetyNotes: "Child-safe, non-toxic chalk and markers. Easel folds flat for transport; locking pins provided.",
-            DepositAmount: 20m)
+            DepositAmount: 8000m)
     ];
 
     // Seed images: primary source is Unsplash (downloaded and stored locally at startup).

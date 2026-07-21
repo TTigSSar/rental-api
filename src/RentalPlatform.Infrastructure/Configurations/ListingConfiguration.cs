@@ -54,6 +54,23 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.Longitude)
             .HasPrecision(9, 6);
 
+        // Privacy-model additions (P1-2 schema only — see Listing.cs; nothing computes these yet,
+        // that's P1-4). Same precision/scale as Latitude/Longitude since both hold the same kind
+        // of WGS84 value.
+        builder.Property(listing => listing.PublicLatitude)
+            .HasPrecision(9, 6);
+
+        builder.Property(listing => listing.PublicLongitude)
+            .HasPrecision(9, 6);
+
+        // Persisted as int like the project's other enums (ListingStatus, PriceUnit). Unlike
+        // PriceUnit's Daily/Hourly, Home (0) is both the CLR default and the desired DB default,
+        // so a plain HasDefaultValue is enough — no sentinel needed to disambiguate "unset" from
+        // an explicitly chosen zero value.
+        builder.Property(listing => listing.LocationKind)
+            .IsRequired()
+            .HasDefaultValue(Domain.Enums.LocationKind.Home);
+
         builder.Property(listing => listing.Status)
             .IsRequired();
 
@@ -111,6 +128,15 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
             .HasForeignKey(listing => listing.CategoryId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Nullable FK — a listing may have no district yet (P1-4 backfills it via point-in-
+        // polygon lookup). Restrict: a district with listings against it cannot be deleted out
+        // from under them (Districts is fixed reference data anyway, so this should never fire
+        // in practice, but Restrict is the safe/explicit choice over a cascading delete here).
+        builder.HasOne(listing => listing.District)
+            .WithMany(district => district.Listings)
+            .HasForeignKey(listing => listing.DistrictId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasMany(listing => listing.Images)
             .WithOne(image => image.Listing)
             .HasForeignKey(image => image.ListingId)
@@ -119,5 +145,10 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.HasIndex(listing => listing.Status);
         builder.HasIndex(listing => listing.City);
         builder.HasIndex(listing => listing.CategoryId);
+        builder.HasIndex(listing => listing.DistrictId);
+
+        // Composite index for the Phase 2 bounding-box queries against the public (fuzzed)
+        // coordinate — not the exact Latitude/Longitude, which stay owner/admin-only.
+        builder.HasIndex(listing => new { listing.PublicLatitude, listing.PublicLongitude });
     }
 }

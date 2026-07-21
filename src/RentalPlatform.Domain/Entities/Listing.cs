@@ -20,6 +20,15 @@ public sealed class Listing
     public string? AddressLine { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
+
+    // Privacy-model additions (P1-2 schema only — nothing computes these yet, see P1-4):
+    // DistrictId/PublicLatitude/PublicLongitude are derived from Latitude/Longitude at write
+    // time and are what non-owner/non-admin callers see instead of the exact coordinate.
+    public Guid? DistrictId { get; set; }
+    public decimal? PublicLatitude { get; set; }
+    public decimal? PublicLongitude { get; set; }
+    public LocationKind LocationKind { get; set; } = LocationKind.Home;
+
     public ListingStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -47,6 +56,7 @@ public sealed class Listing
 
     public User Owner { get; set; } = null!;
     public Category Category { get; set; } = null!;
+    public District? District { get; set; }
     public ICollection<ListingImage> Images { get; set; } = new List<ListingImage>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
     public ICollection<Favorite> Favorites { get; set; } = new List<Favorite>();

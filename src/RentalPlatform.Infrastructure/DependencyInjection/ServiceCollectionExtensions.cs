@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INotificationsStore, NotificationsStore>();
         services.AddScoped<IConversationsStore, ConversationsStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+        services.AddSingleton<IDistrictBoundaryProvider, DistrictBoundaryProvider>();
 
         services.AddHostedService<BookingExpiryBackgroundService>();
 

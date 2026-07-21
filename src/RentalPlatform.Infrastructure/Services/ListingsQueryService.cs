@@ -140,7 +140,16 @@ public sealed class ListingsQueryService : IListingsQueryService
                 // Any future distance/sort computation (Phase 2, not implemented yet) MUST read
                 // the public pair, never Listing.Latitude/Longitude directly, and round its own
                 // output — this is the one seam that decides who gets the exact point.
-                CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value)
+                CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value),
+                // Second decision point, reused below for both the owner's phone number and the
+                // pickup AddressLine: has this caller got a booking on this listing that reached
+                // at least Approved? Matches the contact-reveal gate in BookingDetailResponse —
+                // a Pending request must not leak contact/pickup details before the owner accepts.
+                ContactRevealed = callerId.HasValue && listing.Bookings.Any(booking =>
+                    booking.RenterId == callerId &&
+                    (booking.Status == BookingStatus.Approved ||
+                     booking.Status == BookingStatus.Active ||
+                     booking.Status == BookingStatus.Completed))
             })
             .Select(x => new ListingDetailsResponse
             {
@@ -152,7 +161,13 @@ public sealed class ListingsQueryService : IListingsQueryService
                 Currency = x.Listing.Currency,
                 Country = x.Listing.Country,
                 City = x.Listing.City,
-                AddressLine = x.Listing.AddressLine,
+                // Pickup address: owner/admin always (they need it to manage the listing), plus a
+                // renter whose booking reached Approved (they genuinely need it to collect the
+                // toy). Everyone else — including anonymous callers and unrelated authenticated
+                // users — gets null. This closes a leak where the exact street address was
+                // returned ungated, defeating the approximate-location feature (only
+                // Latitude/Longitude were gated via CanSeeExactCoordinates).
+                AddressLine = (x.CanSeeExactCoordinates || x.ContactRevealed) ? x.Listing.AddressLine : null,
                 Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : x.Listing.PublicLatitude,
                 Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : x.Listing.PublicLongitude,
                 District = x.Listing.District == null ? null : new ListingDistrictResponse
@@ -195,13 +210,7 @@ public sealed class ListingsQueryService : IListingsQueryService
                     // Reveal the owner's phone only once the renter has a booking that reached at
                     // least Approved — matching the contact-reveal gate in BookingDetail. A Pending
                     // request must NOT expose contact details before the owner has accepted it.
-                    PhoneNumber = callerId != null && x.Listing.Bookings.Any(booking =>
-                        booking.RenterId == callerId &&
-                        (booking.Status == BookingStatus.Approved ||
-                         booking.Status == BookingStatus.Active ||
-                         booking.Status == BookingStatus.Completed))
-                        ? x.Listing.Owner.PhoneNumber
-                        : null
+                    PhoneNumber = x.ContactRevealed ? x.Listing.Owner.PhoneNumber : null
                 },
                 Images = x.Listing.Images
                     .OrderByDescending(image => image.IsPrimary)

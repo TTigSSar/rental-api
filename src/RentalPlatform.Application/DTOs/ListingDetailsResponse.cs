@@ -12,6 +12,10 @@ public sealed class ListingDetailsResponse
     public string Currency { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;
+
+    // Pickup street address. Gated on the contact-reveal rule: owner and admin always; a renter
+    // whose booking reached at least Approved; null for everyone else (incl. anonymous callers).
+    // See ListingsQueryService.GetApprovedListingByIdAsync (ContactRevealed / CanSeeExactCoordinates).
     public string? AddressLine { get; init; }
 
     // Owner/admin get the exact point; every other caller (including anonymous) gets the

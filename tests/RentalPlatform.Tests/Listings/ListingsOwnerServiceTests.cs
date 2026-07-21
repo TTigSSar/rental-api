@@ -2,6 +2,7 @@ using RentalPlatform.Application.DTOs;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
+using RentalPlatform.Infrastructure.Services;
 using RentalPlatform.Tests.TestSupport;
 using Xunit;
 
@@ -23,7 +24,11 @@ public sealed class ListingsOwnerServiceTests
     }
 
     private static ListingsOwnerService CreateService(AppDbContext context, Guid currentUserId) =>
-        new(new FakeCurrentUserContext(currentUserId), new ListingsOwnerStore(context));
+        new(
+            new FakeCurrentUserContext(currentUserId),
+            new ListingsOwnerStore(context),
+            new GeohashSnapper(),
+            new DistrictBoundaryProvider());
 
     private static CreateListingRequest ValidCreate(
         Guid? categoryId = null,

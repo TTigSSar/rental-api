@@ -36,6 +36,12 @@ else
     await app.Services.BootstrapDemoContentAsync(app.Configuration);
 }
 
+// Fills PublicLatitude/PublicLongitude/DistrictId for any listing (dev-seeded, demo-bootstrapped,
+// or pre-existing from before this feature shipped) that has exact coordinates but is still
+// missing one of those derived values. Idempotent and unconditional — every environment, every
+// startup, always after any seeding/bootstrap step above so freshly-inserted rows are covered too.
+await app.Services.BackfillListingLocationsAsync();
+
 // Must run before anything that reads the client IP or scheme (rate limiter, CORS, HTTPS
 // redirect, auth). No-op unless ForwardedHeaders:Enabled is set — see ForwardedHeadersExtensions.
 app.UseForwardedHeaders();

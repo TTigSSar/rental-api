@@ -171,6 +171,13 @@ internal static class DevelopmentSeedData
     ];
 
     // 10 toy listings (7 Approved, 2 PendingApproval, 1 Rejected), all owned by demo owner, Yerevan-focused.
+    // Coordinates are deliberately spread across 8 of the 12 Yerevan districts (Kentron, Arabkir,
+    // Nork-Marash, Malatia-Sebastia, Nor Nork, Davtashen, Shengavit, Erebuni) so the district
+    // point-in-polygon lookup (P1-4) and the map/district UI have more than one district to render.
+    // The Gyumri listing (Birthday Party Toy Pack) is intentionally outside every Yerevan district
+    // boundary — it exercises the "no district match, DistrictId stays null" path. Every
+    // coordinate here was verified against DistrictBoundaryProvider.FindDistrictCode before being
+    // baked in (see the district assignment comment on each listing needing it, where non-obvious).
     public static readonly SeedListing[] Listings =
     [
         new(
@@ -191,8 +198,8 @@ internal static class DevelopmentSeedData
             "Montessori Wooden Toy Set",
             "Six-piece natural wood Montessori set: shape sorter, stacking rings, threading beads, peg board and counting bars.",
             "montessori-toys", DevelopmentSeedCredentials.OwnerEmail,
-            3500m, "AMD", "Armenia", "Yerevan", "27 Baghramyan Ave",
-            40.1910m, 44.5132m,
+            3500m, "AMD", "Armenia", "Yerevan", "12 Kasyan St",
+            40.2140m, 44.5220m,
             ListingStatus.Approved, CreatedDaysAgo: 12, UpdatedDaysAgo: 3,
             AgeFromMonths: 24, AgeToMonths: 72,
             Condition: "Like new",
@@ -217,8 +224,8 @@ internal static class DevelopmentSeedData
             "Kids Balance Bike",
             "Lightweight 12-inch balance bike with adjustable seat (30-42 cm) and puncture-resistant tyres.",
             "ride-on-toys", DevelopmentSeedCredentials.OwnerEmail,
-            3000m, "AMD", "Armenia", "Yerevan", "45 Teryan St",
-            40.1861m, 44.5159m,
+            3000m, "AMD", "Armenia", "Yerevan", "5 Titanyan St",
+            40.1810m, 44.5370m,
             ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 2,
             AgeFromMonths: 24, AgeToMonths: 60,
             Condition: "Good",
@@ -230,8 +237,8 @@ internal static class DevelopmentSeedData
             "Outdoor Backyard Slide",
             "Stable plastic backyard slide, ~1.2 m climb. Easy to wipe down. Great for small gardens and play days.",
             "outdoor-toys", DevelopmentSeedCredentials.OwnerEmail,
-            4000m, "AMD", "Armenia", "Yerevan", "10 Nalbandyan St",
-            40.1795m, 44.5089m,
+            4000m, "AMD", "Armenia", "Yerevan", "22 Gai Ave",
+            40.1745m, 44.4475m,
             ListingStatus.Approved, CreatedDaysAgo: 8, UpdatedDaysAgo: 1,
             AgeFromMonths: 18, AgeToMonths: 72,
             Condition: "Good",
@@ -315,8 +322,8 @@ internal static class DevelopmentSeedData
             "STEM Science Discovery Kit",
             "Hands-on science kit with 20+ experiments: volcano, crystal growing, slime, and simple circuit activities. All chemicals are child-safe and pre-measured.",
             "educational-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
-            3000m, "AMD", "Armenia", "Yerevan", "14 Tigranyan St",
-            40.1862m, 44.5171m,
+            3000m, "AMD", "Armenia", "Yerevan", "8 Sarmen St",
+            40.1840m, 44.5720m,
             ListingStatus.Approved, CreatedDaysAgo: 11, UpdatedDaysAgo: 2,
             AgeFromMonths: 60, AgeToMonths: 144,
             Condition: "Excellent",
@@ -328,8 +335,8 @@ internal static class DevelopmentSeedData
             "Classic Board Game Trio",
             "Three timeless board games in one bundle: Snakes & Ladders, Ludo, and a 100-piece junior jigsaw. All pieces verified complete.",
             "board-games", DevelopmentSeedCredentials.DemoOwnerEmail,
-            2000m, "AMD", "Armenia", "Yerevan", "6 Hanrapetutyan St",
-            40.1783m, 44.5139m,
+            2000m, "AMD", "Armenia", "Yerevan", "14 Aygestani St",
+            40.2215m, 44.4795m,
             ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 1,
             AgeFromMonths: 48, AgeToMonths: 144,
             Condition: "Like new",
@@ -354,8 +361,8 @@ internal static class DevelopmentSeedData
             "Wooden Train Set & Track (56 pcs)",
             "56-piece wooden train set with figure-of-eight track, bridges, tunnels, a station, two engines and six carriages. Compatible with major wooden-rail brands.",
             "building-blocks", DevelopmentSeedCredentials.DemoOwnerEmail,
-            3500m, "AMD", "Armenia", "Yerevan", "31 Movses Khorenatsi St",
-            40.1756m, 44.5068m,
+            3500m, "AMD", "Armenia", "Yerevan", "30 Manandyan St",
+            40.1230m, 44.4770m,
             ListingStatus.Approved, CreatedDaysAgo: 5, UpdatedDaysAgo: 1,
             AgeFromMonths: 24, AgeToMonths: 84,
             Condition: "Excellent",
@@ -367,8 +374,8 @@ internal static class DevelopmentSeedData
             "Kids Double-Sided Art Easel",
             "Height-adjustable double-sided easel: whiteboard on one side, blackboard on the other, with a paper roll holder. Includes chalk, eraser, and 3 dry-erase markers.",
             "pretend-play", DevelopmentSeedCredentials.DemoOwnerEmail,
-            2500m, "AMD", "Armenia", "Yerevan", "9 Arshakunyats Ave",
-            40.1728m, 44.5205m,
+            2500m, "AMD", "Armenia", "Yerevan", "12 Ohanyan St",
+            40.1495m, 44.5470m,
             ListingStatus.Approved, CreatedDaysAgo: 4, UpdatedDaysAgo: 0,
             AgeFromMonths: 24, AgeToMonths: 96,
             Condition: "Like new",

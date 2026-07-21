@@ -45,6 +45,12 @@ public sealed class CreateListingRequest
     [Range(typeof(decimal), "-180", "180", ErrorMessage = "Longitude must be between -180 and 180.")]
     public decimal? Longitude { get; init; }
 
+    // Optional owner override for the derived district (point-in-polygon against Latitude/
+    // Longitude — see IDistrictBoundaryProvider). When supplied it must reference an existing
+    // District row and wins over derivation; when omitted, the district is derived from the exact
+    // point (and may be null if that point falls outside every known Yerevan district).
+    public Guid? DistrictId { get; init; }
+
     // ---- Toy-rental MVP: optional toy-specific metadata ----
     [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]
     public int? AgeFromMonths { get; init; }

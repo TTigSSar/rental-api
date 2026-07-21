@@ -17,15 +17,24 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         public const string InvalidStatus = "listing.invalid_status";
         public const string CategoryNotFound = "listing.category_not_found";
         public const string InvalidAgeRange = "listing.invalid_age_range";
+        public const string DistrictNotFound = "listing.district_not_found";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IListingsOwnerStore _listingsOwnerStore;
+    private readonly IGeohashSnapper _geohashSnapper;
+    private readonly IDistrictBoundaryProvider _districtBoundaryProvider;
 
-    public ListingsOwnerService(ICurrentUserContext currentUserContext, IListingsOwnerStore listingsOwnerStore)
+    public ListingsOwnerService(
+        ICurrentUserContext currentUserContext,
+        IListingsOwnerStore listingsOwnerStore,
+        IGeohashSnapper geohashSnapper,
+        IDistrictBoundaryProvider districtBoundaryProvider)
     {
         _currentUserContext = currentUserContext;
         _listingsOwnerStore = listingsOwnerStore;
+        _geohashSnapper = geohashSnapper;
+        _districtBoundaryProvider = districtBoundaryProvider;
     }
 
     public async Task<ServiceResult<CreateListingResponse>> CreateAsync(
@@ -81,6 +90,19 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
+        if (request.DistrictId is { } requestedDistrictId)
+        {
+            var districtExists = await _listingsOwnerStore.DistrictExistsAsync(requestedDistrictId, cancellationToken);
+            if (!districtExists)
+            {
+                return ServiceResult<CreateListingResponse>.Failure(new ServiceError
+                {
+                    Code = ErrorCodes.DistrictNotFound,
+                    Message = "District does not exist."
+                });
+            }
+        }
+
         var now = DateTime.UtcNow;
         var listing = new Listing
         {
@@ -110,6 +132,8 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             CreatedAt = now,
             UpdatedAt = now
         };
+
+        await ApplyDerivedLocationAsync(listing, request.Latitude, request.Longitude, request.DistrictId, cancellationToken);
 
         await _listingsOwnerStore.AddListingAsync(listing, cancellationToken);
         await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
@@ -324,6 +348,19 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
+        if (request.DistrictId is { } requestedDistrictId)
+        {
+            var districtExists = await _listingsOwnerStore.DistrictExistsAsync(requestedDistrictId, cancellationToken);
+            if (!districtExists)
+            {
+                return ServiceResult<Guid>.Failure(new ServiceError
+                {
+                    Code = ErrorCodes.DistrictNotFound,
+                    Message = "District does not exist."
+                });
+            }
+        }
+
         // Track whether any publicly-visible free-text content changed. Such fields were vetted
         // during moderation, so altering them on an already-approved listing must re-trigger review
         // (otherwise an owner could get innocent text approved and then swap in disallowed content).
@@ -346,6 +383,10 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         if (request.DepositAmount is not null) listing.DepositAmount = request.DepositAmount;
         if (request.MinRentalDays is not null) listing.MinRentalDays = request.MinRentalDays;
         if (request.DeliveryType is not null) listing.DeliveryType = request.DeliveryType;
+
+        // Explicit owner override (already validated to exist above). Update does not accept
+        // Latitude/Longitude changes, so there is no re-derivation here — just a direct assignment.
+        if (request.DistrictId is not null) listing.DistrictId = request.DistrictId;
 
         if (listing.Status == ListingStatus.Rejected)
         {
@@ -413,6 +454,50 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         await _listingsOwnerStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<bool>.Success(true);
+    }
+
+    // Computes the privacy-safe public coordinate pair (geohash-6 cell centroid — see
+    // IGeohashSnapper) and the derived district for a listing's exact point, on create. An
+    // explicit owner-supplied district (already validated by the caller) always wins over
+    // derivation; otherwise the district comes from IDistrictBoundaryProvider.FindDistrictCode
+    // against the exact point, and is left null when that point falls outside every known Yerevan
+    // district (legal — plenty of listings are outside Yerevan entirely).
+    private async Task ApplyDerivedLocationAsync(
+        Listing listing,
+        decimal? latitude,
+        decimal? longitude,
+        Guid? requestedDistrictId,
+        CancellationToken cancellationToken)
+    {
+        if (latitude is { } exactLatitude && longitude is { } exactLongitude)
+        {
+            var (publicLatitude, publicLongitude) = _geohashSnapper.SnapToCellCenter(exactLatitude, exactLongitude);
+            listing.PublicLatitude = publicLatitude;
+            listing.PublicLongitude = publicLongitude;
+        }
+        else
+        {
+            listing.PublicLatitude = null;
+            listing.PublicLongitude = null;
+        }
+
+        if (requestedDistrictId is not null)
+        {
+            listing.DistrictId = requestedDistrictId;
+            return;
+        }
+
+        if (latitude is { } derivationLatitude && longitude is { } derivationLongitude)
+        {
+            var code = _districtBoundaryProvider.FindDistrictCode((double)derivationLatitude, (double)derivationLongitude);
+            listing.DistrictId = code is null
+                ? null
+                : await _listingsOwnerStore.FindDistrictIdByCodeAsync(code, cancellationToken);
+        }
+        else
+        {
+            listing.DistrictId = null;
+        }
     }
 
     // Applies a new value and reports whether it actually differed from the current one.

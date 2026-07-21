@@ -133,11 +133,13 @@ public sealed class ListingsQueryService : IListingsQueryService
             {
                 Listing = listing,
                 // Single decision point for "may this caller see this listing's exact
-                // coordinates?" — owner and admins get the real values, everyone else (incl.
-                // anonymous callers) gets null (hotfix H1: exact lat/lng must not be
-                // reverse-geocodable by the public). A later card (P1-3) will swap the
-                // false-branch null below for fuzzed/rounded coordinates instead — change it
-                // only here.
+                // coordinates?" — owner and admins get the real values; everyone else (incl.
+                // anonymous callers) gets the public geohash-cell-centroid pair instead (P1-3,
+                // the public-coordinate rule — hotfix H1 first shipped this gate returning null
+                // for the false branch, now replaced by PublicLatitude/PublicLongitude below).
+                // Any future distance/sort computation (Phase 2, not implemented yet) MUST read
+                // the public pair, never Listing.Latitude/Longitude directly, and round its own
+                // output — this is the one seam that decides who gets the exact point.
                 CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value)
             })
             .Select(x => new ListingDetailsResponse
@@ -151,8 +153,16 @@ public sealed class ListingsQueryService : IListingsQueryService
                 Country = x.Listing.Country,
                 City = x.Listing.City,
                 AddressLine = x.Listing.AddressLine,
-                Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : null,
-                Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : null,
+                Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : x.Listing.PublicLatitude,
+                Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : x.Listing.PublicLongitude,
+                District = x.Listing.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = x.Listing.District.Id,
+                    Code = x.Listing.District.Code,
+                    NameEn = x.Listing.District.NameEn,
+                    NameHy = x.Listing.District.NameHy,
+                    NameRu = x.Listing.District.NameRu
+                },
                 CreatedAt = x.Listing.CreatedAt,
                 UpdatedAt = x.Listing.UpdatedAt,
                 AgeFromMonths = x.Listing.AgeFromMonths,

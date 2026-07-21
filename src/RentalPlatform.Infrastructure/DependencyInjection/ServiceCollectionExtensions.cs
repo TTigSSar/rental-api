@@ -73,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IConversationsStore, ConversationsStore>();
         services.AddSingleton<IFileStorageService, LocalFileStorageService>();
         services.AddSingleton<IDistrictBoundaryProvider, DistrictBoundaryProvider>();
+        services.AddSingleton<IGeohashSnapper, GeohashSnapper>();
 
         services.AddHostedService<BookingExpiryBackgroundService>();
 

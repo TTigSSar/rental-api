@@ -25,6 +25,11 @@ public sealed class UpdateListingRequest
     [MaxLength(100, ErrorMessage = "Country must be at most 100 characters.")]
     public string? Country { get; init; }
 
+    // Optional owner override for the district (see CreateListingRequest.DistrictId). Update does
+    // not currently accept Latitude/Longitude changes, so this is a direct override only — there
+    // is no re-derivation path here; null leaves the existing district unchanged.
+    public Guid? DistrictId { get; init; }
+
     [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]
     public int? AgeFromMonths { get; init; }
 

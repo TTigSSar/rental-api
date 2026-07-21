@@ -19,6 +19,15 @@ public sealed class ListingsOwnerStore : IListingsOwnerStore
     public Task<bool> CategoryExistsAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
         _dbContext.Categories.AnyAsync(category => category.Id == categoryId, cancellationToken);
 
+    public Task<bool> DistrictExistsAsync(Guid districtId, CancellationToken cancellationToken = default) =>
+        _dbContext.Districts.AnyAsync(district => district.Id == districtId, cancellationToken);
+
+    public Task<Guid?> FindDistrictIdByCodeAsync(string code, CancellationToken cancellationToken = default) =>
+        _dbContext.Districts
+            .Where(district => district.Code == code)
+            .Select(district => (Guid?)district.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
     public async Task AddListingAsync(Listing listing, CancellationToken cancellationToken = default) =>
         await _dbContext.Listings.AddAsync(listing, cancellationToken);
 

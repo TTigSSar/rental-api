@@ -129,60 +129,71 @@ public sealed class ListingsQueryService : IListingsQueryService
                 (isAdmin ||
                  listing.Status == ListingStatus.Approved ||
                  (callerId.HasValue && listing.OwnerId == callerId.Value)))
-            .Select(listing => new ListingDetailsResponse
+            .Select(listing => new
             {
-                Id = listing.Id,
-                Title = listing.Title,
-                Description = listing.Description,
-                PricePerDay = listing.PricePerDay,
-                PriceUnit = listing.PriceUnit,
-                Currency = listing.Currency,
-                Country = listing.Country,
-                City = listing.City,
-                AddressLine = listing.AddressLine,
-                Latitude = listing.Latitude,
-                Longitude = listing.Longitude,
-                CreatedAt = listing.CreatedAt,
-                UpdatedAt = listing.UpdatedAt,
-                AgeFromMonths = listing.AgeFromMonths,
-                AgeToMonths = listing.AgeToMonths,
-                Condition = listing.Condition,
-                HygieneNotes = listing.HygieneNotes,
-                SafetyNotes = listing.SafetyNotes,
-                DepositAmount = listing.DepositAmount,
-                MinRentalDays = listing.MinRentalDays,
-                DeliveryType = listing.DeliveryType,
-                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
+                Listing = listing,
+                // Single decision point for "may this caller see this listing's exact
+                // coordinates?" — owner and admins get the real values, everyone else (incl.
+                // anonymous callers) gets null (hotfix H1: exact lat/lng must not be
+                // reverse-geocodable by the public). A later card (P1-3) will swap the
+                // false-branch null below for fuzzed/rounded coordinates instead — change it
+                // only here.
+                CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value)
+            })
+            .Select(x => new ListingDetailsResponse
+            {
+                Id = x.Listing.Id,
+                Title = x.Listing.Title,
+                Description = x.Listing.Description,
+                PricePerDay = x.Listing.PricePerDay,
+                PriceUnit = x.Listing.PriceUnit,
+                Currency = x.Listing.Currency,
+                Country = x.Listing.Country,
+                City = x.Listing.City,
+                AddressLine = x.Listing.AddressLine,
+                Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : null,
+                Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : null,
+                CreatedAt = x.Listing.CreatedAt,
+                UpdatedAt = x.Listing.UpdatedAt,
+                AgeFromMonths = x.Listing.AgeFromMonths,
+                AgeToMonths = x.Listing.AgeToMonths,
+                Condition = x.Listing.Condition,
+                HygieneNotes = x.Listing.HygieneNotes,
+                SafetyNotes = x.Listing.SafetyNotes,
+                DepositAmount = x.Listing.DepositAmount,
+                MinRentalDays = x.Listing.MinRentalDays,
+                DeliveryType = x.Listing.DeliveryType,
+                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id),
                 // Aggregate hidden until the minimum number of reviews (2).
-                Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id) >= 2
+                Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id) >= 2
                     ? (double?)_dbContext.ToyReviews
-                        .Where(tr => tr.ListingId == listing.Id)
+                        .Where(tr => tr.ListingId == x.Listing.Id)
                         .Average(tr => (double)tr.OverallRating)
                     : null,
                 Category = new ListingCategoryResponse
                 {
-                    Id = listing.Category.Id,
-                    Name = listing.Category.Name,
-                    Slug = listing.Category.Slug
+                    Id = x.Listing.Category.Id,
+                    Name = x.Listing.Category.Name,
+                    Slug = x.Listing.Category.Slug
                 },
                 Owner = new ListingOwnerResponse
                 {
-                    Id = listing.Owner.Id,
-                    FirstName = listing.Owner.FirstName,
-                    LastName = listing.Owner.LastName,
-                    AvatarUrl = listing.Owner.AvatarUrl,
+                    Id = x.Listing.Owner.Id,
+                    FirstName = x.Listing.Owner.FirstName,
+                    LastName = x.Listing.Owner.LastName,
+                    AvatarUrl = x.Listing.Owner.AvatarUrl,
                     // Reveal the owner's phone only once the renter has a booking that reached at
                     // least Approved — matching the contact-reveal gate in BookingDetail. A Pending
                     // request must NOT expose contact details before the owner has accepted it.
-                    PhoneNumber = callerId != null && listing.Bookings.Any(booking =>
+                    PhoneNumber = callerId != null && x.Listing.Bookings.Any(booking =>
                         booking.RenterId == callerId &&
                         (booking.Status == BookingStatus.Approved ||
                          booking.Status == BookingStatus.Active ||
                          booking.Status == BookingStatus.Completed))
-                        ? listing.Owner.PhoneNumber
+                        ? x.Listing.Owner.PhoneNumber
                         : null
                 },
-                Images = listing.Images
+                Images = x.Listing.Images
                     .OrderByDescending(image => image.IsPrimary)
                     .ThenBy(image => image.SortOrder)
                     .Select(image => new ListingImageResponse
@@ -196,7 +207,7 @@ public sealed class ListingsQueryService : IListingsQueryService
                 // Both Approved and Active bookings hold the calendar (the booking-create overlap
                 // check blocks all three of Pending/Approved/Active), so the public calendar must
                 // surface Active ranges too — otherwise a date shows free but the request 409s.
-                BookedDateRanges = listing.Bookings
+                BookedDateRanges = x.Listing.Bookings
                     .Where(booking => booking.Status == BookingStatus.Approved ||
                                       booking.Status == BookingStatus.Active)
                     .OrderBy(booking => booking.StartDate)

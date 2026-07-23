@@ -284,7 +284,7 @@ Base route pattern: **`/api/{controller}`** except admin listings (**`/api/admin
 
 | Method | Route | Auth | Description |
 |--------|-------|------|-------------|
-| GET | `/api/listings` | Anonymous | Paged **approved** listings; query: `City`, `CategoryId`, `MinPrice`, `MaxPrice`, `Page`, `PageSize` (`ListingsQueryFilter`). |
+| GET | `/api/listings` | Anonymous | Paged **approved** listings; query: `City`, `CategoryId`, `MinPrice`, `MaxPrice`, `Search`, `AgeFromMonths`, `AgeToMonths`, `OriginLat`, `OriginLng`, `RadiusKm`, `Page`, `PageSize` (`ListingsQueryFilter`). |
 | GET | `/api/listings/{id}` | Anonymous | **Approved** listing detail or 404. |
 | POST | `/api/listings` | **Authorize** | Create listing (**pending approval**). |
 | GET | `/api/listings/mine` | **Authorize** | Owner’s listings (all statuses). |

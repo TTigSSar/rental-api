@@ -51,6 +51,47 @@ public sealed class ListingsQueryService : IListingsQueryService
             query = query.Where(listing => listing.PricePerDay <= filter.MaxPrice.Value);
         }
 
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim();
+            query = query.Where(listing =>
+                listing.Title.Contains(search) || listing.Description.Contains(search));
+        }
+
+        if (filter.AgeFromMonths.HasValue || filter.AgeToMonths.HasValue)
+        {
+            var reqFrom = filter.AgeFromMonths ?? 0;
+            var reqTo = filter.AgeToMonths;
+            query = query.Where(listing =>
+                (listing.AgeToMonths == null || listing.AgeToMonths >= reqFrom) &&
+                (listing.AgeFromMonths == null || reqTo == null || listing.AgeFromMonths <= reqTo));
+        }
+
+        if (filter.OriginLat.HasValue && filter.OriginLng.HasValue && filter.RadiusKm.HasValue)
+        {
+            // Bounding-box approximation over the PUBLIC coordinates only (never the exact
+            // Latitude/Longitude — see the public-coordinate rule at P1-3/GetApprovedListingByIdAsync
+            // above). A square box, not a Haversine circle: the ~1.2km geohash-cell snapping already
+            // introduces slack of that order, so a tighter circular refinement is a documented
+            // follow-up (Maps P2-1) rather than MVP scope here.
+            var radiusKm = filter.RadiusKm.Value;
+            var originLat = filter.OriginLat.Value;
+            var originLng = filter.OriginLng.Value;
+
+            var dLat = radiusKm / 111.0;
+            var dLng = radiusKm / (111.0 * Math.Cos((double)originLat * Math.PI / 180.0));
+
+            var minLat = originLat - (decimal)dLat;
+            var maxLat = originLat + (decimal)dLat;
+            var minLng = originLng - (decimal)dLng;
+            var maxLng = originLng + (decimal)dLng;
+
+            query = query.Where(listing =>
+                listing.PublicLatitude != null && listing.PublicLongitude != null &&
+                listing.PublicLatitude >= minLat && listing.PublicLatitude <= maxLat &&
+                listing.PublicLongitude >= minLng && listing.PublicLongitude <= maxLng);
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var rows = await query

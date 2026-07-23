@@ -21,6 +21,27 @@ public sealed class SqliteTestDatabase : IDisposable
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 
+        // EF Core's Sqlite provider translates string.Contains(...) to the builtin instr(),
+        // which is byte-exact (case-sensitive). On SQL Server (production) the same LINQ call
+        // translates to LIKE under the DB's default collation, which is case-insensitive
+        // (SQL_Latin1_General_CP1_CI_AS) — e.g. ListingsQueryService's Search filter relies on
+        // that CI collation rather than forcing ToLower() in the predicate. Overriding SQLite's
+        // instr() here (permitted: SQLite explicitly allows redefining builtin functions) closes
+        // that provider gap so tests exercise the same case-insensitive behavior production gets,
+        // without changing the entity model, DbContext, or any migration.
+        _connection.CreateFunction<string?, string?, long>(
+            "instr",
+            (haystack, needle) =>
+            {
+                if (haystack is null || needle is null)
+                {
+                    return 0;
+                }
+
+                var index = haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+                return index < 0 ? 0 : index + 1;
+            });
+
         using var context = CreateContext();
         context.Database.EnsureCreated();
     }

@@ -12,6 +12,15 @@ public sealed class ListingsQueryService : IListingsQueryService
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
+    // Districts are a fixed reference-data catalog (see knowledge/decisions.md) — exactly 12 rows.
+    // A caller cannot legitimately need more distinct district ids than that; anything past it is
+    // dropped rather than passed through to an unbounded SQL IN (...).
+    private const int MaxDistrictIds = 12;
+
+    // Maps P2-1: cap on map-pin results. IsTruncated is derived by requesting one extra row and
+    // checking whether it came back, so truncation is exact without a second COUNT query.
+    private const int MaxMapPins = 500;
+
     private readonly AppDbContext _dbContext;
 
     public ListingsQueryService(AppDbContext dbContext)
@@ -19,13 +28,11 @@ public sealed class ListingsQueryService : IListingsQueryService
         _dbContext = dbContext;
     }
 
-    public async Task<PagedResult<ListingPreviewResponse>> GetApprovedListingsAsync(
-        ListingsQueryFilter filter,
-        CancellationToken cancellationToken = default)
+    // Shared predicate chain for both the paged public search and the map-pins endpoint — they
+    // must never diverge on what "an approved, publicly-visible listing matching this filter"
+    // means; only the projection/shape after this differs.
+    private IQueryable<Domain.Entities.Listing> BuildApprovedListingsQuery(ListingsQueryFilter filter)
     {
-        var page = filter.Page < 1 ? DefaultPage : filter.Page;
-        var pageSize = filter.PageSize < 1 ? DefaultPageSize : Math.Min(filter.PageSize, MaxPageSize);
-
         var query = _dbContext.Listings
             .AsNoTracking()
             .Where(listing => listing.Status == ListingStatus.Approved);
@@ -39,6 +46,12 @@ public sealed class ListingsQueryService : IListingsQueryService
         if (filter.CategoryId.HasValue)
         {
             query = query.Where(listing => listing.CategoryId == filter.CategoryId.Value);
+        }
+
+        if (filter.DistrictIds is { Count: > 0 })
+        {
+            var districtIds = filter.DistrictIds.Distinct().Take(MaxDistrictIds).ToList();
+            query = query.Where(listing => listing.DistrictId != null && districtIds.Contains(listing.DistrictId.Value));
         }
 
         if (filter.MinPrice.HasValue)
@@ -73,7 +86,7 @@ public sealed class ListingsQueryService : IListingsQueryService
             // Latitude/Longitude — see the public-coordinate rule at P1-3/GetApprovedListingByIdAsync
             // above). A square box, not a Haversine circle: the ~1.2km geohash-cell snapping already
             // introduces slack of that order, so a tighter circular refinement is a documented
-            // follow-up (Maps P2-1) rather than MVP scope here.
+            // follow-up (Maps P2-1 circular refinement) rather than in scope here.
             var radiusKm = filter.RadiusKm.Value;
             var originLat = filter.OriginLat.Value;
             var originLng = filter.OriginLng.Value;
@@ -86,11 +99,40 @@ public sealed class ListingsQueryService : IListingsQueryService
             var minLng = originLng - (decimal)dLng;
             var maxLng = originLng + (decimal)dLng;
 
-            query = query.Where(listing =>
-                listing.PublicLatitude != null && listing.PublicLongitude != null &&
-                listing.PublicLatitude >= minLat && listing.PublicLatitude <= maxLat &&
-                listing.PublicLongitude >= minLng && listing.PublicLongitude <= maxLng);
+            query = ApplyBoundingBox(query, minLat, maxLat, minLng, maxLng);
         }
+
+        if (filter.MinLat.HasValue && filter.MaxLat.HasValue && filter.MinLng.HasValue && filter.MaxLng.HasValue)
+        {
+            // Maps P2-1 viewport search: same public-coordinate box predicate as the radius filter
+            // above, just with caller-supplied bounds instead of ones derived from origin+radius.
+            query = ApplyBoundingBox(query, filter.MinLat.Value, filter.MaxLat.Value, filter.MinLng.Value, filter.MaxLng.Value);
+        }
+
+        return query;
+    }
+
+    private static IQueryable<Domain.Entities.Listing> ApplyBoundingBox(
+        IQueryable<Domain.Entities.Listing> query,
+        decimal minLat,
+        decimal maxLat,
+        decimal minLng,
+        decimal maxLng)
+    {
+        return query.Where(listing =>
+            listing.PublicLatitude != null && listing.PublicLongitude != null &&
+            listing.PublicLatitude >= minLat && listing.PublicLatitude <= maxLat &&
+            listing.PublicLongitude >= minLng && listing.PublicLongitude <= maxLng);
+    }
+
+    public async Task<PagedResult<ListingPreviewResponse>> GetApprovedListingsAsync(
+        ListingsQueryFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var page = filter.Page < 1 ? DefaultPage : filter.Page;
+        var pageSize = filter.PageSize < 1 ? DefaultPageSize : Math.Min(filter.PageSize, MaxPageSize);
+
+        var query = BuildApprovedListingsQuery(filter);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -155,6 +197,49 @@ public sealed class ListingsQueryService : IListingsQueryService
             TotalCount = totalCount,
             HasMore = (page * pageSize) < totalCount,
             Items = items
+        };
+    }
+
+    public async Task<ListingMapPinsResponse> GetMapPinsAsync(
+        ListingsQueryFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        // Same filter chain as the paged search, plus an unconditional non-null public-coordinate
+        // requirement: a pin cannot be plotted without a point to plot, and per ADR-008 there is no
+        // fallback to the exact Latitude/Longitude for any caller here — listings with no public
+        // pair are excluded outright, never substituted with a placeholder.
+        var query = BuildApprovedListingsQuery(filter)
+            .Where(listing => listing.PublicLatitude != null && listing.PublicLongitude != null);
+
+        // Request one row past the cap so truncation can be reported exactly without a second
+        // COUNT query.
+        var rows = await query
+            .OrderByDescending(listing => listing.CreatedAt)
+            .Take(MaxMapPins + 1)
+            .Select(listing => new ListingMapPinResponse
+            {
+                Id = listing.Id,
+                Latitude = listing.PublicLatitude!.Value,
+                Longitude = listing.PublicLongitude!.Value,
+                Title = listing.Title,
+                PricePerDay = listing.PricePerDay,
+                PriceUnit = listing.PriceUnit,
+                Currency = listing.Currency,
+                PrimaryImageUrl = listing.Images
+                    .OrderByDescending(image => image.IsPrimary)
+                    .ThenBy(image => image.SortOrder)
+                    .Select(image => image.Url)
+                    .FirstOrDefault()
+            })
+            .ToListAsync(cancellationToken);
+
+        var isTruncated = rows.Count > MaxMapPins;
+        var items = isTruncated ? rows.Take(MaxMapPins).ToList() : rows;
+
+        return new ListingMapPinsResponse
+        {
+            Items = items,
+            IsTruncated = isTruncated
         };
     }
 

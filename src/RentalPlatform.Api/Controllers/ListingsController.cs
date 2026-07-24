@@ -36,11 +36,24 @@ public sealed class ListingsController : ControllerBase
     [HttpGet]
     [AllowAnonymous]
     [ProducesResponseType(typeof(PagedResult<ListingPreviewResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<ListingPreviewResponse>>> GetListings(
         [FromQuery] ListingsQueryFilter filter,
         CancellationToken cancellationToken)
     {
         var result = await _listingsQueryService.GetApprovedListingsAsync(filter, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("map-pins")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ListingMapPinsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ListingMapPinsResponse>> GetMapPins(
+        [FromQuery] ListingsQueryFilter filter,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingsQueryService.GetMapPinsAsync(filter, cancellationToken);
         return Ok(result);
     }
 

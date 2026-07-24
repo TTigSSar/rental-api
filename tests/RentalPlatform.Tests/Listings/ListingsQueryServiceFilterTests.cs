@@ -265,4 +265,129 @@ public sealed class ListingsQueryServiceFilterTests
         Assert.Single(result.Items);
         Assert.Equal(nearId, result.Items.Single().Id);
     }
+
+    // ---------- Districts (Maps P1-7) ----------
+    // The 12 Yerevan districts are reference data seeded via EF `HasData` in
+    // DistrictConfiguration (applied automatically by EnsureCreated), so tests reference those
+    // fixed, well-known ids/codes rather than inserting new District rows (which would collide on
+    // the unique Code index).
+    private static readonly Guid KentronDistrictId = new("d0000007-0000-4000-9000-000000000007");
+    private static readonly Guid MalatiaDistrictId = new("d0000008-0000-4000-9000-000000000008");
+    private static readonly Guid AvanDistrictId = new("d0000003-0000-4000-9000-000000000003");
+
+    [Fact]
+    public async Task DistrictIds_Matches_Any_Of_The_Selected_Districts()
+    {
+        using var db = await SeedBaseAsync();
+
+        var inAId = new Guid("a0000000-0000-0000-0000-000000000043");
+        var inBId = new Guid("a0000000-0000-0000-0000-000000000044");
+        var inCId = new Guid("a0000000-0000-0000-0000-000000000045");
+
+        var inA = Build(inAId, "In Kentron", "Desc");
+        inA.DistrictId = KentronDistrictId;
+        var inB = Build(inBId, "In Malatia", "Desc");
+        inB.DistrictId = MalatiaDistrictId;
+        var inC = Build(inCId, "In Avan", "Desc");
+        inC.DistrictId = AvanDistrictId;
+
+        await db.SeedAsync(inA, inB, inC);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { DistrictIds = new[] { KentronDistrictId, MalatiaDistrictId } });
+
+        var ids = result.Items.Select(i => i.Id).ToList();
+        Assert.Equal(2, ids.Count);
+        Assert.Contains(inAId, ids);
+        Assert.Contains(inBId, ids);
+        Assert.DoesNotContain(inCId, ids);
+    }
+
+    [Fact]
+    public async Task DistrictIds_Excludes_Listing_With_No_District()
+    {
+        using var db = await SeedBaseAsync();
+
+        var noDistrictId = new Guid("a0000000-0000-0000-0000-000000000047");
+        var noDistrict = Build(noDistrictId, "No District Toy", "Desc");
+        noDistrict.DistrictId = null;
+        await db.SeedAsync(noDistrict);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { DistrictIds = new[] { KentronDistrictId } });
+
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task Empty_DistrictIds_Returns_All()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000048");
+        await db.SeedAsync(Build(id, "Any Toy", "Desc"));
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { DistrictIds = Array.Empty<Guid>() });
+
+        Assert.Single(result.Items);
+    }
+
+    // ---------- Viewport (Maps P2-1) ----------
+
+    [Fact]
+    public async Task Viewport_Includes_Listing_With_Public_Coords_Inside_Bbox()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000050");
+        var listing = Build(id, "Inside Viewport Toy", "Desc");
+        listing.PublicLatitude = 40.19m;
+        listing.PublicLongitude = 44.52m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { MinLat = 40.10m, MaxLat = 40.25m, MinLng = 44.45m, MaxLng = 44.60m });
+
+        Assert.Single(result.Items);
+        Assert.Equal(id, result.Items.Single().Id);
+    }
+
+    [Fact]
+    public async Task Viewport_Excludes_Listing_With_Public_Coords_Outside_Bbox()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000051");
+        var listing = Build(id, "Outside Viewport Toy", "Desc");
+        listing.PublicLatitude = 41.20m;
+        listing.PublicLongitude = 45.60m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { MinLat = 40.10m, MaxLat = 40.25m, MinLng = 44.45m, MaxLng = 44.60m });
+
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task Viewport_Is_Ignored_Unless_All_Four_Bounds_Present()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000052");
+        var listing = Build(id, "Partial Viewport Toy", "Desc");
+        listing.PublicLatitude = 41.20m;
+        listing.PublicLongitude = 45.60m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Only three of the four bounds supplied — viewport filter must not engage.
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { MinLat = 40.10m, MaxLat = 40.25m, MinLng = 44.45m });
+
+        Assert.Single(result.Items);
+        Assert.Equal(id, result.Items.Single().Id);
+    }
 }

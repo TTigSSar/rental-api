@@ -93,6 +93,24 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    [HttpPut("me/preferred-language")]
+    [Authorize]
+    [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<CurrentUserResponse>> UpdatePreferredLanguage(
+        [FromBody] UpdatePreferredLanguageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.UpdatePreferredLanguageAsync(request.PreferredLanguage, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)

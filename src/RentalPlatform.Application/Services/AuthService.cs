@@ -18,7 +18,11 @@ public sealed class AuthService : IAuthService
         public const string InvalidExternalToken = "auth.external_invalid_token";
         public const string ExternalEmailMissing = "auth.external_email_missing";
         public const string ExternalLinkConflict = "auth.external_link_conflict";
+        public const string InvalidLanguage = "auth.invalid_language";
     }
+
+    private static readonly HashSet<string> AllowedPreferredLanguages =
+        new(StringComparer.OrdinalIgnoreCase) { "en", "hy", "ru" };
 
     private readonly IUserAuthStore _userAuthStore;
     private readonly IPasswordHasher _passwordHasher;
@@ -234,6 +238,52 @@ public sealed class AuthService : IAuthService
                 Message = "User account is blocked."
             });
         }
+
+        return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
+    }
+
+    public async Task<ServiceResult<CurrentUserResponse>> UpdatePreferredLanguageAsync(string? preferredLanguage, CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        if (user.IsBlocked)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "User account is blocked."
+            });
+        }
+
+        var normalizedLanguage = NormalizeOptional(preferredLanguage);
+        if (normalizedLanguage is not null && !AllowedPreferredLanguages.Contains(normalizedLanguage))
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidLanguage,
+                Message = "Preferred language must be one of: en, hy, ru."
+            });
+        }
+
+        user.PreferredLanguage = normalizedLanguage?.ToLowerInvariant();
+        await _userAuthStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
     }

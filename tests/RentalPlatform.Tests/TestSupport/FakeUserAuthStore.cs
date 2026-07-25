@@ -12,6 +12,8 @@ public sealed class FakeUserAuthStore : IUserAuthStore
 
     public IReadOnlyCollection<User> Users => _usersByEmail.Values;
 
+    public int SaveChangesCallCount { get; private set; }
+
     public FakeUserAuthStore Seed(params User[] users)
     {
         foreach (var user in users)
@@ -45,6 +47,8 @@ public sealed class FakeUserAuthStore : IUserAuthStore
     // EmailExistsAsync) once "saved", so tests can assert AddAsync alone didn't commit anything.
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        SaveChangesCallCount++;
+
         foreach (var user in _pendingAdds)
         {
             _usersByEmail[user.Email] = user;

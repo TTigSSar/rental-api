@@ -24,11 +24,14 @@ public sealed class GeohashSnapperTests
     [Fact]
     public void SnapToCellCenter_Two_Points_In_The_Same_Cell_Produce_Identical_Output()
     {
-        // Independently verified (via GetCellBounds) to share a geohash-6 cell despite being two
-        // different exact points ~5-6 metres apart — the "no trilateration" guarantee: repeated
-        // observation of nearby exact points must not let a caller distinguish them.
+        // Independently verified (via GetCellBounds) to share a geohash-7 cell despite being two
+        // different exact points ~2-3 metres apart — the "no trilateration" guarantee: repeated
+        // observation of nearby exact points must not let a caller distinguish them. (At the
+        // smaller geohash-7 cell size the two points must be much closer together than they were
+        // at geohash-6 to still land in the same cell — a ~5-6m-apart pair that shared a cell at
+        // precision 6 straddles a precision-7 boundary and no longer does.)
         var a = Snapper.SnapToCellCenter(40.1872m, 44.5152m);
-        var b = Snapper.SnapToCellCenter(40.18715m, 44.51525m);
+        var b = Snapper.SnapToCellCenter(40.18722m, 44.51518m);
 
         Assert.Equal(a, b);
     }
@@ -56,14 +59,16 @@ public sealed class GeohashSnapperTests
         Assert.NotEqual(kentron, norNork);
     }
 
-    // The geohash-6 cell measured at Yerevan's own latitude (~40.18N) — NOT the equatorial
-    // textbook figure (~1.22km x 0.61km), which only holds where cos(latitude) = 1. Longitude
-    // degrees shrink by cos(latitude) away from the equator, so the east-west span here is
-    // noticeably narrower than the textbook figure: roughly 0.93km (E-W) x 0.61km (N-S). The
-    // north-south span does not depend on longitude, and barely on latitude (the bisection of the
-    // fixed [-90,90] range is uniform), so it stays close to the textbook figure everywhere.
+    // The geohash-7 cell measured at Yerevan's own latitude (~40.18N) — NOT the equatorial
+    // figure (~0.153km x 0.153km — the two degree-spans are numerically identical at precision 7,
+    // 360/2^18 == 180/2^17, so the equatorial cell happens to be square), which only holds where
+    // cos(latitude) = 1. Longitude degrees shrink by cos(latitude) away from the equator, so the
+    // east-west span here is noticeably narrower than the equatorial figure: roughly 0.117km (E-W)
+    // x 0.153km (N-S). The north-south span does not depend on longitude, and barely on latitude
+    // (the bisection of the fixed [-90,90] range is uniform), so it stays close to the equatorial
+    // figure everywhere.
     [Fact]
-    public void Cell_Size_At_Yerevans_Latitude_Is_Roughly_0_93km_By_0_61km_Not_The_Equatorial_Figure()
+    public void Cell_Size_At_Yerevans_Latitude_Is_Roughly_0_117km_By_0_153km_Not_The_Equatorial_Figure()
     {
         const double latitude = 40.1776; // Republic Square
         const double longitude = 44.5126;
@@ -75,7 +80,7 @@ public sealed class GeohashSnapperTests
         var heightKm = (latMax - latMin) * kmPerDegree;
         var widthKm = (lonMax - lonMin) * kmPerDegree * Math.Cos(latitude * Math.PI / 180.0);
 
-        Assert.InRange(heightKm, 0.60, 0.62);
-        Assert.InRange(widthKm, 0.90, 0.96);
+        Assert.InRange(heightKm, 0.150, 0.156);
+        Assert.InRange(widthKm, 0.114, 0.120);
     }
 }

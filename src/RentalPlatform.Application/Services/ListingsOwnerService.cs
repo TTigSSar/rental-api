@@ -456,8 +456,9 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         return ServiceResult<bool>.Success(true);
     }
 
-    // Computes the privacy-safe public coordinate pair (geohash-6 cell centroid — see
-    // IGeohashSnapper) and the derived district for a listing's exact point, on create. An
+    // Computes the privacy-safe public coordinate pair (geohash cell centroid at
+    // GeohashSnapper.Precision — see IGeohashSnapper) and the derived district for a listing's
+    // exact point, on create. An
     // explicit owner-supplied district (already validated by the caller) always wins over
     // derivation; otherwise the district comes from IDistrictBoundaryProvider.FindDistrictCode
     // against the exact point, and is left null when that point falls outside every known Yerevan

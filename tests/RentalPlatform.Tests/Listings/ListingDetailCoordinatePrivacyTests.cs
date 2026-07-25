@@ -9,10 +9,10 @@ namespace RentalPlatform.Tests.Listings;
 // Hotfix H1 + P1-3 (the public-coordinate rule): exact Latitude/Longitude must never reach a
 // caller who isn't the listing's owner or an admin — leaking them lets anyone reverse-geocode a
 // family's home address, defeating the AddressLine privacy gate entirely. Since P1-3, a non-
-// owner/non-admin caller gets the PUBLIC pair (geohash-6 cell centroid) instead of null, so these
-// tests also cover the "no trilateration" requirement: repeated/independent reads of the same
-// listing, by any caller, for any exact point inside a given cell, all resolve to the identical
-// published pair.
+// owner/non-admin caller gets the PUBLIC pair (geohash cell centroid, precision 7 — see
+// GeohashSnapper.Precision) instead of null, so these tests also cover the "no trilateration"
+// requirement: repeated/independent reads of the same listing, by any caller, for any exact point
+// inside a given cell, all resolve to the identical published pair.
 public sealed class ListingDetailCoordinatePrivacyTests
 {
     private static readonly Guid OwnerId = new("f0000000-0000-0000-0000-000000000001");
@@ -27,10 +27,13 @@ public sealed class ListingDetailCoordinatePrivacyTests
     private const decimal ExactLongitude = 44.5152m;
 
     // A second exact point independently verified (via the geohash bit-bisection) to fall inside
-    // the SAME geohash-6 cell as (ExactLatitude, ExactLongitude) above — i.e. a different exact
-    // location that must still publish the identical pair.
-    private const decimal SecondExactLatitude = 40.18715m;
-    private const decimal SecondExactLongitude = 44.51525m;
+    // the SAME geohash-7 cell as (ExactLatitude, ExactLongitude) above — i.e. a different exact
+    // location that must still publish the identical pair. Precision 7's cell is small enough
+    // (~117m x 153m at this latitude) that the points must be only a few metres apart, not the
+    // ~5-6m that sufficed at the old geohash-6 precision — that older offset now straddles a
+    // precision-7 cell boundary.
+    private const decimal SecondExactLatitude = 40.18722m;
+    private const decimal SecondExactLongitude = 44.51518m;
 
     private static readonly GeohashSnapper Snapper = new();
 
@@ -150,7 +153,7 @@ public sealed class ListingDetailCoordinatePrivacyTests
         Assert.Equal(firstRead.Longitude, thirdRead.Longitude);
     }
 
-    // Trilateration guard, the other half: two DIFFERENT exact points that share a geohash-6 cell
+    // Trilateration guard, the other half: two DIFFERENT exact points that share a geohash-7 cell
     // must publish the SAME pair — a caller who somehow knew (or guessed) both listings' cell
     // membership gains no information distinguishing the two exact locations from each other.
     [Fact]
@@ -187,7 +190,7 @@ public sealed class ListingDetailCoordinatePrivacyTests
         Assert.NotNull(secondListingRead);
         // Sanity: the two exact points genuinely differ...
         Assert.NotEqual(ExactLatitude, SecondExactLatitude);
-        // ...yet the published pair is identical, because both fall in the same geohash-6 cell.
+        // ...yet the published pair is identical, because both fall in the same geohash-7 cell.
         Assert.Equal(firstListingRead!.Latitude, secondListingRead!.Latitude);
         Assert.Equal(firstListingRead.Longitude, secondListingRead.Longitude);
     }

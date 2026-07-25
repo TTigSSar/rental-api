@@ -14,18 +14,27 @@ namespace RentalPlatform.Infrastructure.Services;
 // characters, is exactly the "cell" the public coordinate rounds to (GetCellBounds). The public
 // point is that cell's centroid, so any two exact points sharing a cell publish an identical pair.
 //
-// Precision 6 (30 bits: 15 longitude + 15 latitude, since 6*5=30 splits evenly) gives a cell of
-// 360/2^15 degrees of longitude by 180/2^15 degrees of latitude — about 1.22 km x 0.61 km at the
-// equator. Longitude degrees shrink toward the poles (by cos(latitude)), so the cell is narrower
-// east-west away from the equator; see GeohashSnapperTests for the measured size at Yerevan's
-// latitude (~40.18N), which is the number that actually matters here, not the equatorial textbook
-// figure.
+// Precision 7 (35 bits: 18 longitude + 17 latitude — the interleave starts on a longitude bit,
+// so an odd total splits one extra bit to longitude) gives a cell of 360/2^18 degrees of longitude
+// by 180/2^17 degrees of latitude — those two spans happen to be numerically identical in degrees
+// (360/2^18 == 180/2^17), so the cell is a ~153m x 153m square at the equator. Longitude degrees
+// shrink toward the poles (by cos(latitude)), so the cell narrows east-west away from the equator;
+// see GeohashSnapperTests for the measured size at Yerevan's latitude (~40.18N) — about 117m (E-W)
+// x 153m (N-S) — which is the number that actually matters here, not the equatorial figure.
+//
+// Amended 2026-07-25: raised from precision 6 (~933m x 611m at Yerevan's latitude) to precision 7
+// (~117m x 153m) — a product decision to make the public-coordinate fuzzing tighter now that a
+// sub-kilometre radius filter (ListingsQueryService) needs the published point to be close enough
+// to the true one for a "0.2 km" search to be meaningful. See knowledge/decisions.md ADR-008.
 public sealed class GeohashSnapper : IGeohashSnapper
 {
     // The ONE place that controls how coarse the public coordinate is. Changing this changes the
     // privacy/precision trade-off for every listing at once — do not duplicate this number
-    // anywhere else (see the IGeohashSnapper doc comment).
-    public const int Precision = 6;
+    // anywhere else (see the IGeohashSnapper doc comment). Changing it also requires a one-time
+    // re-snap of every already-populated PublicLatitude/PublicLongitude — see the
+    // InvalidatePublicCoordinatesForGeohashPrecisionUpgrade migration and
+    // ListingLocationBackfillRunner, which recomputes any row this migration nulls out.
+    public const int Precision = 7;
 
     private const string Base32Alphabet = "0123456789bcdefghjkmnpqrstuvwxyz";
     private const int BitsPerChar = 5;

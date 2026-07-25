@@ -8,10 +8,20 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.LocationBackfill;
 /// <summary>
 /// One-off, idempotent backfill (P1-4) for listings that predate the privacy-coordinate/district
 /// features (P1-2/P1-3/P1-4): fills <see cref="Domain.Entities.Listing.PublicLatitude"/>/
-/// <see cref="Domain.Entities.Listing.PublicLongitude"/> (geohash-6 cell centroid) and
-/// <see cref="Domain.Entities.Listing.DistrictId"/> (point-in-polygon against the Yerevan
-/// district boundaries) for any row that has an exact Latitude/Longitude but is still missing one
-/// of those derived values. Structural sibling of
+/// <see cref="Domain.Entities.Listing.PublicLongitude"/> (geohash cell centroid at whatever
+/// precision <see cref="RentalPlatform.Infrastructure.Services.GeohashSnapper.Precision"/> is
+/// currently set to) and <see cref="Domain.Entities.Listing.DistrictId"/> (point-in-polygon
+/// against the Yerevan district boundaries) for any row that has an exact Latitude/Longitude but
+/// is still missing one of those derived values.
+///
+/// This is also the mechanism that recomputes PublicLatitude/PublicLongitude at a NEW geohash
+/// precision after a precision change: the one-time
+/// <c>InvalidatePublicCoordinatesForGeohashPrecisionUpgrade</c> migration nulls those two columns
+/// for every row with exact coordinates, and this runner — unchanged — fills them back in on the
+/// very next startup using whatever <see cref="RentalPlatform.Infrastructure.Services.GeohashSnapper.Precision"/>
+/// the running code has. No separate "re-snap" runner needed.
+///
+/// Structural sibling of
 /// <see cref="RentalPlatform.Infrastructure.DependencyInjection.DemoContentBootstrap.DemoContentBootstrapRunner"/>
 /// and <see cref="RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed.DevelopmentSeedRunner"/>:
 /// runs on every startup, in every environment, and is always safe to run again.

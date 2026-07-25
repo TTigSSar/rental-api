@@ -8,10 +8,11 @@ namespace RentalPlatform.Application.Abstractions;
 // information beyond "which cell" — no trilateration by re-querying.
 //
 // Precision is a single constant owned by the implementation (see GeohashSnapper.Precision) —
-// there must never be a second place that decides how coarse the public pair is. Any FUTURE
-// distance/sort computation (Phase 2 — not implemented yet) must consume PublicLatitude/
-// PublicLongitude, never the exact pair, and round its own output to avoid re-introducing a
-// precision side-channel.
+// there must never be a second place that decides how coarse the public pair is. Every distance
+// filter and distance-sort computation (ListingsQueryService: the radius filter's haversine
+// refinement and ListingPreviewResponse.DistanceKm) consumes PublicLatitude/PublicLongitude only,
+// never the exact pair — computing from the exact point would let a caller trilaterate it via a
+// boolean in/out-of-radius oracle on an arbitrary circle, defeating the whole point of fuzzing.
 public interface IGeohashSnapper
 {
     // Both inputs are assumed already validated (WGS84 range) by the caller — CreateListingRequest/

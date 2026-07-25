@@ -111,6 +111,50 @@ public sealed class ListingLocationBackfillRunnerTests
         Assert.Null(stored.DistrictId);
     }
 
+    // Verifies the mechanism the InvalidatePublicCoordinatesForGeohashPrecisionUpgrade migration
+    // relies on: it does NOT reimplement geohash math in SQL, it just nulls PublicLatitude/
+    // PublicLongitude for every listing with exact coordinates, and this unchanged runner recomputes
+    // them at whatever precision GeohashSnapper.Precision currently is — the same self-heal path
+    // that already handles rows whose derived value was never written (M-012 in
+    // knowledge/mistakes.md). This test simulates exactly that: a row carrying a STALE public pair
+    // (as if computed at the old geohash-6 precision) gets invalidated to null and re-filled.
+    [Fact]
+    public async Task Recomputes_Public_Coordinates_At_The_Current_Precision_When_Invalidated_To_Null()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(OwnerId, "owner@test.local"), TestData.Category(CategoryId));
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.Latitude = KentronLatitude;
+        listing.Longitude = KentronLongitude;
+        // A deliberately WRONG/stale public pair standing in for a value computed at the old
+        // geohash-6 precision — the exact value doesn't matter, only that it's non-null, so the
+        // runner's "fill only nulls" guard would otherwise skip this row.
+        listing.PublicLatitude = 40.0m;
+        listing.PublicLongitude = 44.0m;
+        await db.SeedAsync(listing);
+
+        // Simulate what the migration's raw SQL does: invalidate the stale derived value.
+        await using (var invalidate = db.CreateContext())
+        {
+            var toInvalidate = await invalidate.Listings.FindAsync(ListingId);
+            toInvalidate!.PublicLatitude = null;
+            toInvalidate.PublicLongitude = null;
+            await invalidate.SaveChangesAsync();
+        }
+
+        await BuildRunner(db).RunAsync();
+
+        var expected = new GeohashSnapper().SnapToCellCenter(KentronLatitude, KentronLongitude);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(expected.Latitude, stored!.PublicLatitude);
+        Assert.Equal(expected.Longitude, stored.PublicLongitude);
+        // The stale value must actually be gone, not coincidentally equal to the new one.
+        Assert.NotEqual(40.0m, stored.PublicLatitude);
+        Assert.NotEqual(44.0m, stored.PublicLongitude);
+    }
+
     [Fact]
     public async Task Running_Twice_Is_Idempotent_Second_Run_Changes_Nothing()
     {

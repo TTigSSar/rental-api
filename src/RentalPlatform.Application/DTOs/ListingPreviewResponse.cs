@@ -22,4 +22,13 @@ public sealed class ListingPreviewResponse
     /// <summary>Average toy rating, or null when below the aggregate threshold.</summary>
     public double? Rating { get; init; }
     public int ReviewCount { get; init; }
+
+    /// <summary>
+    /// Great-circle distance in kilometres from the request's OriginLat/OriginLng to this
+    /// listing's PUBLIC (geohash-fuzzed) coordinate — never the exact one, for the same reason
+    /// the distance filter itself uses the public pair (see ListingsQueryService, ADR-008).
+    /// Null whenever the request did not supply an origin, or the listing has no public
+    /// coordinate to measure from.
+    /// </summary>
+    public double? DistanceKm { get; init; }
 }

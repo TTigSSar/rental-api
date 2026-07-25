@@ -266,6 +266,172 @@ public sealed class ListingsQueryServiceFilterTests
         Assert.Equal(nearId, result.Items.Single().Id);
     }
 
+    // ---------- Distance: circle vs bbox, sub-km radii, clamping, DistanceKm ----------
+    // Fixture coordinates below were computed independently (Haversine formula, mean Earth
+    // radius 6371.0088km — the same constant ListingsQueryService and GeohashSnapperTests use)
+    // rather than derived from the bbox math under test, so these are a genuine cross-check, not
+    // a tautology.
+
+    private const decimal DistanceOriginLat = 40.1872m;
+    private const decimal DistanceOriginLng = 44.5152m;
+
+    [Fact]
+    public async Task Distance_Excludes_Point_At_Bbox_Corner_But_Outside_The_Circle()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000060");
+        var listing = Build(id, "Corner Toy", "Desc");
+        // Exactly at the 1km bounding-box corner derived from DistanceOriginLat/Lng — inside the
+        // square bbox by construction, but ~1.417km away by Haversine (radius * sqrt(2)), so a
+        // real circle must exclude it. A square-bbox-only filter (the old behaviour) would wrongly
+        // include this listing.
+        listing.PublicLatitude = 40.196209009009m;
+        listing.PublicLongitude = 44.5269928195634m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng, RadiusKm = 1.0 });
+
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task Distance_SubKilometre_Radius_0_2_Includes_A_Point_Well_Inside_The_Circle()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000061");
+        var listing = Build(id, "Very Close Toy", "Desc");
+        // ~0.142km from the origin — inside a 0.2km radius. Sub-kilometre radii must not be
+        // dropped by parameter binding/validation, and the bbox pre-filter must not be so tight
+        // it excludes a genuinely-inside point through rounding.
+        listing.PublicLatitude = 40.1881009009009m;
+        listing.PublicLongitude = 44.5163792819563m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng, RadiusKm = 0.2 });
+
+        Assert.Single(result.Items);
+        Assert.Equal(id, result.Items.Single().Id);
+    }
+
+    [Fact]
+    public async Task Distance_SubKilometre_Radius_0_5_Includes_A_Point_Well_Inside_The_Circle()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000062");
+        var listing = Build(id, "Close Toy", "Desc");
+        // ~0.354km from the origin — inside a 0.5km radius.
+        listing.PublicLatitude = 40.1894522522523m;
+        listing.PublicLongitude = 44.5181482048908m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng, RadiusKm = 0.5 });
+
+        Assert.Single(result.Items);
+        Assert.Equal(id, result.Items.Single().Id);
+    }
+
+    [Fact]
+    public async Task RadiusKm_Below_The_Minimum_Is_Clamped_Not_Rejected()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000063");
+        var listing = Build(id, "Clamped Toy", "Desc");
+        // ~0.142km away — outside a literal 0.01km radius, but inside the clamped floor (0.2km).
+        // Proves out-of-range input is clamped rather than either rejected (500) or taken literally.
+        listing.PublicLatitude = 40.1881009009009m;
+        listing.PublicLongitude = 44.5163792819563m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng, RadiusKm = 0.01 });
+
+        Assert.Single(result.Items);
+        Assert.Equal(id, result.Items.Single().Id);
+    }
+
+    [Fact]
+    public async Task RadiusKm_Above_The_Maximum_Is_Clamped_Not_Taken_Literally()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000064");
+        var listing = Build(id, "Too Far Toy", "Desc");
+        // ~22.4km away — inside a literal 100km radius, but outside the clamped ceiling (20km).
+        // Proves the ceiling is enforced, not just the floor.
+        listing.PublicLatitude = 40.3472m;
+        listing.PublicLongitude = 44.6752m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng, RadiusKm = 100.0 });
+
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task DistanceKm_Is_Null_When_Request_Has_No_Origin()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000065");
+        var listing = Build(id, "Unmeasured Toy", "Desc");
+        listing.PublicLatitude = 40.19m;
+        listing.PublicLongitude = 44.52m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter());
+
+        Assert.Single(result.Items);
+        Assert.Null(result.Items.Single().DistanceKm);
+    }
+
+    [Fact]
+    public async Task DistanceKm_Is_Populated_From_Public_Coordinates_When_Origin_Is_Supplied()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000066");
+        var listing = Build(id, "Measured Toy", "Desc");
+        // ~0.567km from DistanceOriginLat/Lng by construction (independently verified above).
+        listing.PublicLatitude = 40.1908036036036m;
+        listing.PublicLongitude = 44.5199171278254m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // No RadiusKm — DistanceKm must populate independently of whether the radius filter is active.
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng });
+
+        var distanceKm = result.Items.Single().DistanceKm;
+        Assert.NotNull(distanceKm);
+        Assert.InRange(distanceKm!.Value, 0.55, 0.58);
+    }
+
+    [Fact]
+    public async Task DistanceKm_Is_Null_For_A_Listing_With_No_Public_Coordinates_Even_With_Origin_Supplied()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("a0000000-0000-0000-0000-000000000067");
+        var listing = Build(id, "No Coords Toy", "Desc");
+        listing.PublicLatitude = null;
+        listing.PublicLongitude = null;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetApprovedListingsAsync(
+            new ListingsQueryFilter { OriginLat = DistanceOriginLat, OriginLng = DistanceOriginLng });
+
+        Assert.Single(result.Items);
+        Assert.Null(result.Items.Single().DistanceKm);
+    }
+
     // ---------- Districts (Maps P1-7) ----------
     // The 12 Yerevan districts are reference data seeded via EF `HasData` in
     // DistrictConfiguration (applied automatically by EnsureCreated), so tests reference those

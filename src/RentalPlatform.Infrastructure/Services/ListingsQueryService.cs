@@ -21,6 +21,18 @@ public sealed class ListingsQueryService : IListingsQueryService
     // checking whether it came back, so truncation is exact without a second COUNT query.
     private const int MaxMapPins = 500;
 
+    // Radius filter bounds (kilometres). Floor of 0.2km sits just above the geohash-7 public
+    // coordinate's own uncertainty (~117-153m cells at Yerevan's latitude, see GeohashSnapper) —
+    // tighter than that can't be honestly resolved by data this fuzzed. Ceiling of 20km is a
+    // sanity bound for a single-city marketplace. Out-of-range input is clamped, never rejected
+    // with a 500 or silently ignored.
+    private const double MinRadiusKm = 0.2;
+    private const double MaxRadiusKm = 20.0;
+
+    // Mean Earth radius (km) — same constant GeohashSnapperTests uses for cell-size measurement,
+    // kept identical so "kilometres" means the same thing across the fuzzing and the filtering.
+    private const double EarthRadiusKm = 6371.0088;
+
     private readonly AppDbContext _dbContext;
 
     public ListingsQueryService(AppDbContext dbContext)
@@ -82,17 +94,34 @@ public sealed class ListingsQueryService : IListingsQueryService
 
         if (filter.OriginLat.HasValue && filter.OriginLng.HasValue && filter.RadiusKm.HasValue)
         {
-            // Bounding-box approximation over the PUBLIC coordinates only (never the exact
-            // Latitude/Longitude — see the public-coordinate rule at P1-3/GetApprovedListingByIdAsync
-            // above). A square box, not a Haversine circle: the ~1.2km geohash-cell snapping already
-            // introduces slack of that order, so a tighter circular refinement is a documented
-            // follow-up (Maps P2-1 circular refinement) rather than in scope here.
-            var radiusKm = filter.RadiusKm.Value;
+            // Radius filter over the PUBLIC coordinates only — never the exact Latitude/Longitude
+            // (see the public-coordinate rule at P1-3/GetApprovedListingByIdAsync above, and
+            // ADR-008). Two independent reasons this must stay true, not just "the fuzzing is
+            // there anyway":
+            //   1. Filtering on the exact pair turns the endpoint into a boolean in/out-of-radius
+            //      oracle for an arbitrary circle the caller chooses. Repeat the query with
+            //      different centers/radii and you trilaterate the exact point — precisely the
+            //      attack the write-time geohash snap exists to prevent. The oracle only becomes
+            //      harmless once it is evaluated against a point that is ALREADY the fuzzed one.
+            //   2. The listing-detail map draws its uncertainty circle around PublicLatitude/
+            //      PublicLongitude. Filtering by the exact pair would silently disagree with the
+            //      circle the renter sees drawn on the map (a listing could appear "in range" on
+            //      the map but be excluded from search, or vice versa).
+            //
+            // Two-stage: a bounding-box pre-filter (translates to a sargable range predicate the
+            // composite index on (PublicLatitude, PublicLongitude) can use) narrows the candidate
+            // set, then a Haversine refinement turns the square box into the actual circle. Both
+            // stages run in SQL — see ListingsQueryServiceFilterTests for the bbox-corner-but-
+            // outside-circle regression that would silently reappear if either stage fell back to
+            // client evaluation.
+            var radiusKm = Math.Clamp(filter.RadiusKm.Value, MinRadiusKm, MaxRadiusKm);
             var originLat = filter.OriginLat.Value;
             var originLng = filter.OriginLng.Value;
+            var originLatD = (double)originLat;
+            var originLngD = (double)originLng;
 
             var dLat = radiusKm / 111.0;
-            var dLng = radiusKm / (111.0 * Math.Cos((double)originLat * Math.PI / 180.0));
+            var dLng = radiusKm / (111.0 * Math.Cos(originLatD * Math.PI / 180.0));
 
             var minLat = originLat - (decimal)dLat;
             var maxLat = originLat + (decimal)dLat;
@@ -100,6 +129,21 @@ public sealed class ListingsQueryService : IListingsQueryService
             var maxLng = originLng + (decimal)dLng;
 
             query = ApplyBoundingBox(query, minLat, maxLat, minLng, maxLng);
+
+            // Haversine circle refinement. Written as one inline expression (rather than a call to
+            // a shared helper method) because EF Core can only translate the well-known BCL
+            // Math.* calls it recognises inline in the LINQ expression tree — a call to a
+            // user-defined method here would either fail to translate or silently fall back to
+            // client evaluation. The identical formula is duplicated in the DistanceKm projection
+            // below (GetApprovedListingsAsync) for the same reason; keep both in sync if this
+            // changes.
+            query = query.Where(listing =>
+                listing.PublicLatitude != null && listing.PublicLongitude != null &&
+                2 * EarthRadiusKm * Math.Asin(Math.Sqrt(
+                    Math.Pow(Math.Sin((((double)listing.PublicLatitude!.Value - originLatD) * Math.PI / 180.0) / 2.0), 2.0) +
+                    Math.Cos(originLatD * Math.PI / 180.0) * Math.Cos((double)listing.PublicLatitude!.Value * Math.PI / 180.0) *
+                    Math.Pow(Math.Sin((((double)listing.PublicLongitude!.Value - originLngD) * Math.PI / 180.0) / 2.0), 2.0)
+                )) <= radiusKm);
         }
 
         if (filter.MinLat.HasValue && filter.MaxLat.HasValue && filter.MinLng.HasValue && filter.MaxLng.HasValue)
@@ -136,6 +180,16 @@ public sealed class ListingsQueryService : IListingsQueryService
 
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // Catalogue distance badge (design: "0.4 km" on the listing card). Populated only when the
+        // request supplied an origin — independent of whether a RadiusKm filter is also active —
+        // and always measured from the PUBLIC coordinate, the same value the radius filter itself
+        // uses, so the badge and the filter can never disagree about "how far this listing is".
+        // hasOrigin is a query-constant (not row-dependent), so EF folds it into the CASE WHEN
+        // guard below rather than re-evaluating it per row.
+        var hasOrigin = filter.OriginLat.HasValue && filter.OriginLng.HasValue;
+        var originLatD = hasOrigin ? (double)filter.OriginLat!.Value : 0.0;
+        var originLngD = hasOrigin ? (double)filter.OriginLng!.Value : 0.0;
+
         var rows = await query
             .OrderByDescending(listing => listing.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -163,7 +217,18 @@ public sealed class ListingsQueryService : IListingsQueryService
                 ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
                 RatingSum = _dbContext.ToyReviews
                     .Where(tr => tr.ListingId == listing.Id)
-                    .Sum(tr => tr.OverallRating)
+                    .Sum(tr => tr.OverallRating),
+                // Same Haversine formula as the radius filter's refinement in
+                // BuildApprovedListingsQuery — duplicated for the same EF-translation reason
+                // documented there (a shared helper method call would not translate). Keep both in
+                // sync if the formula changes.
+                DistanceKm = (hasOrigin && listing.PublicLatitude != null && listing.PublicLongitude != null)
+                    ? (double?)(2 * EarthRadiusKm * Math.Asin(Math.Sqrt(
+                        Math.Pow(Math.Sin((((double)listing.PublicLatitude!.Value - originLatD) * Math.PI / 180.0) / 2.0), 2.0) +
+                        Math.Cos(originLatD * Math.PI / 180.0) * Math.Cos((double)listing.PublicLatitude!.Value * Math.PI / 180.0) *
+                        Math.Pow(Math.Sin((((double)listing.PublicLongitude!.Value - originLngD) * Math.PI / 180.0) / 2.0), 2.0)
+                    )))
+                    : null
             })
             .ToListAsync(cancellationToken);
 
@@ -186,7 +251,8 @@ public sealed class ListingsQueryService : IListingsQueryService
                 CreatedAt = r.CreatedAt,
                 ReviewCount = r.ReviewCount,
                 // Aggregate hidden until the minimum number of reviews (2).
-                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null
+                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null,
+                DistanceKm = r.DistanceKm
             })
             .ToList();
 
@@ -263,9 +329,9 @@ public sealed class ListingsQueryService : IListingsQueryService
                 // anonymous callers) gets the public geohash-cell-centroid pair instead (P1-3,
                 // the public-coordinate rule — hotfix H1 first shipped this gate returning null
                 // for the false branch, now replaced by PublicLatitude/PublicLongitude below).
-                // Any future distance/sort computation (Phase 2, not implemented yet) MUST read
-                // the public pair, never Listing.Latitude/Longitude directly, and round its own
-                // output — this is the one seam that decides who gets the exact point.
+                // Every distance/sort computation (the radius filter and DistanceKm in
+                // GetApprovedListingsAsync) reads the public pair, never Listing.Latitude/
+                // Longitude directly — this is the one seam that decides who gets the exact point.
                 CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value),
                 // Second decision point, reused below for both the owner's phone number and the
                 // pickup AddressLine: has this caller got a booking on this listing that reached

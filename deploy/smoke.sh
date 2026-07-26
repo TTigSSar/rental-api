@@ -10,8 +10,30 @@
 # its own location (script at <repo>/deploy/, compose file at <repo>/), same as
 # backup-production.sh.
 #
-# Secret hygiene: the script checks that .env EXISTS and has mode 600, but never
-# reads, prints, or exports any value from it.
+# Secret hygiene: the only values this script ever reads out of .env are the two
+# Cloudflare Access service-token keys it needs to authenticate its own public-domain
+# requests (CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET, see below). .env is never
+# sourced as a whole, no other key is parsed, and no secret value is ever printed,
+# logged, put on a command line, or included in a check message.
+#
+# Cloudflare Access modes:
+#   The public hostnames sit behind Cloudflare Access (DEPLOY-PRODUCTION.md section k),
+#   so an anonymous request to https://dorent.am/ is turned away at Cloudflare's edge
+#   and never reaches the tunnel. Access lets non-interactive clients through with a
+#   *service token* — two headers matched by a `Service Auth` policy on the Access
+#   application. The PRESENCE of both keys is this script's mode switch:
+#
+#     both set   -> ENFORCED mode. Public-domain checks send the service token and must
+#                   get the app; additionally, an ANONYMOUS probe of both hostnames must
+#                   NOT get the app (that check is the proof the gate is actually closed).
+#     both unset -> PUBLIC mode. Public-domain checks run anonymously, as before Access
+#                   existed. If the edge answers like Access is on anyway, the check
+#                   FAILs naming the missing service token — it never fails silently.
+#     one set    -> hard FAIL: a half-configured token is a misconfiguration, not a mode.
+#
+#   Values are taken from the environment if already exported, otherwise from .env.
+#   That makes an ad-hoc run possible without touching .env:
+#     CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... ./deploy/smoke.sh
 #
 # Check tiers:
 #   MANDATORY — any failure makes the overall verdict FAIL and the exit code 1.
@@ -43,9 +65,73 @@ BACKUP_LOG="${BACKUPS_DIR}/backup.log"
 API_BASE="http://127.0.0.1:8080"
 UI_BASE="http://127.0.0.1:4200"
 DOMAINS=("https://dorent.am" "https://www.dorent.am")
+# Single hostname used for the per-route public checks (SPA fallback, /api/, /uploads/,
+# /hubs/). Both hostnames are proven to serve the shell by check_domains; the routing
+# behind them is the same nginx, so exercising it once through the edge is enough.
+PUBLIC_BASE="https://dorent.am"
 
 CURL_TIMEOUT_LOCAL=10
 CURL_TIMEOUT_PUBLIC=25
+
+# --- Cloudflare Access service token -------------------------------------------------
+# See the "Cloudflare Access modes" block in the file header for what this switches.
+
+# read_env_key <KEY> → prints the raw value of exactly that key from .env, or nothing.
+# Deliberately NOT `source`: sourcing .env would pull the SA password, the JWT key and
+# the tunnel token into this process's environment and would execute any command
+# substitution a value happened to contain. This only ever matches the one key asked
+# for, takes the last assignment, and strips CR (a .env edited on Windows), optional
+# surrounding quotes and trailing blanks.
+read_env_key() {
+    local key="$1"
+    [[ -r "${ENV_FILE}" ]] || return 0
+    sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=[[:space:]]*//p" "${ENV_FILE}" 2>/dev/null \
+        | tail -n 1 \
+        | sed -E "s/\r$//; s/^\"(.*)\"$/\1/; s/^'(.*)'$/\1/; s/[[:space:]]+$//" \
+        || true
+}
+
+CF_ACCESS_CLIENT_ID="${CF_ACCESS_CLIENT_ID:-$(read_env_key CF_ACCESS_CLIENT_ID)}"
+CF_ACCESS_CLIENT_SECRET="${CF_ACCESS_CLIENT_SECRET:-$(read_env_key CF_ACCESS_CLIENT_SECRET)}"
+
+# ACCESS_MODE: enforced | public | partial (see header). ACCESS_CURL_ARGS is what turns
+# an anonymous probe into an authenticated one; it stays empty in every other mode.
+ACCESS_MODE="public"
+ACCESS_CURL_ARGS=()
+ACCESS_PARTIAL_DETAIL=""
+CF_CURL_CONFIG=""
+
+# The two header values must never appear on a command line: /proc/<pid>/cmdline is
+# world-readable, so `curl -H "CF-Access-Client-Secret: ..."` would expose the secret to
+# every local reader for the life of the request. curl's own config file (-K) keeps them
+# off the argv, and the file is created 600 and removed on exit.
+cleanup_access_config() {
+    if [[ -n "${CF_CURL_CONFIG}" && -f "${CF_CURL_CONFIG}" ]]; then
+        rm -f "${CF_CURL_CONFIG}" || true
+    fi
+    return 0
+}
+trap cleanup_access_config EXIT
+
+if [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]; then
+    ACCESS_MODE="enforced"
+    CF_CURL_CONFIG="$(mktemp "${TMPDIR:-/tmp}/smoke-cf-access.XXXXXX")"
+    chmod 600 "${CF_CURL_CONFIG}"
+    printf 'header = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' \
+        "${CF_ACCESS_CLIENT_ID}" "${CF_ACCESS_CLIENT_SECRET}" > "${CF_CURL_CONFIG}"
+    ACCESS_CURL_ARGS=(--config "${CF_CURL_CONFIG}")
+elif [[ -n "${CF_ACCESS_CLIENT_ID}${CF_ACCESS_CLIENT_SECRET}" ]]; then
+    ACCESS_MODE="partial"
+    if [[ -n "${CF_ACCESS_CLIENT_ID}" ]]; then
+        ACCESS_PARTIAL_DETAIL="CF_ACCESS_CLIENT_ID is set, CF_ACCESS_CLIENT_SECRET is missing"
+    else
+        ACCESS_PARTIAL_DETAIL="CF_ACCESS_CLIENT_SECRET is set, CF_ACCESS_CLIENT_ID is missing"
+    fi
+fi
+
+# Nothing below needs the raw values any more — drop them so a stray `set`/`env` in a
+# future edit cannot surface them.
+unset CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET
 
 # --- Reporting ---------------------------------------------------------------------
 # One grep-friendly line per check: "PASS|WARN|FAIL  <check-id>: <reason>".
@@ -60,19 +146,68 @@ report_fail() { printf 'FAIL  %s: %s\n' "$1" "$2"; N_FAIL=$((N_FAIL + 1)); }
 
 # --- HTTP helpers ------------------------------------------------------------------
 
+# http_probe <timeout> [curl args...] <url> → prints "<code> <redirect_url>".
+# redirect_url is empty unless the response was a redirect (curl fills it from Location
+# without following it — we deliberately never pass -L, because *where* an unauthenticated
+# request is sent is the diagnosis). 000 means nothing answered: refused, timeout, DNS.
+# Never fails the script (set -e safe).
+http_probe() {
+    local timeout="$1"
+    shift
+    local out
+    out="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time "${timeout}" "$@" 2>/dev/null || true)"
+    # curl prints the write-out template even for a failed transfer, so `out` is normally
+    # already "000 ". Empty only if curl itself could not run at all.
+    [[ -n "${out}" ]] || out="000 "
+    printf '%s' "${out}"
+}
+
 # http_code <timeout> [curl args...] <url>  → prints the status code, or 000 on
 # transport failure (refused, timeout, DNS). Never fails the script (set -e safe).
 http_code() {
-    local timeout="$1"
-    shift
-    curl -s -o /dev/null -w '%{http_code}' --max-time "${timeout}" "$@" || printf '000'
+    local probe
+    probe="$(http_probe "$@")"
+    printf '%s' "${probe%% *}"
 }
 
-# http_body <timeout> <url> → prints the response body (empty on failure).
+# http_body <timeout> [curl args...] <url> → prints the response body (empty on failure).
 http_body() {
     local timeout="$1"
     shift
     curl -s --max-time "${timeout}" "$@" || true
+}
+
+# looks_like_access_gate <code> <redirect_url> → 0 if this response is Cloudflare Access
+# turning the request away rather than our own stack answering.
+#
+# Two signatures, and only two, because everything else is ambiguous:
+#   - a redirect whose target is the Access login endpoint (`<team>.cloudflareaccess.com`
+#     or a `/cdn-cgi/access/` path) — what an unauthenticated browser-ish request gets;
+#   - 403, which is how Access refuses a request it will not even offer a login for.
+# 401 is deliberately NOT treated as an Access signature: our own SignalR hub answers
+# 401 to an anonymous negotiate, and that is a healthy result (see check_public_routes).
+looks_like_access_gate() {
+    local code="$1" redirect="${2:-}"
+    case "${code}" in
+        30[12378])
+            [[ "${redirect}" == *cloudflareaccess.com* || "${redirect}" == */cdn-cgi/access/* ]]
+            ;;
+        403) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# access_hint → the one-line remedy appended to a public-domain failure that looks like
+# Access intercepted the request. Different in each mode, because the fix is different.
+access_hint() {
+    case "${ACCESS_MODE}" in
+        enforced)
+            printf 'the service token was REJECTED — token revoked/expired, or the Service Auth policy is missing or ordered below the email policy on the Access application (DEPLOY-PRODUCTION.md section k)'
+            ;;
+        *)
+            printf 'the hostname is behind Cloudflare Access but this run has no service token — set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET in %s (DEPLOY-PRODUCTION.md section k)' "${ENV_FILE}"
+            ;;
+    esac
 }
 
 # --- MANDATORY checks ----------------------------------------------------------------
@@ -143,15 +278,122 @@ check_reverse_proxy_db() {
     fi
 }
 
+# Service-token sanity: half a token is never a mode, it is a typo in .env that would
+# otherwise present itself as "Access rejected us" further down. Fail it by name.
+check_access_token_config() {
+    if [[ "${ACCESS_MODE}" == "partial" ]]; then
+        report_fail "access-token" "${ACCESS_PARTIAL_DETAIL} — Cloudflare Access needs BOTH halves of the service token; fix ${ENV_FILE} (DEPLOY-PRODUCTION.md section k)"
+    fi
+}
+
 # Public domain over the Cloudflare Tunnel: both hostnames must serve the app.
+#
+# In ENFORCED mode the request carries the Access service token, so a 200 here proves the
+# whole public path at once: Cloudflare edge -> Access Service Auth policy -> tunnel ->
+# nginx -> Angular bundle. The app-shell marker matters as much as the status code: an
+# Access login page is also HTTP 200 on some flows, and "200" alone would grade it as a
+# healthy site.
 check_domains() {
-    local url code
+    local url probe code redirect body id
     for url in "${DOMAINS[@]}"; do
-        code="$(http_code "${CURL_TIMEOUT_PUBLIC}" "${url}/")"
-        if [[ "${code}" == "200" ]]; then
-            report_pass "domain-${url#https://}" "GET ${url}/ -> 200 through the tunnel"
+        id="domain-${url#https://}"
+        probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${url}/")"
+        read -r code redirect <<<"${probe}"
+        body="$(http_body "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${url}/")"
+        if [[ "${code}" == "200" && "${body}" == *'<app-root'* ]]; then
+            report_pass "${id}" "GET ${url}/ -> 200 with Angular app shell through the tunnel (access mode: ${ACCESS_MODE})"
+        elif looks_like_access_gate "${code}" "${redirect:-}"; then
+            report_fail "${id}" "GET ${url}/ -> ${code}, intercepted by Cloudflare Access: $(access_hint)"
         else
-            report_fail "domain-${url#https://}" "GET ${url}/ -> ${code} (expected 200; check cloudflared logs / Cloudflare tunnel status)"
+            report_fail "${id}" "GET ${url}/ -> ${code}, app shell marker <app-root> $([[ "${body}" == *'<app-root'* ]] && echo present || echo MISSING) (expected 200 + shell; check cloudflared logs / Cloudflare tunnel status)"
+        fi
+    done
+}
+
+# The routes that only the EDGE path can break, exercised through the public hostname.
+# The loopback equivalents of these three (uploads-routing, ws-negotiate, proxy-api-db)
+# stop at the ui container and therefore cannot see anything Cloudflare does in front of
+# it — Access included. Same expected codes as the loopback checks, same M-008 reasoning:
+#   SPA fallback  200 + <app-root>  (a direct link / page refresh on a client-side route)
+#   /api/         200               (anonymous, DB-free catalogue endpoint)
+#   /uploads/     404 from the API  (200 would mean the SPA fallback swallowed the path)
+#   /hubs/        401 from SignalR  (405 would mean the SPA fallback answered the POST)
+# In ENFORCED mode these run WITH the service token, so each one also proves that Access
+# lets that path through rather than answering it with a login redirect — the concrete
+# risk being that /api/ and /hubs/ are XHR/WebSocket paths a browser cannot follow a
+# redirect on.
+check_public_routes() {
+    local probe code redirect body
+
+    probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/smoke-check-nonexistent-spa-route")"
+    read -r code redirect <<<"${probe}"
+    body="$(http_body "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/smoke-check-nonexistent-spa-route")"
+    if [[ "${code}" == "200" && "${body}" == *'<app-root'* ]]; then
+        report_pass "public-spa-fallback" "GET ${PUBLIC_BASE}/<unknown route> -> 200 with app shell (deep links and page refresh work)"
+    elif looks_like_access_gate "${code}" "${redirect:-}"; then
+        report_fail "public-spa-fallback" "GET ${PUBLIC_BASE}/<unknown route> -> ${code}, intercepted by Cloudflare Access: $(access_hint)"
+    else
+        report_fail "public-spa-fallback" "GET ${PUBLIC_BASE}/<unknown route> -> ${code} (expected 200 + <app-root>; 404 = nginx lost try_files, deep links break)"
+    fi
+
+    probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/api/categories")"
+    read -r code redirect <<<"${probe}"
+    if [[ "${code}" == "200" ]]; then
+        report_pass "public-api" "GET ${PUBLIC_BASE}/api/categories -> 200 (edge -> tunnel -> nginx -> api)"
+    elif looks_like_access_gate "${code}" "${redirect:-}"; then
+        report_fail "public-api" "GET ${PUBLIC_BASE}/api/categories -> ${code}, intercepted by Cloudflare Access: $(access_hint)"
+    else
+        report_fail "public-api" "GET ${PUBLIC_BASE}/api/categories -> ${code} (expected 200)"
+    fi
+
+    probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/uploads/listings/smoke-check-does-not-exist.jpg")"
+    read -r code redirect <<<"${probe}"
+    if [[ "${code}" == "404" ]]; then
+        report_pass "public-uploads" "GET ${PUBLIC_BASE}/uploads/<nonexistent> -> 404 from API (listing images reach the browser through the edge)"
+    elif looks_like_access_gate "${code}" "${redirect:-}"; then
+        report_fail "public-uploads" "GET ${PUBLIC_BASE}/uploads/<nonexistent> -> ${code}, intercepted by Cloudflare Access: $(access_hint)"
+    else
+        report_fail "public-uploads" "GET ${PUBLIC_BASE}/uploads/<nonexistent> -> ${code} (expected 404; 200 = SPA fallback swallowed /uploads/)"
+    fi
+
+    probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} -X POST "${PUBLIC_BASE}/hubs/chat/negotiate?negotiateVersion=1")"
+    read -r code redirect <<<"${probe}"
+    if [[ "${code}" == "401" ]]; then
+        report_pass "public-ws-negotiate" "POST ${PUBLIC_BASE}/hubs/chat/negotiate -> 401 (auth required — SignalR reachable through the edge, chat can connect)"
+    elif looks_like_access_gate "${code}" "${redirect:-}"; then
+        report_fail "public-ws-negotiate" "POST ${PUBLIC_BASE}/hubs/chat/negotiate -> ${code}, intercepted by Cloudflare Access: $(access_hint)"
+    else
+        report_fail "public-ws-negotiate" "POST ${PUBLIC_BASE}/hubs/chat/negotiate -> ${code} (expected 401; 405 = SPA fallback ate /hubs/, 404 = route lost, 5xx = hub broken)"
+    fi
+}
+
+# The gate itself, and the only check here that is about security rather than liveness:
+# with NO credentials of any kind, both hostnames must refuse to hand over the app.
+#
+# The assertion is deliberately "the app shell was not served" rather than a specific
+# status code. Access answers unauthenticated requests differently depending on what the
+# client looks like (302 to the team login domain, or 403), and pinning one of those
+# spellings would make this check lie the first time Cloudflare picks the other. What
+# must never happen is a stranger receiving the Angular app.
+#
+# Runs in ENFORCED mode only: in PUBLIC mode an anonymous 200 is the correct answer, and
+# a check that fires on the intended state is a check people learn to ignore (M-015).
+check_access_gate() {
+    [[ "${ACCESS_MODE}" == "enforced" ]] || return 0
+    local url probe code redirect body id where
+    for url in "${DOMAINS[@]}"; do
+        id="access-gate-${url#https://}"
+        probe="$(http_probe "${CURL_TIMEOUT_PUBLIC}" "${url}/")"
+        read -r code redirect <<<"${probe}"
+        body="$(http_body "${CURL_TIMEOUT_PUBLIC}" "${url}/")"
+        if [[ "${code}" == "000" ]]; then
+            report_fail "${id}" "anonymous GET ${url}/ -> no response at all (cannot conclude the gate is closed; check the tunnel)"
+        elif [[ "${body}" == *'<app-root'* ]]; then
+            report_fail "${id}" "anonymous GET ${url}/ -> ${code} AND served the Angular app shell — the stand is PUBLIC to anyone: the Cloudflare Access application is missing, disabled, or does not cover this hostname (DEPLOY-PRODUCTION.md section k)"
+        else
+            where=""
+            [[ -n "${redirect:-}" ]] && where=" -> ${redirect%%\?*}"
+            report_pass "${id}" "anonymous GET ${url}/ -> ${code}${where}, no app shell (Cloudflare Access is turning strangers away)"
         fi
     done
 }
@@ -312,6 +554,11 @@ check_backups() {
 main() {
     printf 'dorent.am production smoke check — %s\n' "$(date '+%Y-%m-%d %H:%M:%S%z')"
     printf 'repo: %s\n' "${REPO_ROOT}"
+    case "${ACCESS_MODE}" in
+        enforced) printf 'access mode: ENFORCED — public checks authenticate with the Cloudflare Access service token\n' ;;
+        partial)  printf 'access mode: MISCONFIGURED — only one half of the Access service token is set\n' ;;
+        *)        printf 'access mode: PUBLIC — no Access service token configured, public checks run anonymously\n' ;;
+    esac
     printf -- '---- checks ----\n'
 
     # MANDATORY
@@ -319,7 +566,10 @@ main() {
     check_api_health
     check_ui_shell
     check_reverse_proxy_db
+    check_access_token_config
     check_domains
+    check_public_routes
+    check_access_gate
     check_uploads_routing
     check_websocket_negotiate
 

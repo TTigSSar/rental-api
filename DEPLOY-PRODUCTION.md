@@ -326,6 +326,46 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://dorent.am/hubs/chat/neg
 - открыть чат и проверить, что сообщения приходят в реальном времени
   (WebSocket через `/hubs/`, проксируется туннелем).
 
+### Бэкфилл координат объявлений (проверять после каждого гео-деплоя)
+
+`smoke.sh` этого НЕ покрывает — проверять руками.
+
+`Program.cs` на старте выполняет `ApplyMigrationsAsync()`, а сразу за ним
+`BackfillListingLocationsAsync()` — обе до `app.Run()`. Второй шаг
+(`ListingLocationBackfillRunner`) заполняет `PublicLatitude`/`PublicLongitude`/
+`DistrictId` у всех объявлений, у которых есть точные `Latitude`/`Longitude`,
+но производные значения пусты. Именно на этот шаг рассчитывает миграция
+`20260725165816_InvalidatePublicCoordinatesForGeohashPrecisionUpgrade`: она
+обнуляет публичные координаты, а пересчитывает их не она, а бэкфилл.
+
+Если бэкфилл не отработал, объявления остаются с `PublicLatitude IS NULL` и
+**молча исчезают** из `GET /api/listings/map-pins` и из фильтра по радиусу —
+сами объявления при этом целы, поэтому по `smoke.sh` и по главной странице
+поломка не видна.
+
+```bash
+# 1) строка-итог в логах старта API
+docker compose -f docker-compose.production.yml logs --no-color api \
+  | grep -i "Public coordinates filled"
+# ожидается: Public coordinates filled: N, districts assigned: M (of K candidate(s) examined)
+
+# 2) факт в данных: ни одного объявления с точными координатами и пустыми публичными
+#    (пароль — только через SQLCMDPASSWORD, никогда через -P в командной строке)
+docker exec -e SQLCMDPASSWORD="$SQLCMDPASSWORD" rental-api-db-1 \
+  /opt/mssql-tools18/bin/sqlcmd -S 127.0.0.1 -U sa -C -b -h -1 -W -d RentalPlatformDb \
+  -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM Listings
+      WHERE Latitude IS NOT NULL AND Longitude IS NOT NULL
+        AND (PublicLatitude IS NULL OR PublicLongitude IS NULL);"
+# ожидается: 0
+```
+
+Откат этих миграций — **только восстановлением из `.bak`**. `Down()` у обеих
+не проверялся, а у миграции точности он намеренно не «восстанавливает»
+прежние значения (публичные координаты — производный кэш, а не источник
+истины). Схемная миграция `AddDistrictsAndListingLocationFields` аддитивна
+(только `ADD COLUMN`/`CREATE TABLE`/`CREATE INDEX`), поэтому предыдущий образ
+API совместим с новой схемой — откат кода без отката схемы допустим.
+
 ### Данные переживают перезапуск без `-v`
 
 ```bash

@@ -39,6 +39,11 @@
 #   MANDATORY — any failure makes the overall verdict FAIL and the exit code 1.
 #   WARNING   — reported as WARN, but the exit code stays 0 if all mandatory pass.
 #
+# Most checks here ask "does this component answer at all". geo-map-pins is the exception
+# and the reason is worth stating up front: it asserts a property of the DATA, because the
+# geo surface can fail while every liveness check stays green (see the check for the full
+# reasoning). Liveness is not health.
+#
 # Exit codes: 0 = all mandatory checks passed (warnings possible)
 #             1 = at least one mandatory check failed
 #
@@ -62,7 +67,15 @@ BACKUPS_DIR="${BACKUPS_DIR:-/opt/dorent/backups}"
 BACKUP_LOG="${BACKUPS_DIR}/backup.log"
 
 # Loopback endpoints (M-014: always 127.0.0.1, never localhost — IPv6 ::1 trap).
-API_BASE="http://127.0.0.1:8080"
+#
+# API_BASE is overridable from the environment (same pattern as BACKUPS_DIR below) purely
+# so the data-shape checks can be rehearsed against a mock that returns a known-bad body —
+# proving a check actually goes red is not otherwise possible without breaking production
+# data, which is never an acceptable way to test a check. Nothing else is redirectable: the
+# public hostnames in DOMAINS are the stand's identity and stay pinned. An overridden base
+# is visible in every message the affected checks print, so a run pointed somewhere else
+# can never be mistaken for a clean production run.
+API_BASE="${API_BASE:-http://127.0.0.1:8080}"
 UI_BASE="http://127.0.0.1:4200"
 DOMAINS=("https://dorent.am" "https://www.dorent.am")
 # Single hostname used for the per-route public checks (SPA fallback, /api/, /uploads/,
@@ -276,6 +289,102 @@ check_reverse_proxy_db() {
     else
         report_fail "proxy-api-db" "GET ${UI_BASE}/api/listings -> ${code} (expected 200; 5xx here with api-health OK usually means DB trouble)"
     fi
+}
+
+# Geo surface: approved listings must actually reach the map.
+#
+# The failure this exists for is SILENT, which is the whole reason it is a check and not a
+# manual step. Public map coordinates (PublicLatitude/PublicLongitude) are a DERIVED cache,
+# filled at API startup by ListingLocationBackfillRunner immediately after
+# ApplyMigrationsAsync, both before app.Run(). If that step does not run, every listing keeps
+# NULL public coordinates and drops out of /api/listings/map-pins and out of the radius
+# filter — while the listings themselves stay completely healthy. Every other check in this
+# file stays green in that state, /api/listings included: the catalogue works, the map is
+# just empty. A green smoke run would have certified a half-broken stand, so this check is
+# MANDATORY. A warning would have repeated the very gap it was added to close.
+#
+# Both requests go to the API DIRECTLY rather than through the ui container's nginx, on
+# purpose: proxy routing already has checks of its own (proxy-api-db, public-api), so keeping
+# this one off the proxy path means a FAIL here points at the DATA and nothing else.
+#
+# Counting. /api/listings reports totalCount for the approved catalogue; map-pins runs the
+# SAME approved-listing filter chain plus a non-null public-coordinate requirement
+# (ListingsQueryService.GetMapPinsAsync). Pins are therefore always a SUBSET of the
+# catalogue, which makes exactly two relations worth asserting:
+#
+#   totalCount == 0        -> PASS, inert. An empty catalogue plots no pins, and that is a
+#                             legitimate state (fresh restore, stand before seeding). An
+#                             empty response is only evidence of failure when there is
+#                             something that should have been in it — so the catalogue count
+#                             is what tells the two apart. Failing here would fire on a
+#                             healthy system, and a check that cries wolf gets ignored.
+#   totalCount > 0, 0 pins -> FAIL. Precisely the backfill failure described above.
+#   pins > totalCount      -> WARN, not FAIL. A subset cannot outnumber its superset, but the
+#                             two numbers come from two separate requests, so an approval
+#                             landing in between produces this legitimately. Worth surfacing;
+#                             never worth failing a deploy on a timing artifact.
+#
+# What is deliberately NOT asserted is pins == totalCount, or any ratio floor. Listing
+# latitude/longitude are optional (decimal?), so an approved listing with no location at all
+# is a perfectly normal listing. The share of coordinate-less listings is a product fact that
+# moves as the catalogue moves, and a threshold pinned to it would turn an ordinary listing
+# edit into a red deploy — fragile in exactly the way this check must not be.
+check_geo_map_pins() {
+    local listings_url="${API_BASE}/api/listings?page=1&pageSize=1"
+    local pins_url="${API_BASE}/api/listings/map-pins"
+    local code body total pins truncated=""
+
+    # Denominator first: it decides whether the pin count means anything at all.
+    code="$(http_code "${CURL_TIMEOUT_LOCAL}" "${listings_url}")"
+    if [[ "${code}" != "200" ]]; then
+        report_fail "geo-map-pins" "GET ${listings_url} -> ${code} (expected 200; cannot establish the approved-listing count this check is measured against)"
+        return
+    fi
+    body="$(http_body "${CURL_TIMEOUT_LOCAL}" "${listings_url}")"
+    total="$(printf '%s' "${body}" | sed -n -E 's/.*"totalCount"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
+    if [[ ! "${total}" =~ ^[0-9]+$ ]]; then
+        report_fail "geo-map-pins" "GET ${listings_url} -> 200 but no numeric \"totalCount\" in the body (unexpected response shape — the paged-result envelope changed?)"
+        return
+    fi
+
+    code="$(http_code "${CURL_TIMEOUT_LOCAL}" "${pins_url}")"
+    if [[ "${code}" != "200" ]]; then
+        report_fail "geo-map-pins" "GET ${pins_url} -> ${code} (expected 200; the map has no data source at all)"
+        return
+    fi
+    body="$(http_body "${CURL_TIMEOUT_LOCAL}" "${pins_url}")"
+    if [[ "${body}" != *'"items"'* ]]; then
+        report_fail "geo-map-pins" "GET ${pins_url} -> 200 but the body carries no \"items\" envelope (unexpected response shape)"
+        return
+    fi
+
+    # Exactly one "latitude": per pin, and the envelope itself has none. A listing title
+    # containing that literal text is JSON-escaped to \"latitude\": and cannot match.
+    # grep exits 1 on no match and `set -o pipefail` is on, hence the `|| true`; wc still
+    # prints 0, which is the answer we want.
+    pins="$(printf '%s' "${body}" | grep -o '"latitude"[[:space:]]*:' | wc -l | tr -d '[:space:]' || true)"
+    [[ "${body}" == *'"isTruncated"'*'true'* ]] && truncated=" (capped at the pin limit: isTruncated=true)"
+
+    if (( total == 0 )); then
+        if (( pins == 0 )); then
+            report_pass "geo-map-pins" "approved catalogue is empty, so no pins are expected — geo surface not exercised (this check becomes meaningful as soon as one listing is approved)"
+        else
+            report_fail "geo-map-pins" "map-pins returned ${pins} pin(s) while the approved catalogue is empty — map-pins is publishing listings the public catalogue does not (the two filter chains diverged)"
+        fi
+        return
+    fi
+
+    if (( pins == 0 )); then
+        report_fail "geo-map-pins" "${total} approved listing(s) but map-pins returned 0 pins — public coordinates are NULL: the startup ListingLocationBackfillRunner did not run or filled nothing. Listings stay healthy everywhere else while the map and the radius filter are empty (DEPLOY-PRODUCTION.md section g, 'Бэкфилл координат объявлений')"
+        return
+    fi
+
+    if (( pins > total )); then
+        report_warn "geo-map-pins" "${pins} pins vs ${total} approved listing(s): pins are a subset of the catalogue and cannot outnumber it — most likely the catalogue changed between the two requests; if it persists, the map-pins filter chain diverged from the catalogue one"
+        return
+    fi
+
+    report_pass "geo-map-pins" "${pins} of ${total} approved listing(s) carry public coordinates and reach the map${truncated}"
 }
 
 # Service-token sanity: half a token is never a mode, it is a typo in .env that would
@@ -566,6 +675,7 @@ main() {
     check_api_health
     check_ui_shell
     check_reverse_proxy_db
+    check_geo_map_pins
     check_access_token_config
     check_domains
     check_public_routes

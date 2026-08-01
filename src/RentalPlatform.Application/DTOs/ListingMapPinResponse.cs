@@ -15,4 +15,11 @@ public sealed class ListingMapPinResponse
     public PriceUnit PriceUnit { get; init; }
     public string Currency { get; init; } = string.Empty;
     public string? PrimaryImageUrl { get; init; }
+
+    /// <summary>
+    /// Average toy rating, or null when below the aggregate threshold — same threshold
+    /// (minimum 2 reviews) and rounding as ListingPreviewResponse.Rating.
+    /// </summary>
+    public decimal? Rating { get; init; }
+    public int ReviewCount { get; init; }
 }

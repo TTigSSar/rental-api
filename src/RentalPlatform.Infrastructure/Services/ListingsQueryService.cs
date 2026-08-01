@@ -282,25 +282,49 @@ public sealed class ListingsQueryService : IListingsQueryService
         var rows = await query
             .OrderByDescending(listing => listing.CreatedAt)
             .Take(MaxMapPins + 1)
-            .Select(listing => new ListingMapPinResponse
+            .Select(listing => new
             {
-                Id = listing.Id,
+                listing.Id,
                 Latitude = listing.PublicLatitude!.Value,
                 Longitude = listing.PublicLongitude!.Value,
-                Title = listing.Title,
-                PricePerDay = listing.PricePerDay,
-                PriceUnit = listing.PriceUnit,
-                Currency = listing.Currency,
+                listing.Title,
+                listing.PricePerDay,
+                listing.PriceUnit,
+                listing.Currency,
                 PrimaryImageUrl = listing.Images
                     .OrderByDescending(image => image.IsPrimary)
                     .ThenBy(image => image.SortOrder)
                     .Select(image => image.Url)
-                    .FirstOrDefault()
+                    .FirstOrDefault(),
+                // Same ToyReviews subquery pair as GetApprovedListingsAsync (~line 217-220) —
+                // reused verbatim rather than a second, divergent rating formula.
+                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
+                RatingSum = _dbContext.ToyReviews
+                    .Where(tr => tr.ListingId == listing.Id)
+                    .Sum(tr => tr.OverallRating)
             })
             .ToListAsync(cancellationToken);
 
         var isTruncated = rows.Count > MaxMapPins;
-        var items = isTruncated ? rows.Take(MaxMapPins).ToList() : rows;
+        var limitedRows = isTruncated ? rows.Take(MaxMapPins).ToList() : rows;
+
+        var items = limitedRows
+            .Select(r => new ListingMapPinResponse
+            {
+                Id = r.Id,
+                Latitude = r.Latitude,
+                Longitude = r.Longitude,
+                Title = r.Title,
+                PricePerDay = r.PricePerDay,
+                PriceUnit = r.PriceUnit,
+                Currency = r.Currency,
+                PrimaryImageUrl = r.PrimaryImageUrl,
+                ReviewCount = r.ReviewCount,
+                // Aggregate hidden until the minimum number of reviews (2) — same threshold as
+                // ListingPreviewResponse.Rating in GetApprovedListingsAsync.
+                Rating = r.ReviewCount >= 2 ? Math.Round((decimal)r.RatingSum / r.ReviewCount, 1) : null
+            })
+            .ToList();
 
         return new ListingMapPinsResponse
         {

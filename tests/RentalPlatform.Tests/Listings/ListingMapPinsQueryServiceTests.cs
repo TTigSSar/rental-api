@@ -130,4 +130,86 @@ public sealed class ListingMapPinsQueryServiceTests
         Assert.Equal(500, result.Items.Count);
         Assert.True(result.IsTruncated);
     }
+
+    [Fact]
+    public async Task Pin_Reports_Average_Rating_And_Review_Count_When_Reviews_Exist()
+    {
+        // Same threshold/rounding as ListingPreviewResponse.Rating in GetApprovedListingsAsync:
+        // the aggregate is exposed once a listing has at least 2 reviews.
+        using var db = await SeedBaseAsync();
+        var renterId = new Guid("b0000000-0000-0000-0000-000000000003");
+        var strangerId = new Guid("b0000000-0000-0000-0000-000000000004");
+        await db.SeedAsync(
+            TestData.User(renterId, "renter-rating@test.local"),
+            TestData.User(strangerId, "stranger-rating@test.local"));
+
+        var id = new Guid("b0000000-0000-0000-0000-000000000013");
+        var listing = Build(id);
+        listing.PublicLatitude = 40.19m;
+        listing.PublicLongitude = 44.52m;
+        await db.SeedAsync(listing);
+
+        var pastStart = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-10));
+        var pastEnd = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-3));
+        var bookingOneId = Guid.NewGuid();
+        var bookingTwoId = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Booking(bookingOneId, id, renterId, pastStart, pastEnd, BookingStatus.Completed),
+            TestData.Booking(bookingTwoId, id, strangerId, pastStart, pastEnd, BookingStatus.Completed));
+
+        await db.SeedAsync(
+            new ToyReview
+            {
+                Id = Guid.NewGuid(),
+                BookingId = bookingOneId,
+                ListingId = id,
+                ReviewerId = renterId,
+                OverallRating = 5,
+                ConditionRating = 5,
+                CleanlinessRating = 5,
+                ValueForMoneyRating = 5,
+                FunPlayValueRating = 5,
+                DescriptionAccuracyRating = 5,
+                CreatedAt = DateTime.UtcNow
+            },
+            new ToyReview
+            {
+                Id = Guid.NewGuid(),
+                BookingId = bookingTwoId,
+                ListingId = id,
+                ReviewerId = strangerId,
+                OverallRating = 4,
+                ConditionRating = 4,
+                CleanlinessRating = 4,
+                ValueForMoneyRating = 4,
+                FunPlayValueRating = 4,
+                DescriptionAccuracyRating = 4,
+                CreatedAt = DateTime.UtcNow
+            });
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetMapPinsAsync(new ListingsQueryFilter());
+
+        var pin = Assert.Single(result.Items);
+        Assert.Equal(2, pin.ReviewCount);
+        Assert.Equal(4.5m, pin.Rating);
+    }
+
+    [Fact]
+    public async Task Pin_Has_Null_Rating_And_Zero_ReviewCount_When_No_Reviews()
+    {
+        using var db = await SeedBaseAsync();
+        var id = new Guid("b0000000-0000-0000-0000-000000000014");
+        var listing = Build(id);
+        listing.PublicLatitude = 40.19m;
+        listing.PublicLongitude = 44.52m;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        var result = await new ListingsQueryService(context).GetMapPinsAsync(new ListingsQueryFilter());
+
+        var pin = Assert.Single(result.Items);
+        Assert.Equal(0, pin.ReviewCount);
+        Assert.Null(pin.Rating);
+    }
 }

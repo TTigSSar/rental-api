@@ -39,6 +39,9 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Booking>
         builder.Property(booking => booking.RejectionReason)
             .HasMaxLength(500);
 
+        builder.Property(booking => booking.Note)
+            .HasMaxLength(280);
+
         // Lifecycle timestamps (all nullable; populated as the booking progresses).
         builder.Property(booking => booking.ApprovedAt);
         builder.Property(booking => booking.ActiveAt);

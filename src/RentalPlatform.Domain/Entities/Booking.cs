@@ -27,6 +27,10 @@ public sealed class Booking
     // Set when the booking reaches Completed.
     public DateTime? CompletedAt { get; set; }
 
+    // Renter's free-text note to the owner, set once at creation (max 280 chars). Immutable
+    // thereafter — no edit endpoint. Null when the renter didn't add one.
+    public string? Note { get; set; }
+
     public Listing Listing { get; set; } = null!;
     public User Renter { get; set; } = null!;
 }

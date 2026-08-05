@@ -20,4 +20,8 @@ public sealed class BookingRequestResponse
     public DateTime ExpiresAt { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
+
+    // Renter's free-text note to the owner (max 280 chars), visible while the request is
+    // still Pending — this is the entire point of the field. Null when none was provided.
+    public string? Note { get; init; }
 }

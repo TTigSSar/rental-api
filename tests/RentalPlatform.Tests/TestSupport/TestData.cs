@@ -58,7 +58,8 @@ public static class TestData
         DateOnly startDate,
         DateOnly endDate,
         BookingStatus status,
-        DateTime? expiresAt = null) => new()
+        DateTime? expiresAt = null,
+        string? note = null) => new()
     {
         Id = id,
         ListingId = listingId,
@@ -69,7 +70,8 @@ public static class TestData
         Status = status,
         ExpiresAt = expiresAt ?? DateTime.UtcNow.AddHours(24),
         CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        UpdatedAt = DateTime.UtcNow,
+        Note = note
     };
 
     public static Conversation Conversation(

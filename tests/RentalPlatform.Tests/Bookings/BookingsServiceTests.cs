@@ -264,6 +264,192 @@ public sealed class BookingsServiceTests
     }
 
     [Fact]
+    public async Task Create_Persists_Note_Verbatim_And_Returns_It_On_Detail()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var createResult = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7),
+            Note = "Please call before dropping off."
+        });
+
+        Assert.True(createResult.IsSuccess);
+
+        await using var readContext = db.CreateContext();
+        var detail = await CreateService(readContext, RenterId).GetByIdAsync(createResult.Value!.Id);
+
+        Assert.True(detail.IsSuccess);
+        Assert.Equal("Please call before dropping off.", detail.Value!.Note);
+    }
+
+    [Fact]
+    public async Task Create_Trims_Surrounding_Whitespace_From_Note()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var createResult = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7),
+            Note = "   Handle with care   "
+        });
+
+        Assert.True(createResult.IsSuccess);
+
+        await using var readContext = db.CreateContext();
+        var detail = await CreateService(readContext, RenterId).GetByIdAsync(createResult.Value!.Id);
+
+        Assert.Equal("Handle with care", detail.Value!.Note);
+    }
+
+    [Fact]
+    public async Task Create_Stores_Whitespace_Only_Note_As_Null()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var createResult = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7),
+            Note = "   "
+        });
+
+        Assert.True(createResult.IsSuccess);
+
+        await using var readContext = db.CreateContext();
+        var detail = await CreateService(readContext, RenterId).GetByIdAsync(createResult.Value!.Id);
+
+        Assert.Null(detail.Value!.Note);
+    }
+
+    [Fact]
+    public async Task Create_Rejects_Note_Longer_Than_280_Chars_After_Trimming()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        // 281 non-whitespace chars, plus padding whitespace that trimming must not save it from.
+        var tooLong = "  " + new string('a', 281) + "  ";
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7),
+            Note = tooLong
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.note_too_long", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Create_Accepts_Note_At_Exactly_280_Chars_After_Trimming()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        var exactly280 = "  " + new string('a', 280) + "  ";
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7),
+            Note = exactly280
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var readContext = db.CreateContext();
+        var detail = await CreateService(readContext, RenterId).GetByIdAsync(result.Value!.Id);
+        Assert.Equal(280, detail.Value!.Note!.Length);
+    }
+
+    [Fact]
+    public async Task Create_Omitted_Note_Is_Null_Everywhere()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var createResult = await CreateService(context, RenterId).CreateAsync(new CreateBookingRequest
+        {
+            ListingId = ListingId,
+            StartDate = Today.AddDays(6),
+            EndDate = Today.AddDays(7)
+        });
+
+        Assert.True(createResult.IsSuccess);
+
+        await using var readContext = db.CreateContext();
+        var detail = await CreateService(readContext, RenterId).GetByIdAsync(createResult.Value!.Id);
+        Assert.Null(detail.Value!.Note);
+
+        await using var ownerContext = db.CreateContext();
+        var requests = await CreateService(ownerContext, OwnerId).GetOwnerRequestsAsync();
+        var request = Assert.Single(requests.Value!, r => r.Id == createResult.Value!.Id);
+        Assert.Null(request.Note);
+    }
+
+    [Fact]
+    public async Task Owner_Sees_Note_On_Requests_List_While_Booking_Is_Still_Pending()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24),
+            note: "Kids nap 1-3pm, please avoid that window."));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).GetOwnerRequestsAsync();
+
+        Assert.True(result.IsSuccess);
+        var request = Assert.Single(result.Value!, r => r.Id == bookingId);
+        Assert.Equal(BookingStatus.Pending, request.Status);
+        Assert.Equal("Kids nap 1-3pm, please avoid that window.", request.Note);
+    }
+
+    [Fact]
+    public async Task GetById_For_Stranger_Cannot_Read_Note()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24),
+            note: "Private note for the owner only."));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OtherUserId).GetByIdAsync(bookingId);
+
+        // Covered generically by booking.forbidden — asserted explicitly here for the note field:
+        // a stranger gets no BookingDetailResponse at all, so the note can never leak to them.
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.forbidden", result.Error!.Code);
+    }
+
+    [Fact]
     public async Task Cancel_Succeeds_For_Pending_Booking_By_Renter()
     {
         using var db = new SqliteTestDatabase();

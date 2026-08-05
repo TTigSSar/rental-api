@@ -13,6 +13,9 @@ public sealed class BookingsService : IBookingsService
     // (e.g. a multi-year booking) that would lock a listing's calendar and balloon TotalPrice.
     private const int MaxRentalDays = 90;
 
+    // Upper bound on the renter's note to the owner, after trimming.
+    private const int MaxNoteLength = 280;
+
     private static class ErrorCodes
     {
         public const string Unauthenticated = "booking.unauthenticated";
@@ -21,6 +24,7 @@ public sealed class BookingsService : IBookingsService
         public const string ListingNotApproved = "booking.listing_not_approved";
         public const string OwnListingForbidden = "booking.own_listing_forbidden";
         public const string InvalidDates = "booking.invalid_dates";
+        public const string NoteTooLong = "booking.note_too_long";
         public const string Overlap = "booking.overlap";
         public const string BookingNotFound = "booking.not_found";
         public const string BookingForbidden = "booking.forbidden";
@@ -89,6 +93,16 @@ public sealed class BookingsService : IBookingsService
             return Failure<BookingResponse>(ErrorCodes.InvalidDates, dateValidation);
         }
 
+        // Trim, then treat whitespace-only as absent (store null, not ""). Length is judged
+        // after trimming so surrounding whitespace can't push a borderline note over the limit.
+        var trimmedNote = request.Note?.Trim();
+        if (trimmedNote is { Length: > MaxNoteLength })
+        {
+            return Failure<BookingResponse>(ErrorCodes.NoteTooLong, $"Note must be {MaxNoteLength} characters or fewer.");
+        }
+
+        var note = string.IsNullOrEmpty(trimmedNote) ? null : trimmedNote;
+
         var inclusiveDays = request.EndDate.DayNumber - request.StartDate.DayNumber + 1;
         var booking = new Booking
         {
@@ -104,7 +118,8 @@ public sealed class BookingsService : IBookingsService
             Status = BookingStatus.Pending,
             ExpiresAt = now.AddHours(24),
             CreatedAt = now,
-            UpdatedAt = now
+            UpdatedAt = now,
+            Note = note
         };
 
         // Atomic overlap-then-insert. Blocks if any Pending OR Approved booking covers the
@@ -505,7 +520,8 @@ public sealed class BookingsService : IBookingsService
         Status = booking.Status,
         ExpiresAt = booking.ExpiresAt,
         CreatedAt = booking.CreatedAt,
-        UpdatedAt = booking.UpdatedAt
+        UpdatedAt = booking.UpdatedAt,
+        Note = booking.Note
     };
 
     private static BookingDetailResponse MapBookingDetail(Booking booking, BookingParty callerParty)
@@ -551,6 +567,7 @@ public sealed class BookingsService : IBookingsService
             ExpiresAt = booking.ExpiresAt,
 
             RejectionReason = booking.RejectionReason,
+            Note = booking.Note,
 
             CounterpartyId = counterparty.Id,
             CounterpartyFirstName = counterparty.FirstName,

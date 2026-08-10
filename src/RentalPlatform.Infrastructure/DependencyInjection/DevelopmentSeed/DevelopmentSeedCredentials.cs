@@ -14,8 +14,11 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 ///
 /// Docker/demo accounts (toyrent.am domain):
 ///   admin@toyrent.am      — Admin demo account
-///   demo_owner@toyrent.am — Owner with 12 approved listings across all categories
+///   demo_owner@toyrent.am — Owner with 14 approved listings across all categories
 ///   demo_renter@toyrent.am— Renter with bookings and favorites
+///
+/// Additional catalogue-expansion owners (toyrent.am domain, no bookings/reviews/favorites):
+///   anahit@toyrent.am, narek@toyrent.am, lilit@toyrent.am, davit@toyrent.am, mariam@toyrent.am
 /// </remarks>
 internal static class DevelopmentSeedCredentials
 {
@@ -32,4 +35,11 @@ internal static class DevelopmentSeedCredentials
     public const string DemoAdminEmail  = "admin@toyrent.am";
     public const string DemoOwnerEmail  = "demo_owner@toyrent.am";
     public const string DemoRenterEmail = "demo_renter@toyrent.am";
+
+    // Additional owners backing the 50-listing toy-catalogue expansion (2026-08).
+    public const string OwnerAnahitEmail = "anahit@toyrent.am";
+    public const string OwnerNarekEmail  = "narek@toyrent.am";
+    public const string OwnerLilitEmail  = "lilit@toyrent.am";
+    public const string OwnerDavitEmail  = "davit@toyrent.am";
+    public const string OwnerMariamEmail = "mariam@toyrent.am";
 }

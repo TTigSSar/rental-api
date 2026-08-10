@@ -12,4 +12,10 @@ public sealed class CreateBookingRequest
 
     [Required]
     public DateOnly EndDate { get; init; }
+
+    // Optional free-text note from the renter to the owner. Trimmed and, if longer than 280
+    // characters after trimming, rejected by BookingsService (booking.note_too_long) — the
+    // service handles this rather than a [MaxLength] attribute because trimming must happen
+    // before the length is judged (see BookingsService.CreateAsync).
+    public string? Note { get; init; }
 }

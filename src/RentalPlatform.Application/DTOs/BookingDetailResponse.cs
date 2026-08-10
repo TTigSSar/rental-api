@@ -44,6 +44,10 @@ public sealed class BookingDetailResponse
     // Owner's reason when the request was rejected (known reason code or free text). Null otherwise.
     public string? RejectionReason { get; init; }
 
+    // Renter's free-text note to the owner (max 280 chars), visible to both parties. Not gated
+    // by booking status. Null when none was provided.
+    public string? Note { get; init; }
+
     // Counterparty (the other side of the booking). Phone gated to Approved+.
     public Guid CounterpartyId { get; init; }
     public string CounterpartyFirstName { get; init; } = string.Empty;

@@ -168,22 +168,24 @@ internal static class DevelopmentSeedData
 
     // Toy categories. Slugs are stable, lowercase, hyphenated and unique.
     // DisplayOrder controls carousel order on the home page.
-    // IconName uses PrimeIcons class names (without the "pi " prefix).
+    // IconName uses the shared app-icon vocabulary (CATEGORY_ICON_OPTIONS in
+    // Rental-Ui/.../admin/models/category-palette.model.ts) — NOT PrimeIcons class names — so the
+    // public home page's icon lookup (keyed on the same vocabulary) resolves a real glyph.
     // ColorHex is the admin-console-redesign pastel palette (10 categories, one colour each) —
     // Categories don't get created here, only backfilled onto these fixed rows (see
     // DevelopmentSeedRunner.SeedCategoriesAsync); IsVisible stays at its true default for all of them.
     public static readonly SeedCategory[] Categories =
     [
-        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys",        "baby-toys",        IconName: "pi-heart",    ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
-        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks",  "building-blocks",  IconName: "pi-box",      ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2,  ColorHex: "#E6F2D9"),
-        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", "educational-toys", IconName: "pi-book",     ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3,  ColorHex: "#F0E6FF"),
-        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys",     "outdoor-toys",     IconName: "pi-sun",      ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4,  ColorHex: "#D9E8FF"),
-        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys",     "ride-on-toys",     IconName: "pi-car",      ImageUrl: "/assets/categories/ride-on-toys.svg",     DisplayOrder: 5,  ColorHex: "#FFE0E0"),
-        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play",     "pretend-play",     IconName: "pi-palette",  ImageUrl: "/assets/categories/pretend-play.svg",     DisplayOrder: 6,  ColorHex: "#E8EAFF"),
-        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys",  "montessori-toys",  IconName: "pi-leaf",     ImageUrl: "/assets/categories/montessori-toys.svg",  DisplayOrder: 7,  ColorHex: "#FFF1CC"),
-        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles",          "puzzles",          IconName: "pi-th-large", ImageUrl: "/assets/categories/puzzles.svg",           DisplayOrder: 8,  ColorHex: "#D9F0EC"),
-        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games",      "board-games",      IconName: "pi-table",    ImageUrl: "/assets/categories/board-games.svg",      DisplayOrder: 9,  ColorHex: "#E6F4EE"),
-        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys",       "party-toys",       IconName: "pi-gift",     ImageUrl: "/assets/categories/party-toys.svg",       DisplayOrder: 10, ColorHex: "#EDEAE3")
+        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys",        "baby-toys",        IconName: "heart",   ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
+        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks",  "building-blocks",  IconName: "grid",    ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2,  ColorHex: "#E6F2D9"),
+        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", "educational-toys", IconName: "star",    ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3,  ColorHex: "#F0E6FF"),
+        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys",     "outdoor-toys",     IconName: "sparkle", ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4,  ColorHex: "#D9E8FF"),
+        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys",     "ride-on-toys",     IconName: "truck",   ImageUrl: "/assets/categories/ride-on-toys.svg",     DisplayOrder: 5,  ColorHex: "#FFE0E0"),
+        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play",     "pretend-play",     IconName: "sparkle", ImageUrl: "/assets/categories/pretend-play.svg",     DisplayOrder: 6,  ColorHex: "#E8EAFF"),
+        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys",  "montessori-toys",  IconName: "shield",  ImageUrl: "/assets/categories/montessori-toys.svg",  DisplayOrder: 7,  ColorHex: "#FFF1CC"),
+        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles",          "puzzles",          IconName: "grid",    ImageUrl: "/assets/categories/puzzles.svg",           DisplayOrder: 8,  ColorHex: "#D9F0EC"),
+        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games",      "board-games",      IconName: "grid",    ImageUrl: "/assets/categories/board-games.svg",      DisplayOrder: 9,  ColorHex: "#E6F4EE"),
+        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys",       "party-toys",       IconName: "tag",     ImageUrl: "/assets/categories/party-toys.svg",       DisplayOrder: 10, ColorHex: "#EDEAE3")
     ];
 
     // Admin console Phase 6 ("Needs category fix"): a sensible keyword set for each of the 10

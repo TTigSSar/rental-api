@@ -32,6 +32,7 @@ public sealed class CategoriesQueryService : ICategoriesQueryService
                 Slug = category.Slug,
                 IconName = category.IconName,
                 ImageUrl = category.ImageUrl,
+                ColorHex = category.ColorHex,
                 DisplayOrder = category.DisplayOrder
             })
             .ToListAsync(cancellationToken);

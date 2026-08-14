@@ -23,7 +23,7 @@ public sealed class CategoryVisibilityPublicTests
         var db = new SqliteTestDatabase();
         await db.SeedAsync(
             TestData.User(OwnerId, "owner@test.local"),
-            TestData.Category(VisibleCategoryId, name: "Visible Cat", slug: "visible-cat", displayOrder: 1, isVisible: true),
+            TestData.Category(VisibleCategoryId, name: "Visible Cat", slug: "visible-cat", displayOrder: 1, isVisible: true, colorHex: "#FFE6CC"),
             TestData.Category(HiddenCategoryId, name: "Hidden Cat", slug: "hidden-cat", displayOrder: 2, isVisible: false));
         return db;
     }
@@ -39,6 +39,18 @@ public sealed class CategoryVisibilityPublicTests
         var ids = categories.Select(c => c.Id).ToList();
         Assert.Contains(VisibleCategoryId, ids);
         Assert.DoesNotContain(HiddenCategoryId, ids);
+    }
+
+    [Fact]
+    public async Task CategoriesQueryService_Includes_ColorHex()
+    {
+        using var db = await SeedAsync();
+
+        await using var context = db.CreateContext();
+        var categories = await new CategoriesQueryService(context).GetAllAsync();
+
+        var visible = categories.Single(c => c.Id == VisibleCategoryId);
+        Assert.Equal("#FFE6CC", visible.ColorHex);
     }
 
     [Fact]

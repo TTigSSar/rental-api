@@ -45,6 +45,15 @@ public sealed class ListingsQueryService : IListingsQueryService
     // means; only the projection/shape after this differs.
     private IQueryable<Domain.Entities.Listing> BuildApprovedListingsQuery(ListingsQueryFilter filter)
     {
+        // Admin console Phase 2 (narrowed by human review — hiding a category retires the LABEL,
+        // not the inventory): a hidden category (Category.IsVisible = false) is excluded from
+        // GET /api/categories only. Its listings stay in general browse/search (no category
+        // filter), the map-pins endpoint, and the home page — see HomeSectionsQueryService.Approved.
+        // The only place a hidden category's listings are excluded is when a caller explicitly
+        // filters BY that category id below: the category isn't offered as a choice, so filtering
+        // by its id is not a supported path and returns no results. Direct-link access
+        // (GetApprovedListingByIdAsync) and the owner's my-listings (ListingsOwnerStore) are
+        // unaffected either way.
         var query = _dbContext.Listings
             .AsNoTracking()
             .Where(listing => listing.Status == ListingStatus.Approved);
@@ -57,7 +66,11 @@ public sealed class ListingsQueryService : IListingsQueryService
 
         if (filter.CategoryId.HasValue)
         {
-            query = query.Where(listing => listing.CategoryId == filter.CategoryId.Value);
+            // Explicit category-id filter: also require the category itself to be visible (see
+            // the comment above BuildApprovedListingsQuery). Shared with the map-pins endpoint,
+            // which gets the identical narrowing when it passes a CategoryId filter.
+            query = query.Where(listing =>
+                listing.CategoryId == filter.CategoryId.Value && listing.Category.IsVisible);
         }
 
         if (filter.DistrictIds is { Count: > 0 })

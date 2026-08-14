@@ -76,7 +76,12 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
         };
     }
 
-    // Base query shared by all sections: only public approved listings, no tracking.
+    // Base query shared by all sections: only public approved listings, no tracking. Admin console
+    // Phase 2 was narrowed by human review — hiding a category retires the LABEL (excluded from
+    // GET /api/categories), not the inventory. The home page carries no category filter (even the
+    // two hardcoded slug carousels below are not the "explicit category filter" path the narrowing
+    // applies to — see ListingsQueryService.BuildApprovedListingsQuery), so a hidden category's
+    // listings appear here same as any other approved listing.
     private IQueryable<Listing> Approved() =>
         _dbContext.Listings
             .AsNoTracking()

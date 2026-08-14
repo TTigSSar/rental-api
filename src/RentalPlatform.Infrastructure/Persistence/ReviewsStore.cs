@@ -115,4 +115,35 @@ public sealed class ReviewsStore : IReviewsStore
 
         return new RatingAggregate(count, Math.Round(average, 1));
     }
+
+    public async Task<IReadOnlyDictionary<Guid, RatingAggregate>> GetOwnerRatingAggregatesAsync(
+        IReadOnlyCollection<Guid> ownerIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (ownerIds.Count == 0)
+        {
+            return new Dictionary<Guid, RatingAggregate>();
+        }
+
+        var ids = ownerIds.Distinct().ToList();
+
+        var rows = await _dbContext.OwnerReviews
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.OwnerId))
+            .GroupBy(r => r.OwnerId)
+            .Select(g => new
+            {
+                OwnerId = g.Key,
+                Count = g.Count(),
+                // Same formula as GetOwnerRatingAggregateAsync above (mirrors ReviewsService owner
+                // overall = avg((Communication + PickupHandover + Friendliness) / 3)) — repeated
+                // inline rather than factored into a shared method because EF Core can only
+                // translate expressions written directly in the LINQ tree (same reasoning as the
+                // Haversine duplication documented in ListingsQueryService).
+                Average = g.Average(r => (r.CommunicationRating + r.PickupHandoverRating + r.FriendlinessRating) / 3.0)
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(r => r.OwnerId, r => new RatingAggregate(r.Count, Math.Round(r.Average, 1)));
+    }
 }

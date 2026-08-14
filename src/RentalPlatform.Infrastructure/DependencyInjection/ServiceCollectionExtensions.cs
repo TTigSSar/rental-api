@@ -61,6 +61,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReviewsService, ReviewsService>();
         services.AddScoped<IFavoritesService, FavoritesService>();
         services.AddScoped<IAdminListingsService, AdminListingsService>();
+        services.AddScoped<IAdminCategoriesService, AdminCategoriesService>();
+        services.AddScoped<IAdminUsersService, AdminUsersService>();
+        services.AddScoped<IReportsService, ReportsService>();
+        services.AddScoped<IAdminReportsService, AdminReportsService>();
+        services.AddScoped<IAdminOverviewService, AdminOverviewService>();
         services.AddScoped<INotificationsService, NotificationsService>();
         services.AddScoped<INotificationEmitter, NotificationEmitter>();
         services.AddScoped<IChatService, ChatService>();
@@ -69,6 +74,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IBookingsStore, BookingsStore>();
         services.AddScoped<IFavoritesStore, FavoritesStore>();
         services.AddScoped<IAdminListingsStore, AdminListingsStore>();
+        services.AddScoped<IAdminCategoriesStore, AdminCategoriesStore>();
+        services.AddScoped<IAdminUsersStore, AdminUsersStore>();
+        services.AddScoped<IModerationLogStore, ModerationLogStore>();
+        services.AddScoped<IReportsStore, ReportsStore>();
+        services.AddScoped<IAdminOverviewStore, AdminOverviewStore>();
         services.AddScoped<IReviewsStore, ReviewsStore>();
         services.AddScoped<INotificationsStore, NotificationsStore>();
         services.AddScoped<IConversationsStore, ConversationsStore>();

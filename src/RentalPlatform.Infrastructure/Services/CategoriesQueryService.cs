@@ -18,6 +18,11 @@ public sealed class CategoriesQueryService : ICategoriesQueryService
     {
         return await _dbContext.Categories
             .AsNoTracking()
+            // Admin console Phase 2: a category hidden by an admin (IsVisible = false) must not
+            // appear to renters browsing/filtering by category. Listings already in that category
+            // stay reachable by direct link and in their owner's my-listings — this endpoint (and
+            // the category filter it feeds) is the only thing gated here.
+            .Where(category => category.IsVisible)
             .OrderBy(category => category.DisplayOrder)
             .ThenBy(category => category.Name)
             .Select(category => new CategoryResponse

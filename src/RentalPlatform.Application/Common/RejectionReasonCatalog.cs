@@ -17,6 +17,9 @@ public static class RejectionReasonCatalog
             ["inappropriate"] = "Inappropriate content",
             ["wrongCategory"] = "Listed under incorrect category",
             ["unsafeItem"] = "Unsafe item",
+            ["hygiene"] = "No cleaning or hygiene details",
+            ["pricing"] = "Unrealistic pricing",
+            ["other"] = "Other",
         };
 
     public static bool IsKnownCode(string? code) =>

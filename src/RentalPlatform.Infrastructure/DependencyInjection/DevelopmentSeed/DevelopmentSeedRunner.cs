@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.DependencyInjection.SeedSupport;
@@ -15,6 +16,9 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 /// </summary>
 internal sealed class DevelopmentSeedRunner
 {
+    // Shared with SeedReportsAsync (the Message-target demo report points at this same thread).
+    private static readonly Guid DemoConversationId = new("88888888-0001-4000-9000-000000000001");
+
     private readonly AppDbContext _dbContext;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ILogger<DevelopmentSeedRunner> _logger;
@@ -41,6 +45,7 @@ internal sealed class DevelopmentSeedRunner
         var today = DateOnly.FromDateTime(now);
 
         var insertedCategories = await SeedCategoriesAsync(cancellationToken);
+        var insertedCategoryKeywords = await SeedCategoryKeywordsAsync(cancellationToken);
         var (userByEmail, insertedUsers) = await SeedUsersAsync(now, cancellationToken);
         var insertedListings = await SeedListingsAsync(userByEmail, now, cancellationToken);
         var insertedImages = await SeedListingImagesAsync(cancellationToken);
@@ -48,10 +53,12 @@ internal sealed class DevelopmentSeedRunner
         var insertedBookings = await SeedBookingsAsync(userByEmail, today, now, cancellationToken);
         var insertedReviews = await SeedReviewsAsync(userByEmail, now, cancellationToken);
         var insertedChat = await SeedChatAsync(userByEmail, now, cancellationToken);
+        var insertedReports = await SeedReportsAsync(userByEmail, now, cancellationToken);
 
         var totalInserted =
-            insertedCategories + insertedUsers + insertedListings +
-            insertedImages + insertedFavorites + insertedBookings + insertedReviews + insertedChat;
+            insertedCategories + insertedCategoryKeywords + insertedUsers + insertedListings +
+            insertedImages + insertedFavorites + insertedBookings + insertedReviews + insertedChat +
+            insertedReports;
 
         if (totalInserted == 0)
         {
@@ -92,7 +99,9 @@ internal sealed class DevelopmentSeedRunner
                 Slug = category.Slug,
                 IconName = category.IconName,
                 ImageUrl = category.ImageUrl,
-                DisplayOrder = category.DisplayOrder
+                DisplayOrder = category.DisplayOrder,
+                ColorHex = category.ColorHex,
+                IsVisible = true
             })
             .ToArray();
 
@@ -117,10 +126,85 @@ internal sealed class DevelopmentSeedRunner
             if (existing.IconName != seed.IconName)  { existing.IconName     = seed.IconName;     dirty = true; }
             if (existing.ImageUrl != seed.ImageUrl)  { existing.ImageUrl     = seed.ImageUrl;     dirty = true; }
             if (existing.DisplayOrder != seed.DisplayOrder) { existing.DisplayOrder = seed.DisplayOrder; dirty = true; }
+            // Admin console Phase 2 pastel palette. IsVisible is deliberately NOT force-backfilled
+            // here (unlike the fields above): it already defaults true for every pre-existing row
+            // via the AddCategoryVisibilityAndColor migration, and stomping it on every seed run
+            // would silently undo an admin's manual hide toggle on a dev database.
+            if (existing.ColorHex != seed.ColorHex)  { existing.ColorHex     = seed.ColorHex;      dirty = true; }
             if (dirty) updated++;
         }
 
         return newRows.Length + updated;
+    }
+
+    /// <summary>
+    /// Admin console Phase 6 ("Needs category fix"): seeds the CategoryKeyword rows in
+    /// DevelopmentSeedData.CategoryKeywords. Idempotent by the (CategoryId, Keyword) pair — the
+    /// same uniqueness the DB index enforces — rather than a fixed-GUID table like
+    /// DevelopmentSeedData.ReportIds, since these rows have no id an application caller ever needs
+    /// to reference.
+    /// </summary>
+    private async Task<int> SeedCategoryKeywordsAsync(CancellationToken cancellationToken)
+    {
+        var slugs = DevelopmentSeedData.CategoryKeywords
+            .Select(keyword => keyword.CategorySlug)
+            .Distinct()
+            .ToArray();
+
+        var categoriesBySlug = (await _dbContext.Categories
+                .Where(category => slugs.Contains(category.Slug))
+                .ToListAsync(cancellationToken))
+            .ToDictionary(category => category.Slug, category => category, StringComparer.OrdinalIgnoreCase);
+
+        // SeedCategoriesAsync (just above, same RunAsync call) may have added brand-new category
+        // rows that aren't persisted yet on a fresh database — the same "Added but not yet saved"
+        // situation SeedReportsAsync handles for DemoConversationId. Merge those in too so a
+        // first-ever run can still resolve every slug.
+        foreach (var entry in _dbContext.ChangeTracker.Entries<Category>())
+        {
+            if (entry.State == EntityState.Added && !categoriesBySlug.ContainsKey(entry.Entity.Slug))
+            {
+                categoriesBySlug[entry.Entity.Slug] = entry.Entity;
+            }
+        }
+
+        var existingPairs = (await _dbContext.CategoryKeywords
+                .Select(keyword => new { keyword.CategoryId, keyword.Keyword })
+                .ToListAsync(cancellationToken))
+            .Select(row => (row.CategoryId, Keyword: row.Keyword.ToLowerInvariant()))
+            .ToHashSet();
+
+        var newRows = new List<CategoryKeyword>();
+        foreach (var seed in DevelopmentSeedData.CategoryKeywords)
+        {
+            if (!categoriesBySlug.TryGetValue(seed.CategorySlug, out var category))
+            {
+                _logger.LogWarning(
+                    "Skipping seed category keyword {Keyword}: category slug {Slug} was not found.",
+                    seed.Keyword, seed.CategorySlug);
+                continue;
+            }
+
+            var pairKey = (category.Id, Keyword: seed.Keyword.ToLowerInvariant());
+            if (!existingPairs.Add(pairKey))
+            {
+                continue;
+            }
+
+            newRows.Add(new CategoryKeyword
+            {
+                Id = Guid.NewGuid(),
+                CategoryId = category.Id,
+                Keyword = seed.Keyword
+            });
+        }
+
+        if (newRows.Count > 0)
+        {
+            await _dbContext.CategoryKeywords.AddRangeAsync(newRows, cancellationToken);
+        }
+
+        return newRows.Count;
     }
 
     private async Task<(IDictionary<string, User> ByEmail, int Changes)> SeedUsersAsync(
@@ -659,7 +743,7 @@ internal sealed class DevelopmentSeedRunner
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var conversationId = new Guid("88888888-0001-4000-9000-000000000001");
+        var conversationId = DemoConversationId;
         var bookingId = new Guid("55555555-0002-4000-9000-000000000002"); // Approved: LEGO Duplo, owner@ ↔ renter@
         var listingId = DevelopmentSeedData.ListingIds.LegoDuploStarterSet;
 
@@ -784,6 +868,181 @@ internal sealed class DevelopmentSeedRunner
             messages.Length);
 
         return 1 + messages.Length + participants.Length;
+    }
+
+    /// <summary>
+    /// Seeds a handful of demo reports spanning every ReportSeverity (Low/Medium/High) and every
+    /// ReportStatus (Open/Resolved/Dismissed), against a mix of listing/user/message targets, with
+    /// realistic reporter attribution — so the admin Reports screen and the FlagCount/
+    /// OwnerOpenReportCount aggregates have real data in dev without any mock code path. Bespoke,
+    /// hand-written (not a declarative SeedReport[] table) because each row's target is a
+    /// different polymorphic kind — same convention as SeedChatAsync. Idempotent by the fixed
+    /// DevelopmentSeedData.ReportIds GUIDs: each row inserts only when its id is absent.
+    /// Severity is derived from ReasonCode via ReportReasonCatalog, exactly like production
+    /// (ReportsService.CreateAsync) — never hardcoded here — so the two can never drift apart.
+    /// </summary>
+    private async Task<int> SeedReportsAsync(
+        IDictionary<string, User> userByEmail,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var reportIds = new[]
+        {
+            DevelopmentSeedData.ReportIds.UnsafeBalanceBike,
+            DevelopmentSeedData.ReportIds.MisleadingKitchenPhotos,
+            DevelopmentSeedData.ReportIds.RenterNoShow,
+            DevelopmentSeedData.ReportIds.RudeMessagesResolved,
+            DevelopmentSeedData.ReportIds.OffPlatformPaymentDismissed,
+            DevelopmentSeedData.ReportIds.SpamListing,
+            DevelopmentSeedData.ReportIds.OtherOwnerFlag
+        };
+
+        var existingIds = (await _dbContext.Reports
+            .Where(report => reportIds.Contains(report.Id))
+            .Select(report => report.Id)
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        if (existingIds.Count == reportIds.Length)
+        {
+            return 0;
+        }
+
+        User? UserOrNull(string email) =>
+            userByEmail.TryGetValue(NormalizeEmail(email), out var user) ? user : null;
+
+        var renter = UserOrNull(DevelopmentSeedCredentials.RenterEmail);
+        var owner = UserOrNull(DevelopmentSeedCredentials.OwnerEmail);
+        var secondUser = UserOrNull(DevelopmentSeedCredentials.SecondUserEmail);
+        var admin = UserOrNull(DevelopmentSeedCredentials.AdminEmail);
+        var demoOwner = UserOrNull(DevelopmentSeedCredentials.DemoOwnerEmail);
+        var demoRenter = UserOrNull(DevelopmentSeedCredentials.DemoRenterEmail);
+        var davit = UserOrNull(DevelopmentSeedCredentials.OwnerDavitEmail);
+        var anahit = UserOrNull(DevelopmentSeedCredentials.OwnerAnahitEmail);
+
+        if (renter is null || owner is null || secondUser is null || admin is null
+            || demoOwner is null || demoRenter is null || davit is null || anahit is null)
+        {
+            _logger.LogWarning("Skipping seed reports: one or more demo users are missing.");
+            return 0;
+        }
+
+        // The Message-target report points at the owner@/renter@ demo thread seeded by
+        // SeedChatAsync. If that thread hasn't been created yet (fresh DB, this same run), it is
+        // queued as Added on the change tracker — present() checks both cases.
+        var conversationPresent = await _dbContext.Conversations
+            .AnyAsync(conversation => conversation.Id == DemoConversationId, cancellationToken)
+            || _dbContext.ChangeTracker.Entries<Conversation>()
+                .Any(entry => entry.State == EntityState.Added && entry.Entity.Id == DemoConversationId);
+
+        string TitleOf(Guid listingId) =>
+            DevelopmentSeedData.Listings.First(listing => listing.Id == listingId).Title;
+
+        var candidates = new List<Report>();
+
+        void AddIfMissing(Report report)
+        {
+            if (!existingIds.Contains(report.Id))
+            {
+                candidates.Add(report);
+            }
+        }
+
+        Report BuildReport(
+            Guid id, ReportTargetType targetType, Guid targetId, string targetLabel,
+            Guid reporterId, string reasonCode, string? detail, ReportStatus status, DateTime createdAt,
+            Guid? resolvedByUserId = null, string? resolutionNote = null, DateTime? resolvedAt = null) => new()
+        {
+            Id = id,
+            TargetType = targetType,
+            TargetId = targetId,
+            TargetLabel = targetLabel,
+            ReporterUserId = reporterId,
+            ReasonCode = reasonCode,
+            Detail = detail,
+            Severity = ReportReasonCatalog.SeverityFor(reasonCode),
+            Status = status,
+            CreatedAt = createdAt,
+            ResolvedAt = resolvedAt,
+            ResolvedByUserId = resolvedByUserId,
+            ResolutionNote = resolutionNote
+        };
+
+        // Open, High — listing, unsafe item.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.UnsafeBalanceBike,
+            ReportTargetType.Listing, DevelopmentSeedData.ListingIds.KidsBalanceBike,
+            TitleOf(DevelopmentSeedData.ListingIds.KidsBalanceBike),
+            renter.Id, "unsafeItem",
+            "The balance bike's frame has a visible crack near the front fork. Feels unsafe to ride.",
+            ReportStatus.Open, now.AddHours(-6)));
+
+        // Open, Medium — listing, misleading photos.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.MisleadingKitchenPhotos,
+            ReportTargetType.Listing, DevelopmentSeedData.ListingIds.ToyKitchenSet,
+            TitleOf(DevelopmentSeedData.ListingIds.ToyKitchenSet),
+            secondUser.Id, "misleadingPhotos",
+            "Photos show a full accessory set but three of the play-food pieces were missing at pickup.",
+            ReportStatus.Open, now.AddDays(-1)));
+
+        // Open, High — user, no-show at pickup.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.RenterNoShow,
+            ReportTargetType.User, renter.Id, $"{renter.FirstName} {renter.LastName}".Trim(),
+            owner.Id, "noShow",
+            "Confirmed a 6pm pickup and never showed up or replied to messages.",
+            ReportStatus.Open, now.AddHours(-3)));
+
+        // Resolved, Low — user, rude messages, already actioned by admin@.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.RudeMessagesResolved,
+            ReportTargetType.User, secondUser.Id, $"{secondUser.FirstName} {secondUser.LastName}".Trim(),
+            renter.Id, "rudeMessages",
+            "Sent several insulting messages after a booking request was declined.",
+            ReportStatus.Resolved, now.AddDays(-4),
+            resolvedByUserId: admin.Id,
+            resolutionNote: "Reviewed the chat log and issued the user a warning.",
+            resolvedAt: now.AddDays(-3)));
+
+        // Dismissed, Medium — message, off-platform payment attempt, found to be unfounded.
+        if (conversationPresent)
+        {
+            AddIfMissing(BuildReport(
+                DevelopmentSeedData.ReportIds.OffPlatformPaymentDismissed,
+                ReportTargetType.Message, DemoConversationId, $"Chat with {owner.FirstName} {owner.LastName}".Trim(),
+                renter.Id, "offPlatformPayment",
+                "Thought the owner was steering the conversation toward a bank transfer outside the app.",
+                ReportStatus.Dismissed, now.AddDays(-2),
+                resolvedByUserId: admin.Id,
+                resolutionNote: "No evidence of an off-platform payment attempt in the thread.",
+                resolvedAt: now.AddDays(-1)));
+        }
+
+        // Open, Medium — listing, spam/scam, catalogue-expansion owner.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.SpamListing,
+            ReportTargetType.Listing, DevelopmentSeedData.ListingIds.LEGOClassicCreativeBricksBox500Pcs,
+            TitleOf(DevelopmentSeedData.ListingIds.LEGOClassicCreativeBricksBox500Pcs),
+            davit.Id, "spam",
+            "Listing text looks copy-pasted from an unrelated resale site, unsure it's a real rental.",
+            ReportStatus.Open, now.AddDays(-5)));
+
+        // Open, Low — user, other, catalogue-expansion demo pair.
+        AddIfMissing(BuildReport(
+            DevelopmentSeedData.ReportIds.OtherOwnerFlag,
+            ReportTargetType.User, demoOwner.Id, $"{demoOwner.FirstName} {demoOwner.LastName}".Trim(),
+            demoRenter.Id, "other",
+            "Asked me to pay a deposit by bank transfer before confirming the booking.",
+            ReportStatus.Open, now.AddHours(-20)));
+
+        if (candidates.Count > 0)
+        {
+            await _dbContext.Reports.AddRangeAsync(candidates, cancellationToken);
+            _logger.LogInformation("Demo seed: created {Count} report(s).", candidates.Count);
+        }
+
+        return candidates.Count;
     }
 
     private async Task<string?> ResolveSeedPrimaryImageUrlAsync(Guid listingId, CancellationToken cancellationToken)

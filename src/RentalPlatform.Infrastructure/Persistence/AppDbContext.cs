@@ -23,6 +23,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+    public DbSet<ModerationLogEntry> ModerationLogEntries => Set<ModerationLogEntry>();
+    public DbSet<Report> Reports => Set<Report>();
+    public DbSet<CategoryKeyword> CategoryKeywords => Set<CategoryKeyword>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

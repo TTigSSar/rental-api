@@ -32,5 +32,14 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(category => category.DisplayOrder)
             .IsRequired()
             .HasDefaultValue(0);
+
+        // Default true + explicit backfill in the AddCategoryVisibilityAndColor migration so no
+        // existing category (and therefore none of its listings) disappears from browse on deploy.
+        builder.Property(category => category.IsVisible)
+            .IsRequired()
+            .HasDefaultValue(true);
+
+        builder.Property(category => category.ColorHex)
+            .HasMaxLength(9);
     }
 }

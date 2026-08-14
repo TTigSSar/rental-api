@@ -1,3 +1,4 @@
+using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
@@ -10,24 +11,44 @@ public static class TestData
 {
     public static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-    public static User User(Guid id, string email, bool isBlocked = false, UserRole role = UserRole.User) => new()
+    public static User User(
+        Guid id,
+        string email,
+        bool isBlocked = false,
+        UserRole role = UserRole.User,
+        string? firstName = null,
+        string? lastName = null,
+        bool isIdConfirmed = false,
+        DateTime? createdAt = null) => new()
     {
         Id = id,
         Email = email,
         PasswordHash = "x",
-        FirstName = "Test",
-        LastName = "User",
+        FirstName = firstName ?? "Test",
+        LastName = lastName ?? "User",
         PreferredLanguage = "en",
-        CreatedAt = DateTime.UtcNow,
+        CreatedAt = createdAt ?? DateTime.UtcNow,
         IsBlocked = isBlocked,
-        Role = role
+        Role = role,
+        IsIdConfirmed = isIdConfirmed
     };
 
-    public static Category Category(Guid id) => new()
+    public static Category Category(
+        Guid id,
+        string? name = null,
+        string? slug = null,
+        int displayOrder = 0,
+        bool isVisible = true,
+        string? colorHex = null,
+        string? iconName = null) => new()
     {
         Id = id,
-        Name = "Building Blocks",
-        Slug = $"building-blocks-{id:N}"
+        Name = name ?? "Building Blocks",
+        Slug = slug ?? $"building-blocks-{id:N}",
+        DisplayOrder = displayOrder,
+        IsVisible = isVisible,
+        ColorHex = colorHex,
+        IconName = iconName
     };
 
     public static Listing Listing(
@@ -105,6 +126,38 @@ public static class TestData
         Type = type,
         Body = body,
         CreatedAt = DateTime.UtcNow
+    };
+
+    // Severity is always derived from ReasonCode via ReportReasonCatalog — same as production
+    // (ReportsService.CreateAsync) — never overridable here, so tests can't accidentally seed a
+    // reason/severity combination production could never produce.
+    public static Report Report(
+        Guid id,
+        ReportTargetType targetType,
+        Guid targetId,
+        Guid reporterUserId,
+        string reasonCode = "other",
+        ReportStatus status = ReportStatus.Open,
+        string? targetLabel = null,
+        string? detail = null,
+        DateTime? createdAt = null,
+        DateTime? resolvedAt = null,
+        Guid? resolvedByUserId = null,
+        string? resolutionNote = null) => new()
+    {
+        Id = id,
+        TargetType = targetType,
+        TargetId = targetId,
+        TargetLabel = targetLabel ?? "Test target",
+        ReporterUserId = reporterUserId,
+        ReasonCode = reasonCode,
+        Detail = detail,
+        Severity = ReportReasonCatalog.SeverityFor(reasonCode),
+        Status = status,
+        CreatedAt = createdAt ?? DateTime.UtcNow,
+        ResolvedAt = resolvedAt,
+        ResolvedByUserId = resolvedByUserId,
+        ResolutionNote = resolutionNote
     };
 
     public static ListingImage Image(Guid id, Guid listingId, bool isPrimary, int sortOrder) => new()

@@ -90,6 +90,10 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ColorHex")
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)");
+
                     b.Property<int>("DisplayOrder")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -102,6 +106,11 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsVisible")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -119,6 +128,30 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Categories", (string)null);
+                });
+
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.CategoryKeyword", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Keyword")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Keyword");
+
+                    b.HasIndex("CategoryId", "Keyword")
+                        .IsUnique();
+
+                    b.ToTable("CategoryKeywords", (string)null);
                 });
 
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ChatMessage", b =>
@@ -569,6 +602,47 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("ListingImages", (string)null);
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.ModerationLogEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Action")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DetailJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TargetLabel")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("TargetType")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("TargetType", "TargetId");
+
+                    b.ToTable("ModerationLogEntries", (string)null);
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -773,6 +847,67 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.Report", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("ReporterUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TargetLabel")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("TargetType")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReporterUserId");
+
+                    b.HasIndex("ResolvedByUserId");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.HasIndex("TargetType", "TargetId");
+
+                    b.ToTable("Reports", (string)null);
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ToyReview", b =>
                 {
                     b.Property<Guid>("Id")
@@ -936,6 +1071,17 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Renter");
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.CategoryKeyword", b =>
+                {
+                    b.HasOne("RentalPlatform.Domain.Entities.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ChatMessage", b =>
                 {
                     b.HasOne("RentalPlatform.Domain.Entities.Conversation", "Conversation")
@@ -1056,6 +1202,17 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Listing");
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.ModerationLogEntry", b =>
+                {
+                    b.HasOne("RentalPlatform.Domain.Entities.User", "Actor")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Actor");
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.Notification", b =>
                 {
                     b.HasOne("RentalPlatform.Domain.Entities.User", "Recipient")
@@ -1119,6 +1276,24 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Renter");
 
                     b.Navigation("Reviewer");
+                });
+
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.Report", b =>
+                {
+                    b.HasOne("RentalPlatform.Domain.Entities.User", "Reporter")
+                        .WithMany()
+                        .HasForeignKey("ReporterUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RentalPlatform.Domain.Entities.User", "ResolvedByUser")
+                        .WithMany()
+                        .HasForeignKey("ResolvedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Reporter");
+
+                    b.Navigation("ResolvedByUser");
                 });
 
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ToyReview", b =>

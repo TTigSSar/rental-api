@@ -25,6 +25,13 @@ public interface IReviewsStore
     // numbers. The averages mirror the composite formulas in ReviewsService.
     Task<RatingAggregate> GetOwnerRatingAggregateAsync(Guid ownerId, CancellationToken cancellationToken = default);
     Task<RatingAggregate> GetRenterRatingAggregateAsync(Guid renterId, CancellationToken cancellationToken = default);
+
+    // Batched sibling of GetOwnerRatingAggregateAsync — same formula, grouped across many owners
+    // in one query instead of one query per owner. Used by the admin listing queue, which shows
+    // an owner-trust block per row and must not turn into an N+1 query per page. Owners with no
+    // reviews are simply absent from the result; callers treat a missing key as (0 count, no rating).
+    Task<IReadOnlyDictionary<Guid, RatingAggregate>> GetOwnerRatingAggregatesAsync(
+        IReadOnlyCollection<Guid> ownerIds, CancellationToken cancellationToken = default);
 }
 
 // Count of reviews and their rounded overall average (0 when there are none).

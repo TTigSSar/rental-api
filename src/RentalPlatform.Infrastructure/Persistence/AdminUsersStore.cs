@@ -60,6 +60,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
             {
                 u.Id,
                 u.Email,
+                u.PhoneNumber,
                 u.FirstName,
                 u.LastName,
                 u.AvatarUrl,
@@ -76,7 +77,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
 
         var items = rows
             .Select(r => new AdminUserRow(
-                r.Id, r.Email, r.FirstName, r.LastName, r.AvatarUrl, r.Role, r.IsBlocked, r.IsIdConfirmed, r.CreatedAt,
+                r.Id, r.Email, r.PhoneNumber, r.FirstName, r.LastName, r.AvatarUrl, r.Role, r.IsBlocked, r.IsIdConfirmed, r.CreatedAt,
                 r.ListingCount, r.RentalCount, r.FlagCount))
             .ToList();
 
@@ -92,6 +93,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
             {
                 u.Id,
                 u.Email,
+                u.PhoneNumber,
                 u.FirstName,
                 u.LastName,
                 u.AvatarUrl,
@@ -108,7 +110,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
 
         return r is null
             ? null
-            : new AdminUserRow(r.Id, r.Email, r.FirstName, r.LastName, r.AvatarUrl, r.Role, r.IsBlocked, r.IsIdConfirmed, r.CreatedAt, r.ListingCount, r.RentalCount, r.FlagCount);
+            : new AdminUserRow(r.Id, r.Email, r.PhoneNumber, r.FirstName, r.LastName, r.AvatarUrl, r.Role, r.IsBlocked, r.IsIdConfirmed, r.CreatedAt, r.ListingCount, r.RentalCount, r.FlagCount);
     }
 
     public async Task<AdminUserStatusCounts> GetStatusCountsAsync(string? search, CancellationToken cancellationToken = default)

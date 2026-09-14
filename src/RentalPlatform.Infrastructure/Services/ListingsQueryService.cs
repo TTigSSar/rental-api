@@ -370,10 +370,10 @@ public sealed class ListingsQueryService : IListingsQueryService
                 // GetApprovedListingsAsync) reads the public pair, never Listing.Latitude/
                 // Longitude directly — this is the one seam that decides who gets the exact point.
                 CanSeeExactCoordinates = isAdmin || (callerId.HasValue && listing.OwnerId == callerId.Value),
-                // Second decision point, reused below for both the owner's phone number and the
-                // pickup AddressLine: has this caller got a booking on this listing that reached
-                // at least Approved? Matches the contact-reveal gate in BookingDetailResponse —
-                // a Pending request must not leak contact/pickup details before the owner accepts.
+                // Second decision point, gating the pickup AddressLine below: has this caller got a
+                // booking on this listing that reached at least Approved? Matches the equivalent
+                // gate in BookingDetailResponse — a Pending request must not leak pickup details
+                // before the owner accepts.
                 ContactRevealed = callerId.HasValue && listing.Bookings.Any(booking =>
                     booking.RenterId == callerId &&
                     (booking.Status == BookingStatus.Approved ||
@@ -435,11 +435,7 @@ public sealed class ListingsQueryService : IListingsQueryService
                     Id = x.Listing.Owner.Id,
                     FirstName = x.Listing.Owner.FirstName,
                     LastName = x.Listing.Owner.LastName,
-                    AvatarUrl = x.Listing.Owner.AvatarUrl,
-                    // Reveal the owner's phone only once the renter has a booking that reached at
-                    // least Approved — matching the contact-reveal gate in BookingDetail. A Pending
-                    // request must NOT expose contact details before the owner has accepted it.
-                    PhoneNumber = x.ContactRevealed ? x.Listing.Owner.PhoneNumber : null
+                    AvatarUrl = x.Listing.Owner.AvatarUrl
                 },
                 Images = x.Listing.Images
                     .OrderByDescending(image => image.IsPrimary)

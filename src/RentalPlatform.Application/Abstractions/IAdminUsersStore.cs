@@ -55,6 +55,7 @@ public sealed record AdminUsersPage(IReadOnlyCollection<AdminUserRow> Items, int
 public sealed record AdminUserRow(
     Guid Id,
     string Email,
+    string? PhoneNumber,
     string FirstName,
     string LastName,
     string? AvatarUrl,

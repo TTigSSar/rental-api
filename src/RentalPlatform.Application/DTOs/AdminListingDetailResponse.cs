@@ -15,6 +15,8 @@ public sealed class AdminListingDetailResponse
 
     public Guid OwnerId { get; init; }
     public string OwnerEmail { get; init; } = string.Empty;
+    // Admin-only: lets moderators call the owner directly. Not exposed on any renter-facing DTO.
+    public string? OwnerPhoneNumber { get; init; }
     public string OwnerFirstName { get; init; } = string.Empty;
     public string OwnerLastName { get; init; } = string.Empty;
 

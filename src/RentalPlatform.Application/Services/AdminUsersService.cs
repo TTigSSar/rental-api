@@ -275,6 +275,7 @@ public sealed class AdminUsersService : IAdminUsersService
     {
         Id = row.Id,
         Email = row.Email,
+        PhoneNumber = row.PhoneNumber,
         FirstName = row.FirstName,
         LastName = row.LastName,
         AvatarUrl = row.AvatarUrl,

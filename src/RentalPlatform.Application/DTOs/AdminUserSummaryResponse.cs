@@ -11,6 +11,8 @@ public sealed class AdminUserSummaryResponse
 {
     public Guid Id { get; init; }
     public string Email { get; init; } = string.Empty;
+    // Admin-only: lets moderators call the member directly. Not exposed on any renter/owner-facing DTO.
+    public string? PhoneNumber { get; init; }
     public string FirstName { get; init; } = string.Empty;
     public string LastName { get; init; } = string.Empty;
     public string? AvatarUrl { get; init; }

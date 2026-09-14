@@ -4,7 +4,7 @@ namespace RentalPlatform.Application.DTOs;
 
 /// <summary>
 /// Full booking detail for the dedicated Booking Details page. Returned to either party
-/// (renter or owner). Counterparty phone is gated to bookings that are at least Approved.
+/// (renter or owner).
 /// </summary>
 public sealed class BookingDetailResponse
 {
@@ -48,10 +48,9 @@ public sealed class BookingDetailResponse
     // by booking status. Null when none was provided.
     public string? Note { get; init; }
 
-    // Counterparty (the other side of the booking). Phone gated to Approved+.
+    // Counterparty (the other side of the booking).
     public Guid CounterpartyId { get; init; }
     public string CounterpartyFirstName { get; init; } = string.Empty;
     public string CounterpartyLastName { get; init; } = string.Empty;
     public string? CounterpartyAvatarUrl { get; init; }
-    public string? CounterpartyPhoneNumber { get; init; }
 }

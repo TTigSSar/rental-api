@@ -443,6 +443,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Id = listing.Id,
             OwnerId = listing.OwnerId,
             OwnerEmail = listing.Owner.Email,
+            OwnerPhoneNumber = listing.Owner.PhoneNumber,
             OwnerFirstName = listing.Owner.FirstName,
             OwnerLastName = listing.Owner.LastName,
             CategoryId = listing.CategoryId,

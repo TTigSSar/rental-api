@@ -529,7 +529,7 @@ public sealed class BookingsService : IBookingsService
         var listing = booking.Listing;
         var counterparty = callerParty == BookingParty.Renter ? listing.Owner : booking.Renter;
 
-        // Address and phone are revealed only once the booking is at least Approved.
+        // The pickup address is revealed only once the booking is at least Approved.
         var contactRevealed = booking.Status is BookingStatus.Approved
             or BookingStatus.Active
             or BookingStatus.Completed;
@@ -572,8 +572,7 @@ public sealed class BookingsService : IBookingsService
             CounterpartyId = counterparty.Id,
             CounterpartyFirstName = counterparty.FirstName,
             CounterpartyLastName = counterparty.LastName,
-            CounterpartyAvatarUrl = counterparty.AvatarUrl,
-            CounterpartyPhoneNumber = contactRevealed ? counterparty.PhoneNumber : null
+            CounterpartyAvatarUrl = counterparty.AvatarUrl
         };
     }
 

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using RentalPlatform.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using RentalPlatform.Infrastructure.Persistence;
 namespace RentalPlatform.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814141003_AddConversationModeration")]
+    partial class AddConversationModeration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -251,9 +254,7 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("[BookingId] IS NOT NULL");
 
-                    b.HasIndex("Kind", "RenterId")
-                        .IsUnique()
-                        .HasFilter("[Kind] = 1");
+                    b.HasIndex("Kind", "RenterId");
 
                     b.HasIndex("OwnerId", "LastMessageAt");
 

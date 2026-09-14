@@ -31,15 +31,18 @@ public sealed class AdminUsersService : IAdminUsersService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IAdminUsersStore _store;
     private readonly IModerationLogStore _moderationLogStore;
+    private readonly IModerationNoteEmitter _moderationNoteEmitter;
 
     public AdminUsersService(
         ICurrentUserContext currentUserContext,
         IAdminUsersStore store,
-        IModerationLogStore moderationLogStore)
+        IModerationLogStore moderationLogStore,
+        IModerationNoteEmitter moderationNoteEmitter)
     {
         _currentUserContext = currentUserContext;
         _store = store;
         _moderationLogStore = moderationLogStore;
+        _moderationNoteEmitter = moderationNoteEmitter;
     }
 
     public async Task<ServiceResult<AdminUserQueueResponse>> GetQueueAsync(
@@ -139,7 +142,7 @@ public sealed class AdminUsersService : IAdminUsersService
     }
 
     public async Task<ServiceResult<AdminUserSummaryResponse>> SuspendAsync(
-        Guid userId, CancellationToken cancellationToken = default)
+        Guid userId, string? reason = null, CancellationToken cancellationToken = default)
     {
         var adminResult = await EnsureAdminAsync(cancellationToken);
         if (!adminResult.IsSuccess)
@@ -169,6 +172,8 @@ public sealed class AdminUsersService : IAdminUsersService
                 ErrorCodes.CannotSuspendAdmin, "Admins cannot suspend another admin.");
         }
 
+        var trimmedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+
         if (!user.IsBlocked)
         {
             user.IsBlocked = true;
@@ -185,6 +190,9 @@ public sealed class AdminUsersService : IAdminUsersService
                 DetailJson = null,
                 CreatedAt = DateTime.UtcNow
             }, cancellationToken);
+
+            // Best-effort (see IModerationNoteEmitter): never lets a note failure fail the suspension.
+            await _moderationNoteEmitter.AccountSuspendedAsync(admin.Id, user.Id, trimmedReason, cancellationToken);
         }
         // else: already suspended — idempotent no-op, same convention as VerifyAsync above.
 

@@ -4,6 +4,10 @@ using RentalPlatform.Domain.Enums;
 namespace RentalPlatform.Application.Abstractions;
 
 /// <summary>An inbox row: a conversation plus the current user's view of it.</summary>
+/// <param name="Booking">
+/// The linked booking. Null for a Moderation conversation (<see cref="Conversation.Kind"/> ==
+/// <see cref="ConversationKind.Moderation"/>), which has none.
+/// </param>
 /// <param name="LastMessageSenderId">
 /// Sender of the conversation's last message. Null when there is no last message, or it was a
 /// system message (system messages have a null sender).
@@ -14,18 +18,76 @@ namespace RentalPlatform.Application.Abstractions;
 public sealed record ChatConversationListItem(
     Conversation Conversation,
     User Counterpart,
-    Booking Booking,
+    Booking? Booking,
     int UnreadCount,
     Guid? LastMessageSenderId,
     MessageType? LastMessageType = null);
 
-/// <summary>Full conversation view: the thread, its context, and a page of messages.</summary>
+/// <summary>
+/// Full conversation view: the thread, its context, and a page of messages.
+/// <paramref name="Booking"/> is null for a Moderation conversation.
+/// </summary>
 public sealed record ChatConversationDetails(
     Conversation Conversation,
     User Counterpart,
-    Booking Booking,
+    Booking? Booking,
     DateTime? CounterpartLastReadAt,
     IReadOnlyList<ChatMessage> Messages);
+
+/// <summary>"all" | "unread" | "needsReply" filter for the admin Messages thread queue.</summary>
+public enum ModerationThreadFilter
+{
+    All,
+    Unread,
+    NeedsReply
+}
+
+/// <summary>
+/// Filter-independent totals over the same (Kind == Moderation, search-filtered) set
+/// ListModerationThreadsAsync lists — same convention as ReportStatusCounts/AdminUserStatusCounts:
+/// stable as the admin switches the All/Unread/NeedsReply pill with the same search term applied.
+/// <see cref="Unread"/> and <see cref="NeedsReply"/> use the exact same predicates as
+/// ModerationThreadFilter.Unread/NeedsReply in ListModerationThreadsAsync.
+/// </summary>
+public sealed record ModerationThreadCounts(int All, int Unread, int NeedsReply);
+
+/// <summary>One page of the admin Messages thread queue, plus the total count of the filtered set.</summary>
+public sealed record ModerationThreadsPage(IReadOnlyCollection<ModerationThreadRow> Items, int TotalCount, ModerationThreadCounts Counts);
+
+/// <summary>
+/// One row of the admin Messages thread queue: a Moderation conversation joined to its member.
+/// Status/MarketplaceRole are derived by the service from <see cref="MemberIsBlocked"/>/
+/// <see cref="MemberIsIdConfirmed"/>/<see cref="MemberListingCount"/>/<see cref="MemberRentalCount"/>
+/// — same convention as AdminUsersStore.AdminUserRow — not by this store.
+/// </summary>
+/// <param name="LastMessageType">
+/// Type of the conversation's last message, resolved the same way ChatConversationListItem
+/// resolves it query-time. Null when there is no last message yet.
+/// </param>
+/// <param name="LastMessageNoteSubject">
+/// <see cref="ChatMessage.NoteSubject"/> of the last message when
+/// <see cref="LastMessageType"/> is <see cref="MessageType.ModerationNote"/>; null otherwise (including
+/// when there is no last message yet). <see cref="ModerationThreadRow.LastMessageSnippet"/> is the raw
+/// note body in that case — this lets the client render "Note: {subject}" instead of bare body text.
+/// </param>
+public sealed record ModerationThreadRow(
+    Guid ConversationId,
+    Guid MemberId,
+    string MemberFirstName,
+    string MemberLastName,
+    string? MemberAvatarUrl,
+    bool MemberIsBlocked,
+    bool MemberIsIdConfirmed,
+    int MemberListingCount,
+    int MemberRentalCount,
+    int MemberOpenFlagCount,
+    int UnreadCount,
+    string? LastMessageSnippet,
+    DateTime? LastMessageAt,
+    bool LastMessageFromMember,
+    MessageType? LastMessageType,
+    string? LastMessageNoteSubject,
+    DateTime CreatedAt);
 
 public interface IConversationsStore
 {
@@ -88,6 +150,42 @@ public interface IConversationsStore
 
     /// <summary>Advances this participant's read cursor to the latest message. False when not a participant.</summary>
     Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get-or-create for the admin Messages screen: returns the single Moderation conversation for
+    /// this member (<c>Kind == Moderation &amp;&amp; RenterId == memberId</c>), creating it (with
+    /// <paramref name="moderatorId"/> as <c>OwnerId</c> — see <see cref="Conversation"/>'s doc
+    /// comment) on first access. One thread per member, not per moderator: a second moderator
+    /// calling this for the same member gets back the same conversation instead of a duplicate.
+    /// </summary>
+    Task<Conversation> GetOrCreateForModerationAsync(Guid moderatorId, Guid memberId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Inserts a ModerationNote message (<see cref="MessageType.ModerationNote"/>) authored by
+    /// <paramref name="moderatorId"/> and refreshes the conversation's denormalised preview
+    /// fields — a distinct insert path from <see cref="AddSystemMessageAsync"/> with
+    /// <b>no idempotency guard</b> (unlike a booking-lifecycle System line, a moderation note is
+    /// never a retry of "the same event"; two rejections of two different listings must both post).
+    /// </summary>
+    Task<ChatMessage> AddModerationNoteAsync(
+        Guid conversationId,
+        Guid moderatorId,
+        ModerationNoteKind kind,
+        string? subject,
+        string? reason,
+        string body,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>One page of the admin Messages thread queue (filter/search/paging applied), newest activity first.</summary>
+    Task<ModerationThreadsPage> ListModerationThreadsAsync(
+        ModerationThreadFilter filter,
+        string? search,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Single-row equivalent of a <see cref="ModerationThreadRow"/> for one conversation. Null if not a Moderation conversation.</summary>
+    Task<ModerationThreadRow?> GetModerationThreadRowAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Closes the booking's conversation (sets <c>ClosedAt</c>) for the read-only chat lock — per

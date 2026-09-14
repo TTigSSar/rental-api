@@ -13,11 +13,19 @@ namespace RentalPlatform.Application.Common;
 // is the terminal, read-only state and is produced ONLY by the ClosedAt override below.
 public static class ChatTokens
 {
+    // Status pill for a Moderation conversation (Kind == ConversationKind.Moderation): such a
+    // thread has no booking, so none of the booking-derived pills below ever apply to it, and it
+    // never closes (see ChatService.TryLazyCloseAsync). A distinct constant, not folded into
+    // StatusToken(BookingStatus, ...) below, so that existing overload's signature — and the
+    // ChatTokensTests that call it directly — stay untouched.
+    public const string ModerationStatusToken = "moderation";
+
     public static string MessageTypeToken(MessageType type) => type switch
     {
         MessageType.Text => "text",
         MessageType.Image => "image",
         MessageType.System => "system",
+        MessageType.ModerationNote => "moderationNote",
         _ => "text"
     };
 
@@ -29,6 +37,25 @@ public static class ChatTokens
         ChatSystemKind.Return => "return",
         ChatSystemKind.Closed => "closed",
         _ => null
+    };
+
+    public static string? ModerationNoteKindToken(ModerationNoteKind? kind) => kind switch
+    {
+        ModerationNoteKind.Reject => "reject",
+        ModerationNoteKind.Warn => "warn",
+        ModerationNoteKind.Suspend => "suspend",
+        ModerationNoteKind.Category => "category",
+        ModerationNoteKind.Info => "info",
+        _ => null
+    };
+
+    // "booking" | "moderation" — matches the chat DTOs' existing convention of hand-mapped
+    // lowercase tokens for enums (Type/SystemKind/Status), not the raw enum name a bare
+    // JsonStringEnumConverter would emit elsewhere on this API.
+    public static string ConversationKindToken(ConversationKind kind) => kind switch
+    {
+        ConversationKind.Moderation => "moderation",
+        _ => "booking"
     };
 
     // Derived UI status pill: booking status + ClosedAt override.

@@ -118,6 +118,10 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         // state, not a value with an implied fallback.
         builder.Property(listing => listing.DeliveryType);
 
+        // Additive multi-select successor to DeliveryType — see DeliveryOptions.cs. Persisted as
+        // int (the [Flags] combination), same nullability rationale as DeliveryType above.
+        builder.Property(listing => listing.DeliveryOptions);
+
         builder.HasOne(listing => listing.Owner)
             .WithMany(user => user.Listings)
             .HasForeignKey(listing => listing.OwnerId)

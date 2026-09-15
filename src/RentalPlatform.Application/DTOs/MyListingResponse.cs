@@ -22,6 +22,9 @@ public sealed class MyListingResponse
     public decimal? DepositAmount { get; init; }
     public int? MinRentalDays { get; init; }
     public DeliveryType? DeliveryType { get; init; }
+
+    // Additive multi-select successor to DeliveryType — see ListingDetailsResponse.DeliveryTypes.
+    public IReadOnlyList<DeliveryType>? DeliveryTypes { get; init; }
     public ListingStatus Status { get; init; }
     public string? RejectionReason { get; init; }
     public ListingRejectionResponse? Rejection { get; init; }

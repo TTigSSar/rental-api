@@ -34,7 +34,10 @@ public sealed class ListingsOwnerServiceTests
         Guid? categoryId = null,
         int? ageFromMonths = null,
         int? ageToMonths = null,
-        PriceUnit? priceUnit = null) => new()
+        PriceUnit? priceUnit = null,
+        int? minRentalDays = null,
+        DeliveryType? deliveryType = null,
+        IReadOnlyList<DeliveryType>? deliveryTypes = null) => new()
     {
         CategoryId = categoryId ?? CategoryId,
         Title = "Wooden Train Set",
@@ -44,7 +47,10 @@ public sealed class ListingsOwnerServiceTests
         Country = "Armenia",
         City = "Yerevan",
         AgeFromMonths = ageFromMonths,
-        AgeToMonths = ageToMonths
+        AgeToMonths = ageToMonths,
+        MinRentalDays = minRentalDays,
+        DeliveryType = deliveryType,
+        DeliveryTypes = deliveryTypes
     };
 
     private static async Task SeedApprovedListingAsync(SqliteTestDatabase db)
@@ -144,6 +150,142 @@ public sealed class ListingsOwnerServiceTests
     }
 
     [Fact]
+    public async Task Update_With_Null_DeliveryTypes_And_DeliveryType_Leaves_Delivery_Unchanged()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.DeliveryOptions = DeliveryOptions.Pickup | DeliveryOptions.Courier;
+        listing.DeliveryType = DeliveryType.Pickup;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Neither DeliveryTypes nor DeliveryType supplied — delivery is a structured field, so
+        // omitting both must leave the stored value untouched (same pattern as PriceUnit above),
+        // and must not trigger re-moderation (the listing stays Approved).
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            PricePerDay = 15m
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(ListingStatus.Approved, stored!.Status);
+        Assert.Equal(DeliveryOptions.Pickup | DeliveryOptions.Courier, stored.DeliveryOptions);
+        Assert.Equal(DeliveryType.Pickup, stored.DeliveryType);
+    }
+
+    // Regression coverage for the stale-client bug: an update that supplies ONLY the legacy scalar
+    // DeliveryType (DeliveryTypes omitted) must not blindly collapse a richer multi-select
+    // DeliveryOptions down to that single flag when the flag is already included in the current
+    // state. See DeliveryOptionsMapper.ShouldApplyLegacyOnlyUpdate.
+    [Fact]
+    public async Task Update_With_LegacyOnly_Pickup_On_PickupAndCourier_Listing_Is_NoOp()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.DeliveryOptions = DeliveryOptions.Pickup | DeliveryOptions.Courier;
+        listing.DeliveryType = DeliveryType.Pickup;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Legacy-only Pickup — a stale client whose form always sends its old default — is
+        // consistent with the current flags (Pickup is already included), so it's a no-op.
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            DeliveryType = DeliveryType.Pickup
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(DeliveryOptions.Pickup | DeliveryOptions.Courier, stored!.DeliveryOptions);
+        Assert.Equal(DeliveryType.Pickup, stored.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Update_With_LegacyOnly_Courier_On_PickupAndCourier_Listing_Is_NoOp()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.DeliveryOptions = DeliveryOptions.Pickup | DeliveryOptions.Courier;
+        listing.DeliveryType = DeliveryType.Pickup;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Legacy-only Courier is also already included in the current flags, so this is a no-op
+        // too — the listing stays Pickup|Courier with legacy mirror unchanged at Pickup. This is
+        // the exact scenario from the bug report: saving any edit must not silently drop Courier.
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            DeliveryType = DeliveryType.Courier
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(DeliveryOptions.Pickup | DeliveryOptions.Courier, stored!.DeliveryOptions);
+        Assert.Equal(DeliveryType.Pickup, stored.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Update_With_LegacyOnly_Pickup_On_CourierOnly_Listing_Becomes_Pickup()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.DeliveryOptions = DeliveryOptions.Courier;
+        listing.DeliveryType = DeliveryType.Courier;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Legacy-only Pickup is a real change from the current Courier-only state — this preserves
+        // old-client semantics: collapse to the single reported flag, same as pre-fix behaviour.
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            DeliveryType = DeliveryType.Pickup
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(DeliveryOptions.Pickup, stored!.DeliveryOptions);
+        Assert.Equal(DeliveryType.Pickup, stored.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Update_With_LegacyOnly_Courier_On_Listing_With_Null_DeliveryOptions_Becomes_Courier()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var listing = TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved);
+        listing.DeliveryOptions = null;
+        listing.DeliveryType = null;
+        await db.SeedAsync(listing);
+
+        await using var context = db.CreateContext();
+        // Null current DeliveryOptions (pre-migration row) — behaves as today: sets the single flag.
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            DeliveryType = DeliveryType.Courier
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(DeliveryOptions.Courier, stored!.DeliveryOptions);
+        Assert.Equal(DeliveryType.Courier, stored.DeliveryType);
+    }
+
+    [Fact]
     public async Task Create_Fails_When_Category_Missing()
     {
         using var db = new SqliteTestDatabase();
@@ -184,6 +326,78 @@ public sealed class ListingsOwnerServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("listing.user_blocked", result.Error!.Code);
+    }
+
+    // DeliveryTypes is the additive multi-select successor to the legacy scalar DeliveryType (see
+    // DeliveryOptionsMapper). GetMineAsync's projection is exercised here alongside CreateAsync
+    // since MyListingResponse is the only place both the expanded list and the legacy mirror are
+    // observable together.
+    [Fact]
+    public async Task Create_With_Multiple_DeliveryTypes_Returns_Both_And_Mirrors_Legacy_Pickup()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+        var created = await service.CreateAsync(ValidCreate(deliveryTypes: new[] { DeliveryType.Pickup, DeliveryType.Courier }));
+        Assert.True(created.IsSuccess);
+
+        var mine = await service.GetMineAsync();
+        Assert.True(mine.IsSuccess);
+        var listing = Assert.Single(mine.Value!, l => l.Id == created.Value!.Id);
+        Assert.Equal(new[] { DeliveryType.Pickup, DeliveryType.Courier }, listing.DeliveryTypes);
+        Assert.Equal(DeliveryType.Pickup, listing.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Create_With_Courier_Only_Mirrors_Legacy_Courier()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+        var created = await service.CreateAsync(ValidCreate(deliveryTypes: new[] { DeliveryType.Courier }));
+        Assert.True(created.IsSuccess);
+
+        var mine = await service.GetMineAsync();
+        var listing = Assert.Single(mine.Value!, l => l.Id == created.Value!.Id);
+        Assert.Equal(new[] { DeliveryType.Courier }, listing.DeliveryTypes);
+        Assert.Equal(DeliveryType.Courier, listing.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Create_With_Legacy_DeliveryType_Only_Populates_DeliveryTypes_List()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+        var created = await service.CreateAsync(ValidCreate(deliveryType: DeliveryType.Courier));
+        Assert.True(created.IsSuccess);
+
+        var mine = await service.GetMineAsync();
+        var listing = Assert.Single(mine.Value!, l => l.Id == created.Value!.Id);
+        Assert.Equal(new[] { DeliveryType.Courier }, listing.DeliveryTypes);
+        Assert.Equal(DeliveryType.Courier, listing.DeliveryType);
+    }
+
+    [Fact]
+    public async Task Create_Accepts_MinRentalDays_365()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).CreateAsync(ValidCreate(minRentalDays: 365));
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(result.Value!.Id);
+        Assert.Equal(365, stored!.MinRentalDays);
     }
 
     [Fact]

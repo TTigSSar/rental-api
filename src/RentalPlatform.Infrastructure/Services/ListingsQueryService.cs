@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.Persistence;
@@ -352,7 +353,7 @@ public sealed class ListingsQueryService : IListingsQueryService
         bool isAdmin = false,
         CancellationToken cancellationToken = default)
     {
-        return await _dbContext.Listings
+        var row = await _dbContext.Listings
             .AsNoTracking()
             .Where(listing => listing.Id == id &&
                 (isAdmin ||
@@ -380,88 +381,104 @@ public sealed class ListingsQueryService : IListingsQueryService
                      booking.Status == BookingStatus.Active ||
                      booking.Status == BookingStatus.Completed))
             })
-            .Select(x => new ListingDetailsResponse
+            .Select(x => new
             {
-                Id = x.Listing.Id,
-                Title = x.Listing.Title,
-                Description = x.Listing.Description,
-                PricePerDay = x.Listing.PricePerDay,
-                PriceUnit = x.Listing.PriceUnit,
-                Currency = x.Listing.Currency,
-                Country = x.Listing.Country,
-                City = x.Listing.City,
-                // Pickup address: owner/admin always (they need it to manage the listing), plus a
-                // renter whose booking reached Approved (they genuinely need it to collect the
-                // toy). Everyone else — including anonymous callers and unrelated authenticated
-                // users — gets null. This closes a leak where the exact street address was
-                // returned ungated, defeating the approximate-location feature (only
-                // Latitude/Longitude were gated via CanSeeExactCoordinates).
-                AddressLine = (x.CanSeeExactCoordinates || x.ContactRevealed) ? x.Listing.AddressLine : null,
-                Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : x.Listing.PublicLatitude,
-                Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : x.Listing.PublicLongitude,
-                District = x.Listing.District == null ? null : new ListingDistrictResponse
+                // DeliveryTypes is expanded from this raw flags column in C# below — EF Core
+                // cannot translate the flag-expansion loop (DeliveryOptionsMapper.Expand) into SQL,
+                // so the column is projected here and the DTO's DeliveryTypes is filled in after
+                // materialization (see the `row.Dto.DeliveryTypes = ...` line below).
+                DeliveryOptionsRaw = x.Listing.DeliveryOptions,
+                Dto = new ListingDetailsResponse
                 {
-                    Id = x.Listing.District.Id,
-                    Code = x.Listing.District.Code,
-                    NameEn = x.Listing.District.NameEn,
-                    NameHy = x.Listing.District.NameHy,
-                    NameRu = x.Listing.District.NameRu
-                },
-                CreatedAt = x.Listing.CreatedAt,
-                UpdatedAt = x.Listing.UpdatedAt,
-                AgeFromMonths = x.Listing.AgeFromMonths,
-                AgeToMonths = x.Listing.AgeToMonths,
-                Condition = x.Listing.Condition,
-                HygieneNotes = x.Listing.HygieneNotes,
-                SafetyNotes = x.Listing.SafetyNotes,
-                DepositAmount = x.Listing.DepositAmount,
-                MinRentalDays = x.Listing.MinRentalDays,
-                DeliveryType = x.Listing.DeliveryType,
-                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id),
-                // Aggregate hidden until the minimum number of reviews (2).
-                Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id) >= 2
-                    ? (double?)_dbContext.ToyReviews
-                        .Where(tr => tr.ListingId == x.Listing.Id)
-                        .Average(tr => (double)tr.OverallRating)
-                    : null,
-                Category = new ListingCategoryResponse
-                {
-                    Id = x.Listing.Category.Id,
-                    Name = x.Listing.Category.Name,
-                    Slug = x.Listing.Category.Slug
-                },
-                Owner = new ListingOwnerResponse
-                {
-                    Id = x.Listing.Owner.Id,
-                    FirstName = x.Listing.Owner.FirstName,
-                    LastName = x.Listing.Owner.LastName,
-                    AvatarUrl = x.Listing.Owner.AvatarUrl
-                },
-                Images = x.Listing.Images
-                    .OrderByDescending(image => image.IsPrimary)
-                    .ThenBy(image => image.SortOrder)
-                    .Select(image => new ListingImageResponse
+                    Id = x.Listing.Id,
+                    Title = x.Listing.Title,
+                    Description = x.Listing.Description,
+                    PricePerDay = x.Listing.PricePerDay,
+                    PriceUnit = x.Listing.PriceUnit,
+                    Currency = x.Listing.Currency,
+                    Country = x.Listing.Country,
+                    City = x.Listing.City,
+                    // Pickup address: owner/admin always (they need it to manage the listing), plus a
+                    // renter whose booking reached Approved (they genuinely need it to collect the
+                    // toy). Everyone else — including anonymous callers and unrelated authenticated
+                    // users — gets null. This closes a leak where the exact street address was
+                    // returned ungated, defeating the approximate-location feature (only
+                    // Latitude/Longitude were gated via CanSeeExactCoordinates).
+                    AddressLine = (x.CanSeeExactCoordinates || x.ContactRevealed) ? x.Listing.AddressLine : null,
+                    Latitude = x.CanSeeExactCoordinates ? x.Listing.Latitude : x.Listing.PublicLatitude,
+                    Longitude = x.CanSeeExactCoordinates ? x.Listing.Longitude : x.Listing.PublicLongitude,
+                    District = x.Listing.District == null ? null : new ListingDistrictResponse
                     {
-                        Id = image.Id,
-                        Url = image.Url,
-                        IsPrimary = image.IsPrimary,
-                        SortOrder = image.SortOrder
-                    })
-                    .ToList(),
-                // Both Approved and Active bookings hold the calendar (the booking-create overlap
-                // check blocks all three of Pending/Approved/Active), so the public calendar must
-                // surface Active ranges too — otherwise a date shows free but the request 409s.
-                BookedDateRanges = x.Listing.Bookings
-                    .Where(booking => booking.Status == BookingStatus.Approved ||
-                                      booking.Status == BookingStatus.Active)
-                    .OrderBy(booking => booking.StartDate)
-                    .Select(booking => new ListingBookedDateRangeResponse
+                        Id = x.Listing.District.Id,
+                        Code = x.Listing.District.Code,
+                        NameEn = x.Listing.District.NameEn,
+                        NameHy = x.Listing.District.NameHy,
+                        NameRu = x.Listing.District.NameRu
+                    },
+                    CreatedAt = x.Listing.CreatedAt,
+                    UpdatedAt = x.Listing.UpdatedAt,
+                    AgeFromMonths = x.Listing.AgeFromMonths,
+                    AgeToMonths = x.Listing.AgeToMonths,
+                    Condition = x.Listing.Condition,
+                    HygieneNotes = x.Listing.HygieneNotes,
+                    SafetyNotes = x.Listing.SafetyNotes,
+                    DepositAmount = x.Listing.DepositAmount,
+                    MinRentalDays = x.Listing.MinRentalDays,
+                    DeliveryType = x.Listing.DeliveryType,
+                    ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id),
+                    // Aggregate hidden until the minimum number of reviews (2).
+                    Rating = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id) >= 2
+                        ? (double?)_dbContext.ToyReviews
+                            .Where(tr => tr.ListingId == x.Listing.Id)
+                            .Average(tr => (double)tr.OverallRating)
+                        : null,
+                    Category = new ListingCategoryResponse
                     {
-                        StartDate = booking.StartDate,
-                        EndDate = booking.EndDate
-                    })
-                    .ToList()
+                        Id = x.Listing.Category.Id,
+                        Name = x.Listing.Category.Name,
+                        Slug = x.Listing.Category.Slug
+                    },
+                    Owner = new ListingOwnerResponse
+                    {
+                        Id = x.Listing.Owner.Id,
+                        FirstName = x.Listing.Owner.FirstName,
+                        LastName = x.Listing.Owner.LastName,
+                        AvatarUrl = x.Listing.Owner.AvatarUrl
+                    },
+                    Images = x.Listing.Images
+                        .OrderByDescending(image => image.IsPrimary)
+                        .ThenBy(image => image.SortOrder)
+                        .Select(image => new ListingImageResponse
+                        {
+                            Id = image.Id,
+                            Url = image.Url,
+                            IsPrimary = image.IsPrimary,
+                            SortOrder = image.SortOrder
+                        })
+                        .ToList(),
+                    // Both Approved and Active bookings hold the calendar (the booking-create overlap
+                    // check blocks all three of Pending/Approved/Active), so the public calendar must
+                    // surface Active ranges too — otherwise a date shows free but the request 409s.
+                    BookedDateRanges = x.Listing.Bookings
+                        .Where(booking => booking.Status == BookingStatus.Approved ||
+                                          booking.Status == BookingStatus.Active)
+                        .OrderBy(booking => booking.StartDate)
+                        .Select(booking => new ListingBookedDateRangeResponse
+                        {
+                            StartDate = booking.StartDate,
+                            EndDate = booking.EndDate
+                        })
+                        .ToList()
+                }
             })
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        row.Dto.DeliveryTypes = DeliveryOptionsMapper.Expand(row.DeliveryOptionsRaw, row.Dto.DeliveryType);
+        return row.Dto;
     }
 }

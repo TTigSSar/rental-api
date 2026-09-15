@@ -41,6 +41,14 @@ public sealed class ListingDetailsResponse
     public int? MinRentalDays { get; init; }
     public DeliveryType? DeliveryType { get; init; }
 
+    // Additive multi-select successor to DeliveryType — expanded from Listing.DeliveryOptions in
+    // [Pickup, Courier] order, falling back to a single-element list from the legacy DeliveryType
+    // for pre-migration rows, or null when neither is set. See DeliveryOptionsMapper.
+    // Plain `set` (not `init` like its siblings) because ListingsQueryService.
+    // GetApprovedListingByIdAsync fills it in a second step after the EF projection materializes
+    // (the expansion is not SQL-translatable) rather than inside the query's object initializer.
+    public IReadOnlyList<DeliveryType>? DeliveryTypes { get; set; }
+
     /// <summary>Average toy rating, or null when below the aggregate threshold.</summary>
     public double? Rating { get; init; }
     public int ReviewCount { get; init; }

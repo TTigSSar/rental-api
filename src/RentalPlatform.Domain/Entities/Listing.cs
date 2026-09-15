@@ -54,6 +54,11 @@ public sealed class Listing
     public int? MinRentalDays { get; set; }
     public DeliveryType? DeliveryType { get; set; }
 
+    // Additive multi-select successor to DeliveryType (see DeliveryOptions.cs) — an owner may now
+    // offer Pickup, Courier, or both. DeliveryType stays populated too, mirrored from this value,
+    // for backward compatibility.
+    public DeliveryOptions? DeliveryOptions { get; set; }
+
     public User Owner { get; set; } = null!;
     public Category Category { get; set; } = null!;
     public District? District { get; set; }

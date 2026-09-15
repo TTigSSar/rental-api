@@ -3,7 +3,7 @@ using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.DTOs;
 
-public sealed class UpdateListingRequest
+public sealed class UpdateListingRequest : IValidatableObject
 {
     [StringLength(200, MinimumLength = 3, ErrorMessage = "Title must be between 3 and 200 characters.")]
     public string? Title { get; init; }
@@ -53,7 +53,35 @@ public sealed class UpdateListingRequest
     public int? MinRentalDays { get; init; }
 
     // Optional: how the toy is handed over. Null leaves the existing value unchanged; when supplied
-    // it must be a defined enum value.
+    // it must be a defined enum value. Legacy single-select field — see DeliveryTypes below.
     [EnumDataType(typeof(DeliveryType), ErrorMessage = "Delivery type must be one of Pickup, Courier.")]
     public DeliveryType? DeliveryType { get; init; }
+
+    // Additive multi-select successor to DeliveryType. Null leaves the listing's delivery options
+    // unchanged (this is a structured field and never triggers re-moderation). When supplied it
+    // must be non-empty and every value must be a defined DeliveryType (see Validate below) —
+    // duplicates are tolerated and collapsed by the service. Wins over DeliveryType when both are
+    // supplied (see DeliveryOptionsMapper).
+    public IReadOnlyList<DeliveryType>? DeliveryTypes { get; init; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (DeliveryTypes is null)
+        {
+            yield break;
+        }
+
+        if (DeliveryTypes.Count == 0)
+        {
+            yield return new ValidationResult(
+                "Delivery types must not be empty when supplied.",
+                new[] { nameof(DeliveryTypes) });
+        }
+        else if (DeliveryTypes.Any(value => !Enum.IsDefined(typeof(DeliveryType), value)))
+        {
+            yield return new ValidationResult(
+                "Delivery types must each be one of Pickup, Courier.",
+                new[] { nameof(DeliveryTypes) });
+        }
+    }
 }

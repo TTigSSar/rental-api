@@ -149,7 +149,7 @@ internal sealed class DemoContentBootstrapRunner
                 Condition = seed.Condition,
                 HygieneNotes = seed.HygieneNotes,
                 SafetyNotes = seed.SafetyNotes,
-                DepositAmount = seed.DepositAmount,
+                CompensationAmount = seed.CompensationAmount,
                 Status = ListingStatus.Approved,
                 CreatedAt = now.AddDays(-seed.CreatedDaysAgo),
                 UpdatedAt = now.AddDays(-seed.UpdatedDaysAgo)

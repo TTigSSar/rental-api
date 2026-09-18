@@ -66,7 +66,7 @@ public static class TestData
         Currency = "USD",
         Country = "Armenia",
         City = "Yerevan",
-        DepositAmount = 25m,
+        CompensationAmount = 25m,
         Status = status,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow

@@ -126,7 +126,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             Condition = NormalizeOptional(request.Condition),
             HygieneNotes = NormalizeOptional(request.HygieneNotes),
             SafetyNotes = NormalizeOptional(request.SafetyNotes),
-            DepositAmount = request.DepositAmount,
+            CompensationAmount = request.CompensationAmount,
             MinRentalDays = request.MinRentalDays,
             DeliveryOptions = deliveryOptions,
             DeliveryType = DeliveryOptionsMapper.ToLegacy(deliveryOptions),
@@ -201,7 +201,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 Condition = listing.Condition,
                 HygieneNotes = listing.HygieneNotes,
                 SafetyNotes = listing.SafetyNotes,
-                DepositAmount = listing.DepositAmount,
+                CompensationAmount = listing.CompensationAmount,
                 MinRentalDays = listing.MinRentalDays,
                 DeliveryType = listing.DeliveryType,
                 DeliveryTypes = DeliveryOptionsMapper.Expand(listing.DeliveryOptions, listing.DeliveryType),
@@ -383,7 +383,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         if (request.Country is not null) listing.Country = request.Country.Trim();
         if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
         if (request.AgeToMonths is not null) listing.AgeToMonths = request.AgeToMonths;
-        if (request.DepositAmount is not null) listing.DepositAmount = request.DepositAmount;
+        if (request.CompensationAmount is not null) listing.CompensationAmount = request.CompensationAmount;
         if (request.MinRentalDays is not null) listing.MinRentalDays = request.MinRentalDays;
 
         if (request.DeliveryTypes is not null)

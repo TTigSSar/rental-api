@@ -45,8 +45,10 @@ public sealed class UpdateListingRequest : IValidatableObject
     [MaxLength(1000, ErrorMessage = "Safety notes must be at most 1000 characters.")]
     public string? SafetyNotes { get; init; }
 
-    [Range(typeof(decimal), "0", "999999999999.99", ErrorMessage = "Deposit amount cannot be negative.")]
-    public decimal? DepositAmount { get; init; }
+    // Optional (partial update): null leaves the existing amount unchanged. See
+    // CreateListingRequest.CompensationAmount for the "Loss & damage compensation" semantics.
+    [Range(typeof(decimal), "1000", "10000000", ErrorMessage = "Loss & damage compensation must be between 1,000 and 10,000,000 AMD.")]
+    public decimal? CompensationAmount { get; init; }
 
     // Optional: shortest number of days a renter may book for. Null leaves the existing value unchanged.
     [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]

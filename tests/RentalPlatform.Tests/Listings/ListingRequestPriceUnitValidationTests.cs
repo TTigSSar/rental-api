@@ -24,7 +24,8 @@ public sealed class ListingRequestPriceUnitValidationTests
         PricePerDay = 12m,
         PriceUnit = priceUnit,
         Country = "Armenia",
-        City = "Yerevan"
+        City = "Yerevan",
+        CompensationAmount = 5000m
     };
 
     [Fact]

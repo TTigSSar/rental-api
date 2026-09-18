@@ -29,6 +29,7 @@ public sealed class ListingDeliveryOptionsTests
         PricePerDay = 12m,
         Country = "Armenia",
         City = "Yerevan",
+        CompensationAmount = 5000m,
         DeliveryTypes = deliveryTypes,
         MinRentalDays = minRentalDays
     };

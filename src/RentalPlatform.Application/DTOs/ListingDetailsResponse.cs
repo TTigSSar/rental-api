@@ -37,7 +37,7 @@ public sealed class ListingDetailsResponse
     public string? Condition { get; init; }
     public string? HygieneNotes { get; init; }
     public string? SafetyNotes { get; init; }
-    public decimal? DepositAmount { get; init; }
+    public decimal? CompensationAmount { get; init; }
     public int? MinRentalDays { get; init; }
     public DeliveryType? DeliveryType { get; init; }
 

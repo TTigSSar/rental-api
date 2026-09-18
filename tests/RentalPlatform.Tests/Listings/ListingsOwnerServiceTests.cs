@@ -150,6 +150,49 @@ public sealed class ListingsOwnerServiceTests
     }
 
     [Fact]
+    public async Task Update_Leaves_CompensationAmount_Unchanged_When_Omitted()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        // TestData.Listing seeds CompensationAmount = 25m.
+        await SeedApprovedListingAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            PricePerDay = 50m
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        Assert.Equal(25m, stored!.CompensationAmount);
+    }
+
+    [Fact]
+    public async Task Update_Changes_CompensationAmount_Without_Re_Moderation()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await SeedApprovedListingAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).UpdateAsync(ListingId, new UpdateListingRequest
+        {
+            CompensationAmount = 40000m
+        });
+
+        Assert.True(result.IsSuccess);
+
+        await using var verify = db.CreateContext();
+        var stored = await verify.Listings.FindAsync(ListingId);
+        // CompensationAmount is a structured field, so an approved listing stays approved.
+        Assert.Equal(ListingStatus.Approved, stored!.Status);
+        Assert.Equal(40000m, stored.CompensationAmount);
+    }
+
+    [Fact]
     public async Task Update_With_Null_DeliveryTypes_And_DeliveryType_Leaves_Delivery_Unchanged()
     {
         using var db = new SqliteTestDatabase();

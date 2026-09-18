@@ -29,7 +29,7 @@ public sealed class BookingDetailResponse
     // Pricing / dates
     public string Currency { get; init; } = string.Empty;
     public decimal PricePerDay { get; init; }
-    public decimal? DepositAmount { get; init; }
+    public decimal? CompensationAmount { get; init; }
     public decimal TotalPrice { get; init; }
     public DateOnly StartDate { get; init; }
     public DateOnly EndDate { get; init; }

@@ -4,7 +4,7 @@ namespace RentalPlatform.Application.DTOs;
 
 /// <summary>
 /// The single-listing "inspect" dossier. Everything <see cref="AdminListingSummaryResponse"/>
-/// has (full ordered Images, Description, AddressLine, DepositAmount, Condition, HygieneNotes,
+/// has (full ordered Images, Description, AddressLine, CompensationAmount, Condition, HygieneNotes,
 /// SafetyNotes, AgeFromMonths, AgeToMonths and Currency are already carried by the summary — see
 /// the final report for why those aren't repeated as distinct fields here), plus the listing's
 /// current Status and the owner's open-report count.
@@ -36,7 +36,7 @@ public sealed class AdminListingDetailResponse
     public string? Condition { get; init; }
     public string? HygieneNotes { get; init; }
     public string? SafetyNotes { get; init; }
-    public decimal? DepositAmount { get; init; }
+    public decimal? CompensationAmount { get; init; }
 
     public IReadOnlyCollection<ListingImageResponse> Images { get; init; } = Array.Empty<ListingImageResponse>();
 

@@ -422,7 +422,7 @@ public sealed class ListingsQueryService : IListingsQueryService
                     Condition = x.Listing.Condition,
                     HygieneNotes = x.Listing.HygieneNotes,
                     SafetyNotes = x.Listing.SafetyNotes,
-                    DepositAmount = x.Listing.DepositAmount,
+                    CompensationAmount = x.Listing.CompensationAmount,
                     MinRentalDays = x.Listing.MinRentalDays,
                     DeliveryType = x.Listing.DeliveryType,
                     ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == x.Listing.Id),

@@ -108,7 +108,7 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.SafetyNotes)
             .HasMaxLength(1000);
 
-        builder.Property(listing => listing.DepositAmount)
+        builder.Property(listing => listing.CompensationAmount)
             .HasPrecision(18, 2);
 
         builder.Property(listing => listing.MinRentalDays);

@@ -25,7 +25,7 @@ public sealed class PendingListingForReviewResponse
     public string? Condition { get; init; }
     public string? HygieneNotes { get; init; }
     public string? SafetyNotes { get; init; }
-    public decimal? DepositAmount { get; init; }
+    public decimal? CompensationAmount { get; init; }
 
     public IReadOnlyCollection<ListingImageResponse> Images { get; init; } = Array.Empty<ListingImageResponse>();
 

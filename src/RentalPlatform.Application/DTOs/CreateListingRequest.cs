@@ -67,8 +67,13 @@ public sealed class CreateListingRequest : IValidatableObject
     [MaxLength(1000, ErrorMessage = "Safety notes must be at most 1000 characters.")]
     public string? SafetyNotes { get; init; }
 
-    [Range(typeof(decimal), "0", "999999999999.99", ErrorMessage = "Deposit amount cannot be negative.")]
-    public decimal? DepositAmount { get; init; }
+    // Owner-facing "Loss & damage compensation": the amount the renter owes the owner if the toy
+    // is lost, seriously damaged, or not returned. Nothing is ever paid upfront and DoRent never
+    // collects, holds or refunds it (ADR-014). CLR type stays decimal? so an omitted field binds
+    // to null and trips [Required] as a 400, rather than silently defaulting to 0.
+    [Required(ErrorMessage = "Loss & damage compensation is required.")]
+    [Range(typeof(decimal), "1000", "10000000", ErrorMessage = "Loss & damage compensation must be between 1,000 and 10,000,000 AMD.")]
+    public decimal? CompensationAmount { get; init; }
 
     // Optional: shortest number of days a renter may book for. Omitted when the owner doesn't set one.
     [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]

@@ -460,7 +460,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Condition = listing.Condition,
             HygieneNotes = listing.HygieneNotes,
             SafetyNotes = listing.SafetyNotes,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             Images = orderedImages,
             CreatedAt = listing.CreatedAt,
             PhotoCount = orderedImages.Count,
@@ -520,7 +520,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Condition = listing.Condition,
             HygieneNotes = listing.HygieneNotes,
             SafetyNotes = listing.SafetyNotes,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             Images = orderedImages,
             CreatedAt = listing.CreatedAt,
             PhotoCount = orderedImages.Count,
@@ -561,7 +561,7 @@ public sealed class AdminListingsService : IAdminListingsService
         Condition = listing.Condition,
         HygieneNotes = listing.HygieneNotes,
         SafetyNotes = listing.SafetyNotes,
-        DepositAmount = listing.DepositAmount,
+        CompensationAmount = listing.CompensationAmount,
         Images = listing.Images
             .OrderByDescending(img => img.IsPrimary)
             .ThenBy(img => img.SortOrder)

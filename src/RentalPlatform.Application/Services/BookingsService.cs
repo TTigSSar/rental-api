@@ -487,7 +487,7 @@ public sealed class BookingsService : IBookingsService
             .FirstOrDefault(),
         Currency = booking.Listing.Currency,
         PricePerDay = booking.Listing.PricePerDay,
-        DepositAmount = booking.Listing.DepositAmount,
+        CompensationAmount = booking.Listing.CompensationAmount,
         OwnerFirstName = booking.Listing.Owner?.FirstName ?? string.Empty,
         OwnerLastName = booking.Listing.Owner?.LastName ?? string.Empty,
         StartDate = booking.StartDate,
@@ -555,7 +555,7 @@ public sealed class BookingsService : IBookingsService
 
             Currency = listing.Currency,
             PricePerDay = listing.PricePerDay,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             TotalPrice = booking.TotalPrice,
             StartDate = booking.StartDate,
             EndDate = booking.EndDate,

@@ -50,7 +50,7 @@ public sealed class Listing
     public string? Condition { get; set; }
     public string? HygieneNotes { get; set; }
     public string? SafetyNotes { get; set; }
-    public decimal? DepositAmount { get; set; }
+    public decimal? CompensationAmount { get; set; }
     public int? MinRentalDays { get; set; }
     public DeliveryType? DeliveryType { get; set; }
 

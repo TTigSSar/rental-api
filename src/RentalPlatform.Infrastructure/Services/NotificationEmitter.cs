@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain.Entities;
@@ -36,7 +37,7 @@ public sealed class NotificationEmitter : INotificationEmitter
             Urgent = true,
             Title = $"New rental request from {renter.FirstName}",
             Body = $"{renter.FirstName} wants your \"{listing.Title}\" for {FormatRange(booking)}. Respond within 24h to keep your fast-reply badge.",
-            Meta = BuildMeta(booking, listing.Currency),
+            Meta = BuildMeta(booking),
             ActorName = FullName(renter),
             ActorAvatarUrl = renter.AvatarUrl,
             ActorVerified = renter.IsIdConfirmed,
@@ -60,7 +61,7 @@ public sealed class NotificationEmitter : INotificationEmitter
             Urgent = false,
             Title = $"{owner.FirstName} approved your request",
             Body = $"The \"{booking.Listing.Title}\" is yours for {FormatRange(booking)}. Arrange a pickup time with {owner.FirstName}.",
-            Meta = BuildMeta(booking, booking.Listing.Currency),
+            Meta = BuildMeta(booking),
             ActorName = FullName(owner),
             ActorAvatarUrl = owner.AvatarUrl,
             ActorVerified = owner.IsIdConfirmed,
@@ -86,7 +87,7 @@ public sealed class NotificationEmitter : INotificationEmitter
             Body = string.IsNullOrWhiteSpace(booking.RejectionReason)
                 ? $"Your request for \"{booking.Listing.Title}\" was declined. Here are similar toys nearby."
                 : $"\"{booking.RejectionReason}\" — here are similar toys nearby.",
-            Meta = BuildMeta(booking, booking.Listing.Currency),
+            Meta = BuildMeta(booking),
             ActorName = FullName(owner),
             ActorAvatarUrl = owner.AvatarUrl,
             ActorVerified = owner.IsIdConfirmed,
@@ -177,12 +178,18 @@ public sealed class NotificationEmitter : INotificationEmitter
         return start == end ? start : $"{start}–{end}";
     }
 
-    private static string BuildMeta(Booking booking, string? currency)
+    /// <summary>
+    /// DoRent is single-currency (AMD), so the ֏ symbol is a constant here rather than
+    /// read from the listing/booking. This format is deliberately kept identical to
+    /// DramCurrencyPipe in the Angular app (Rental-Ui/src/app/shared/utils/dram-currency.pipe.ts)
+    /// — the two must be changed together.
+    /// </summary>
+    private static string BuildMeta(Booking booking)
     {
         var days = booking.EndDate.DayNumber - booking.StartDate.DayNumber + 1;
         var dayLabel = days == 1 ? "day" : "days";
-        var price = $"{booking.TotalPrice:0} {currency}".Trim();
-        return $"{days} {dayLabel} · {price}";
+        var amount = booking.TotalPrice.ToString("#,##0", CultureInfo.InvariantCulture);
+        return $"{days} {dayLabel} · {amount}\u00A0֏";
     }
 
     private static string? PrimaryImageUrl(Listing listing) =>

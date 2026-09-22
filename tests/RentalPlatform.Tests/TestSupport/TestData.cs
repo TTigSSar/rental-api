@@ -63,7 +63,7 @@ public static class TestData
         Title = "LEGO Duplo Starter Set",
         Description = "A deterministic test listing.",
         PricePerDay = 10m,
-        Currency = "USD",
+        Currency = "AMD",
         Country = "Armenia",
         City = "Yerevan",
         CompensationAmount = 25m,

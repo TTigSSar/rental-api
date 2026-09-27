@@ -111,6 +111,27 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    [HttpPut("me/password")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.PasswordChangePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.ChangePasswordAsync(request.CurrentPassword, request.NewPassword, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromError(result.Error);
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)
@@ -125,6 +146,10 @@ public sealed class AuthController : ControllerBase
             "auth.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
             "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "auth.external_link_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.invalid_current_password" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.password_not_set" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.password_unchanged" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.password_too_long" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }

@@ -11,6 +11,7 @@ public static class RateLimiterExtensions
     public const string AuthPolicy = "auth";
     public const string BookingCreatePolicy = "booking-create";
     public const string ImageUploadPolicy = "image-upload";
+    public const string PasswordChangePolicy = "password-change";
 
     public static IServiceCollection AddApiRateLimiting(this IServiceCollection services)
     {
@@ -43,6 +44,16 @@ public static class RateLimiterExtensions
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(PasswordChangePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveClientKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true

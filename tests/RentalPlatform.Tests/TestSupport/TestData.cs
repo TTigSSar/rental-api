@@ -19,11 +19,12 @@ public static class TestData
         string? firstName = null,
         string? lastName = null,
         bool isIdConfirmed = false,
-        DateTime? createdAt = null) => new()
+        DateTime? createdAt = null,
+        string? passwordHash = null) => new()
     {
         Id = id,
         Email = email,
-        PasswordHash = "x",
+        PasswordHash = passwordHash ?? "x",
         FirstName = firstName ?? "Test",
         LastName = lastName ?? "User",
         PreferredLanguage = "en",

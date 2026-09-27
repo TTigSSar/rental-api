@@ -898,7 +898,9 @@ cd /opt/dorent/rental-api
 # ожидается: VERIFY PASS: restored <file>.bak as RentalPlatformDb_verify, dbo.Users COUNT(*) = <N>
 # если VERIFY упал — СТОП, не деплоить: откатывать схему будет нечем
 
-# 3) сборка образов — на 2 ГБ RAM по одному сервису, а не всё сразу (пункт f)
+# 3) сборка образов. Пункт f объясняет, почему сборка идёт ДО подъёма, но на
+#    обновлении надёжнее ещё и развести два образа по отдельным командам:
+#    2026-09-27 так и делалось (api 56 с, ui 61 с, OOM-killer не сработал)
 docker compose -f docker-compose.production.yml build api
 docker compose -f docker-compose.production.yml build ui
 

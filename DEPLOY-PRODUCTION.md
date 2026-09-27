@@ -579,6 +579,15 @@ dbo.Users COUNT(*) = <N>` — и `N` должно быть правдоподо�
 после написания скрипта) — бэкап, который проверялся полгода назад, снова
 превращается в непроверенный, если формат/схема успели измениться.
 
+Репетиция миграций (раздел «Обновление стенда») **попутно является той самой
+проверкой восстановления**: она разворачивает свежий `.bak` в отдельную базу и
+поднимает на ней приложение, то есть доказывает восстановимость строже, чем
+`--verify` (тот ограничивается одним `SELECT COUNT(*)`). Это важно ровно
+потому, что cron ходит **без** `--verify` и восстановимость не проверяет
+никогда. Практический вывод: деплой с миграциями — это одновременно и
+регулярная тренировка восстановления, и после него в `backup.log` остаётся
+свежий `VERIFY PASS`.
+
 ### Off-site копия — пока не сделано
 
 Сейчас `/opt/dorent/backups` — это тот же физический сервер, что и сами
@@ -871,15 +880,184 @@ curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}\n' https://dorent.am/
 
 ## Обновление стенда
 
+Это последовательность шагов, а не набор команд: **`up -d` — первая команда,
+которая меняет production.** Всё, что выше неё, либо не трогает стенд
+(`git pull`, `build`), либо его страхует (бэкап, репетиция). Порядок важен.
+
 ```bash
+# 1) код
 cd /opt/dorent/rental-api  && git pull
 cd /opt/dorent/Rental-Ui   && git pull
 cd /opt/dorent/rental-api
-docker compose -f docker-compose.production.yml build
+
+# 2) бэкап И доказательство, что он восстанавливается — ДВА запуска, режимы
+#    взаимоисключающие: --verify только проверяет самый свежий .bak и НЕ
+#    делает новый (пункт i)
+./deploy/backup-production.sh
+./deploy/backup-production.sh --verify
+# ожидается: VERIFY PASS: restored <file>.bak as RentalPlatformDb_verify, dbo.Users COUNT(*) = <N>
+# если VERIFY упал — СТОП, не деплоить: откатывать схему будет нечем
+
+# 3) сборка образов. Пункт f объясняет, почему сборка идёт ДО подъёма, но на
+#    обновлении надёжнее ещё и развести два образа по отдельным командам:
+#    2026-09-27 так и делалось (api 56 с, ui 61 с, OOM-killer не сработал)
+docker compose -f docker-compose.production.yml build api
+docker compose -f docker-compose.production.yml build ui
+
+# 4) ЕСТЬ МИГРАЦИИ EF? -> РЕПЕТИЦИЯ на восстановленном бэкапе (обязательно,
+#    ADR-023) — подраздел ниже. Нет миграций -> шаг пропускается целиком.
+git diff --name-only <sha_до>..<sha_после> -- "*Migrations*" | grep -vE "Designer|ModelSnapshot"
+# пусто -> миграций нет; непусто -> репетиция обязательна
+
+# 5) и только теперь меняем production
 docker compose -f docker-compose.production.yml up -d
 ./deploy/smoke.sh   # деплой завершён, только когда smoke-проверка прошла (раздел j)
 ```
 
-Миграции EF Core применяются автоматически при старте `api` (`MigrationExtensions`,
-работает во всех окружениях) — отдельно накатывать их не нужно, но перед
-обновлением production рекомендуется снять бэкап (пункт i).
+Миграции EF Core применяются автоматически при старте `api`
+(`MigrationExtensions`, работает во всех окружениях) — отдельно накатывать их
+не нужно. Обратная сторона ровно та же: **они применяются к боевой базе в тот
+момент, когда контейнер `api` впервые поднялся, никакого отдельного
+подтверждения не спрашивают и сами себя не откатывают.** Поэтому бэкап перед
+обновлением production — не «рекомендуется», а обязателен, а при наличии
+миграций к нему добавляется репетиция.
+
+### Репетиция миграций на восстановленном бэкапе — обязательный шаг (ADR-023)
+
+**Когда применяется.** Любой деплой, в котором есть хотя бы одна
+неприменённая миграция EF — **каждая** миграция, а не только та, которая
+«выглядит рискованной». Решение «сегодняшняя миграция очевидно безобидная»
+принимать не нужно и нельзя: именно так шаг и пропускают. Деплой без
+миграций (проверка из шага 4 выше даёт пусто) пропускает репетицию
+**целиком** — для изменения, которое не трогает схему, ни репетиция,
+ни свежий бэкап с `--verify` не обязательны.
+
+**Почему это не «когда будет время».** Часть миграций падает только на
+боевых данных, и увидеть это заранее нельзя ни сборкой, ни тестами, ни
+ревью. Конкретный случай из релиза 2026-09-27: `AddConversationModeration`
+создаёт **уникальный** фильтрованный индекс (по `BookingId IS NOT NULL`, и
+следом `DeduplicateModerationConversations` — по `Kind = 1`). Один дубль в
+живых данных — и миграция падает **посередине релиза**, уже после того как
+её предшественницы применились, оставив схему, которая не является ни
+старой, ни новой. Это свойство production-данных, а не кода: ни сборка, ни
+тесты, ни ревью его не видят.
+
+**Асимметрия, которая оправдывает десять минут.** Откат кода — это
+`git checkout <старый sha>` + пересборка + `up -d`, дёшево и обратимо.
+Откат схемы — это восстановление бэкапа и потеря всего, что записано после
+него: миграции не откатываются на месте (у части из них `Down` честно
+описан как невосстановимый). Цена несопоставима.
+
+**Последовательность.** Ровно так это было проведено 2026-09-27. Репетиция
+идёт **после `build`** (ей нужен именно новый образ) и **строго до `up -d`**.
+
+```bash
+cd /opt/dorent/rental-api
+BAK=/opt/dorent/backups/<самый свежий>.bak   # тот же файл, что дал VERIFY PASS в шаге 2
+DB=RentalPlatformDb_rehearsal
+CID="$(docker compose -f docker-compose.production.yml ps -q db)"
+
+# пароль SA читаем в переменную: в командную строку он не попадает никогда
+P="$(grep -E "^MSSQL_SA_PASSWORD=" .env | tail -n1 | cut -d= -f2-)"
+
+# хелперы: пароль уходит через SQLCMDPASSWORD, у каждого docker-вызова </dev/null
+ex() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "$1" </dev/null; }
+qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -h -1 -W -s "|" -Q "SET NOCOUNT ON; $1" </dev/null; }
+```
+
+1. **Снять «отпечаток» боевой базы ДО деплоя** — количества строк по
+   затронутым таблицам плюс агрегаты по колонкам, которые миграция
+   переименовывает или переносит. Агрегат важнее счётчика: он ловит случай
+   «строки целы, а значения уехали».
+
+   ```bash
+   qp "USE RentalPlatformDb; SELECT 'users='+CAST((SELECT COUNT(*) FROM dbo.Users) AS VARCHAR(10))+' listings='+CAST((SELECT COUNT(*) FROM dbo.Listings) AS VARCHAR(10))+' bookings='+CAST((SELECT COUNT(*) FROM dbo.Bookings) AS VARCHAR(10));"
+   qp "USE RentalPlatformDb; SELECT 'sum='+CAST(SUM(CAST(<колонка> AS DECIMAL(18,2))) AS VARCHAR(40))+' nonnull='+CAST(COUNT(<колонка>) AS VARCHAR(10)) FROM dbo.Listings;"
+   ```
+
+2. **Положить `.bak` внутрь контейнера и отдать его пользователю `mssql`**
+   (ловушка 1 ниже — без `chown` будет `OS error 5 (Access is denied)`):
+
+   ```bash
+   docker compose -f docker-compose.production.yml exec -T db mkdir -p /var/opt/mssql/backup </dev/null
+   docker cp "$BAK" "$CID:/var/opt/mssql/backup/rehearsal.bak"
+   docker compose -f docker-compose.production.yml exec -T -u root db \
+     chown mssql:mssql /var/opt/mssql/backup/rehearsal.bak </dev/null
+   ```
+
+3. **Развернуть отдельную базу.** Логические имена читать из самого бэкапа, а
+   физические обязательно переименовать, иначе конфликт с файлами боевой базы:
+
+   ```bash
+   qp "RESTORE FILELISTONLY FROM DISK = N'/var/opt/mssql/backup/rehearsal.bak';"
+   # колонка 1 — логическое имя, колонка 3 — тип (D = данные, L = лог)
+   ex "RESTORE DATABASE [$DB] FROM DISK = N'/var/opt/mssql/backup/rehearsal.bak' WITH MOVE N'<D>' TO N'/var/opt/mssql/data/$DB.mdf', MOVE N'<L>' TO N'/var/opt/mssql/data/$DB.ldf', REPLACE;"
+   ```
+
+4. **Поднять НОВЫЙ собранный образ `api` на этой базе.** Строка подключения
+   передаётся через окружение «только по имени ключа» (`-e ИМЯ` без
+   `=значение`), поэтому пароль не попадает ни в `argv`, ни в `ps`:
+
+   ```bash
+   export ConnectionStrings__DefaultConnection="Server=db,1433;Database=$DB;User Id=sa;Password=$P;TrustServerCertificate=True;"
+   timeout 300 docker compose -f docker-compose.production.yml run --rm --no-deps \
+     -e ConnectionStrings__DefaultConnection api > /tmp/rehearsal.log 2>&1 </dev/null
+   # ожидается: код возврата 124 — timeout снял уже поднявшийся API. Это НОРМА,
+   # а не ошибка: контейнер не должен завершаться сам.
+   ```
+
+5. **Проверить, что именно применилось** — по одной строке на каждую миграцию
+   из деплоя, и ни одной ошибки:
+
+   ```bash
+   grep -E "Applying migration|Application started" /tmp/rehearsal.log
+   grep -icE "error|exception|unhandled" /tmp/rehearsal.log
+   ```
+
+   ```
+   ожидается: Applying migration '<имя_1>'. ... Applying migration '<имя_N>'.
+              Application started. Press Ctrl+C to shut down.
+              и 0 совпадений по error/exception
+   ```
+
+6. **Сверить отпечаток на репетиционной базе с шагом 1** — те же счётчики и те
+   же агрегаты. Для переименования колонки сумма обязана совпасть до копейки
+   (2026-09-27: `DepositAmount` sum `661000.00` / 56 непустых →
+   `CompensationAmount` sum `661000.00` / 56 непустых). Любое расхождение —
+   СТОП, production не трогать.
+
+7. **Убрать за собой** — репетиционная база и временный `.bak` не должны
+   остаться на диске 2-гигабайтного сервера:
+
+   ```bash
+   ex "IF DB_ID(N'$DB') IS NOT NULL BEGIN ALTER DATABASE [$DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$DB]; END"
+   docker compose -f docker-compose.production.yml exec -T -u root db \
+     rm -f /var/opt/mssql/backup/rehearsal.bak </dev/null
+   shred -u -n 3 /tmp/rehearsal.log
+   ```
+
+После этого — `up -d`, и те же проверки из шага 6 повторить уже на боевой
+базе: репетиция предсказывает результат, но не заменяет его измерение.
+
+> ⚠️ **Три механические ловушки.** Каждая стоит примерно часа, если
+> выяснять заново.
+>
+> 1. **`docker cp` сохраняет владельца с хоста.** Внутри контейнера
+>    `sqlservr` работает как `mssql` (uid 10001) и не может прочитать файл,
+>    которым не владеет — `RESTORE` падает с `OS error 5 (Access is
+>    denied)`. Лечится `exec -u root db chown mssql:mssql <файл>` (сам
+>    `mssql` сделать `chown` не может). Ровно то же делает `--verify`
+>    внутри `backup-production.sh` — оттуда и брать образец.
+> 2. **`sqlcmd` получает пароль ТОЛЬКО через `SQLCMDPASSWORD`**, никогда
+>    через `-P` в командной строке: `-P` светит пароль в `ps` и в истории
+>    оболочки. И `-b` обязателен, иначе `sqlcmd` вернёт 0 даже на упавшем
+>    SQL, и ошибка пройдёт незамеченной.
+> 3. **`docker compose exec -T` и `run` ЧИТАЮТ stdin.** Если гонять эти
+>    команды скриптом, поданным на stdin (`ssh host bash -s <<"EOF"`),
+>    первый же docker-вызов сожрёт весь остаток скрипта, и тот молча
+>    оборвётся — без ошибки, просто «дальше ничего не выполнилось».
+>    Поэтому у каждого docker-вызова в таком скрипте стоит `</dev/null`.
+>    Замечено на живом прогоне 2026-09-27 дважды, прежде чем стало понятно,
+>    почему вывод обрывается на середине.

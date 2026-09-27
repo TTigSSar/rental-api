@@ -108,7 +108,7 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         builder.Property(listing => listing.SafetyNotes)
             .HasMaxLength(1000);
 
-        builder.Property(listing => listing.DepositAmount)
+        builder.Property(listing => listing.CompensationAmount)
             .HasPrecision(18, 2);
 
         builder.Property(listing => listing.MinRentalDays);
@@ -117,6 +117,10 @@ public sealed class ListingConfiguration : IEntityTypeConfiguration<Listing>
         // No default/sentinel: unlike PriceUnit, an unset delivery method is a real "not specified"
         // state, not a value with an implied fallback.
         builder.Property(listing => listing.DeliveryType);
+
+        // Additive multi-select successor to DeliveryType — see DeliveryOptions.cs. Persisted as
+        // int (the [Flags] combination), same nullability rationale as DeliveryType above.
+        builder.Property(listing => listing.DeliveryOptions);
 
         builder.HasOne(listing => listing.Owner)
             .WithMany(user => user.Listings)

@@ -29,13 +29,18 @@ public sealed class AdminListingsServiceTests
 
     private static AdminListingsService CreateService(
         AppDbContext context, Guid currentUserId, FakeEmailService email) =>
+        CreateService(context, currentUserId, email, new FakeModerationNoteEmitter());
+
+    private static AdminListingsService CreateService(
+        AppDbContext context, Guid currentUserId, FakeEmailService email, FakeModerationNoteEmitter moderationNoteEmitter) =>
         new(
             new FakeCurrentUserContext(currentUserId),
             new AdminListingsStore(context),
             new ReviewsStore(context),
             new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance),
             email,
-            new FakeNotificationEmitter());
+            new FakeNotificationEmitter(),
+            moderationNoteEmitter);
 
     [Fact]
     public async Task Approve_Pending_Listing_Sets_Approved_And_Notifies_Owner()
@@ -77,6 +82,31 @@ public sealed class AdminListingsServiceTests
         Assert.Equal("Small parts.", stored.RejectionNote); // trimmed
         Assert.Equal("Unsafe item: Small parts.", stored.RejectionReason); // composed label + note
         Assert.Single(email.RejectedSent);
+    }
+
+    // Phase 2 (moderation messages): rejecting a listing must auto-post a Reject note into the
+    // owner's Moderation conversation — best-effort, so this only asserts the emitter was called
+    // with the right kind/subject/reason, not that a chat row exists (that's ConversationsStore's
+    // job, covered separately).
+    [Fact]
+    public async Task Reject_Pending_Listing_Emits_Moderation_Note()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAsync(db, ListingStatus.PendingApproval);
+        var email = new FakeEmailService();
+        var noteEmitter = new FakeModerationNoteEmitter();
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId, email, noteEmitter)
+            .RejectAsync(ListingId, "unsafeItem", "Small parts.");
+
+        Assert.True(result.IsSuccess);
+        var call = Assert.Single(noteEmitter.ListingRejectedCalls);
+        Assert.Equal(AdminId, call.ModeratorId);
+        Assert.Equal(OwnerId, call.MemberId);
+        Assert.Equal("LEGO Duplo Starter Set", call.ListingTitle);
+        Assert.Equal("Unsafe item", call.ReasonLabel);
+        Assert.Equal("Small parts.", call.Note);
     }
 
     [Fact]

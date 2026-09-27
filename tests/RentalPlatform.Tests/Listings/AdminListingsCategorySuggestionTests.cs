@@ -29,7 +29,8 @@ public sealed class AdminListingsCategorySuggestionTests
             new ReviewsStore(context),
             new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance),
             new FakeEmailService(),
-            new FakeNotificationEmitter());
+            new FakeNotificationEmitter(),
+            new FakeModerationNoteEmitter());
 
     private static Listing MakeListing(
         Guid id, Guid categoryId, string title, string description, ListingStatus status = ListingStatus.PendingApproval)

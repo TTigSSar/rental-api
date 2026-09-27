@@ -19,6 +19,7 @@ public interface IAdminUsersService
 
     Task<ServiceResult<AdminUserSummaryResponse>> SuspendAsync(
         Guid userId,
+        string? reason = null,
         CancellationToken cancellationToken = default);
 
     Task<ServiceResult<AdminUserSummaryResponse>> ReactivateAsync(

@@ -59,6 +59,7 @@ public sealed class AdminListingsService : IAdminListingsService
     private readonly IModerationLogStore _moderationLogStore;
     private readonly IEmailService _emailService;
     private readonly INotificationEmitter _notificationEmitter;
+    private readonly IModerationNoteEmitter _moderationNoteEmitter;
 
     public AdminListingsService(
         ICurrentUserContext currentUserContext,
@@ -66,7 +67,8 @@ public sealed class AdminListingsService : IAdminListingsService
         IReviewsStore reviewsStore,
         IModerationLogStore moderationLogStore,
         IEmailService emailService,
-        INotificationEmitter notificationEmitter)
+        INotificationEmitter notificationEmitter,
+        IModerationNoteEmitter moderationNoteEmitter)
     {
         _currentUserContext = currentUserContext;
         _adminListingsStore = adminListingsStore;
@@ -74,6 +76,7 @@ public sealed class AdminListingsService : IAdminListingsService
         _moderationLogStore = moderationLogStore;
         _emailService = emailService;
         _notificationEmitter = notificationEmitter;
+        _moderationNoteEmitter = moderationNoteEmitter;
     }
 
     public async Task<ServiceResult<IReadOnlyCollection<PendingListingForReviewResponse>>> GetPendingAsync(
@@ -222,6 +225,10 @@ public sealed class AdminListingsService : IAdminListingsService
             CreatedAt = DateTime.UtcNow
         }, cancellationToken);
 
+        // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this recategorisation.
+        await _moderationNoteEmitter.ListingRecategorisedAsync(
+            admin.Id, listing.OwnerId, listing.Title, fromCategoryName, category.Name, cancellationToken);
+
         var detail = await BuildDetailAsync(listing, cancellationToken);
         return ServiceResult<AdminListingDetailResponse>.Success(detail);
     }
@@ -365,6 +372,10 @@ public sealed class AdminListingsService : IAdminListingsService
         // Best-effort: notify the owner that changes are needed.
         await _notificationEmitter.ListingRejectedAsync(listing, trimmedReason, cancellationToken);
 
+        // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this rejection.
+        await _moderationNoteEmitter.ListingRejectedAsync(
+            admin.Id, listing.OwnerId, listing.Title, RejectionReasonCatalog.LabelFor(trimmedCode), trimmedNote, cancellationToken);
+
         return ServiceResult<ModerateListingResponse>.Success(new ModerateListingResponse
         {
             Id = listing.Id,
@@ -432,6 +443,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Id = listing.Id,
             OwnerId = listing.OwnerId,
             OwnerEmail = listing.Owner.Email,
+            OwnerPhoneNumber = listing.Owner.PhoneNumber,
             OwnerFirstName = listing.Owner.FirstName,
             OwnerLastName = listing.Owner.LastName,
             CategoryId = listing.CategoryId,
@@ -448,7 +460,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Condition = listing.Condition,
             HygieneNotes = listing.HygieneNotes,
             SafetyNotes = listing.SafetyNotes,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             Images = orderedImages,
             CreatedAt = listing.CreatedAt,
             PhotoCount = orderedImages.Count,
@@ -508,7 +520,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Condition = listing.Condition,
             HygieneNotes = listing.HygieneNotes,
             SafetyNotes = listing.SafetyNotes,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             Images = orderedImages,
             CreatedAt = listing.CreatedAt,
             PhotoCount = orderedImages.Count,
@@ -549,7 +561,7 @@ public sealed class AdminListingsService : IAdminListingsService
         Condition = listing.Condition,
         HygieneNotes = listing.HygieneNotes,
         SafetyNotes = listing.SafetyNotes,
-        DepositAmount = listing.DepositAmount,
+        CompensationAmount = listing.CompensationAmount,
         Images = listing.Images
             .OrderByDescending(img => img.IsPrimary)
             .ThenBy(img => img.SortOrder)

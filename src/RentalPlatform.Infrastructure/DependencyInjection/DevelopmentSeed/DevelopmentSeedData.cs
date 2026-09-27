@@ -47,7 +47,7 @@ internal static class DevelopmentSeedData
         string? Condition,
         string? HygieneNotes,
         string? SafetyNotes,
-        decimal? DepositAmount,
+        decimal? CompensationAmount,
         string? RejectionReason = null);
 
     public sealed record SeedListingImage(
@@ -361,7 +361,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wiped down with child-safe disinfectant after every return. Complete piece count verified.",
             SafetyNotes: "All pieces are large enough to comply with EN 71-1 small-parts requirements. No loose batteries.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.MontessoriWoodenToySet,
             "Montessori Wooden Toy Set",
@@ -374,7 +374,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Wood pieces wiped with a damp cloth and left to fully air-dry between rentals.",
             SafetyNotes: "Smooth, splinter-free finish. Non-toxic water-based stain. No magnets, no detachable small parts.",
-            DepositAmount: 14000m),
+            CompensationAmount: 14000m),
         new(
             ListingIds.BabyActivityGym,
             "Baby Activity Gym",
@@ -387,7 +387,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Removable mat is machine-washed at 60 °C between rentals. Hanging toys are surface-sanitized.",
             SafetyNotes: "All attachments are double-stitched and torque-tested. Suitable for supervised tummy time.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.KidsBalanceBike,
             "Kids Balance Bike",
@@ -400,7 +400,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Frame and grips wiped with disinfectant; saddle cover wiped with antibacterial spray.",
             SafetyNotes: "Helmet not included. Owner recommends a fitted helmet and supervised use on flat surfaces.",
-            DepositAmount: 16000m),
+            CompensationAmount: 16000m),
         new(
             ListingIds.OutdoorBackyardSlide,
             "Outdoor Backyard Slide",
@@ -413,7 +413,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Surfaces wiped with mild soap and water after every rental, then dried.",
             SafetyNotes: "Must be placed on level ground. Owner provides anti-slip pads. Max user weight 25 kg.",
-            DepositAmount: 20000m),
+            CompensationAmount: 20000m),
         new(
             ListingIds.ChildrensPuzzleBundle,
             "Children's Puzzle Bundle",
@@ -426,7 +426,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Pieces wiped with a slightly damp cloth and air-dried between rentals.",
             SafetyNotes: "Smallest pieces are above the 3-year-old small-parts threshold. Not recommended under 36 months.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
         new(
             ListingIds.ToyKitchenSet,
             "Wooden Toy Kitchen Set",
@@ -439,7 +439,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wood surfaces wiped with food-safe cleaner; small accessories washed in soapy water.",
             SafetyNotes: "Rounded edges. No glass, no magnets, no detachable small parts under 36 months.",
-            DepositAmount: 16000m),
+            CompensationAmount: 16000m),
 
         // ---- PendingApproval (admin moderation queue) ----
         new(
@@ -454,7 +454,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Cards and pieces wiped down between rentals; boxes inspected for completeness.",
             SafetyNotes: "Contains small parts; not suitable under 36 months without supervision.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.BirthdayPartyToyPack,
             "Birthday Party Toy Pack",
@@ -467,7 +467,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Balls and fabric items washed; foam darts wiped with antibacterial wipes.",
             SafetyNotes: "Foam darts only. No projectile toys. Adult supervision recommended.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
 
         // ---- Rejected ----
         new(
@@ -482,7 +482,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: null,
             SafetyNotes: null,
-            DepositAmount: 10000m,
+            CompensationAmount: 10000m,
             RejectionReason: "Hygiene notes are required. Please describe how the item is cleaned between rentals."),
 
         // ---- Additional approved listings owned by demo_owner@toyrent.am (listings 8–12 approved) ----
@@ -498,7 +498,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Single-use chemical sachets replaced after each rental. Trays and tools washed with soapy water.",
             SafetyNotes: "Adult supervision required for all experiments. No open flames. Includes safety goggles.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
         new(
             ListingIds.ClassicBoardGameTrio,
             "Classic Board Game Trio",
@@ -511,7 +511,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Cards and tokens wiped with a dry cloth before return; boxes sealed with elastic for storage.",
             SafetyNotes: "Contains small pieces; not suitable for children under 3 years without supervision.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.PartyFunActivityPack,
             "Party Fun Activity Pack",
@@ -524,7 +524,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Fabric items machine-washed after every rental. Hard plastic items wiped with antibacterial spray.",
             SafetyNotes: "Parachute activity requires adult supervision. Clear a flat open area of at least 4 × 4 m.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.WoodenTrainSet,
             "Wooden Train Set & Track (56 pcs)",
@@ -537,7 +537,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Track pieces and rolling stock wiped with a damp cloth and dried before packing. Piece count verified.",
             SafetyNotes: "No small detachable parts below 3-year-old threshold. Supervised use recommended under 24 months.",
-            DepositAmount: 14000m),
+            CompensationAmount: 14000m),
         new(
             ListingIds.KidsArtEasel,
             "Kids Double-Sided Art Easel",
@@ -550,7 +550,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Whiteboard and blackboard surfaces wiped clean before handover. Markers capped and tested.",
             SafetyNotes: "Child-safe, non-toxic chalk and markers. Easel folds flat for transport; locking pins provided.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
 
         // ==================================================================================
         // ---- 50-listing toy-catalogue expansion (2026-08) ----
@@ -573,7 +573,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Seat pad and toy bar wiped with baby-safe disinfectant and machine-washed at 40C between rentals.",
             SafetyNotes: "5-point harness included. Vibration unit runs on batteries only, no mains cord near the seat. Not for unsupervised sleep.",
-            DepositAmount: 9000m),
+            CompensationAmount: 9000m),
         new(
             ListingIds.LEGOClassicCreativeBricksBox500Pcs,
             "LEGO Classic Creative Bricks Box (500 pcs)",
@@ -586,7 +586,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Bricks run through a mesh-bag wash in warm soapy water and air-dried on a towel before repacking.",
             SafetyNotes: "Standard LEGO brick sizes; not recommended for children under 3 due to the small-parts risk printed on the box.",
-            DepositAmount: 15000m),
+            CompensationAmount: 15000m),
         new(
             ListingIds.LeapFrogLeapStartInteractiveLearningSystem,
             "LeapFrog LeapStart Interactive Learning System",
@@ -599,7 +599,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Console and stylus wiped with antibacterial wipes; book pages spot-cleaned, no sticky residue.",
             SafetyNotes: "Runs on batteries only, no charging cable included. Volume capped at a child-safe level.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.SmobyOutdoorPlayhouse,
             "Smoby Outdoor Playhouse",
@@ -612,7 +612,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Interior and exterior panels hosed down and scrubbed with mild detergent, then fully air-dried.",
             SafetyNotes: "Anchored with ground stakes for stability; all edges are rounded plastic with no sharp seams.",
-            DepositAmount: 32000m),
+            CompensationAmount: 32000m),
         new(
             ListingIds.LittleTikesCozyCoupe,
             "Little Tikes Cozy Coupe",
@@ -625,7 +625,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Seat and steering wheel wiped with disinfectant spray; interior vacuumed of dust and crumbs.",
             SafetyNotes: "No sharp edges on the body shell. Recommended for supervised outdoor or driveway use only.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.MelissaDougWoodenDollhouse,
             "Melissa & Doug Wooden Dollhouse",
@@ -638,7 +638,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Furniture pieces wiped individually with a damp cloth; house frame dusted and wiped down.",
             SafetyNotes: "No small removable roof or wall pieces. Furniture edges are sanded smooth.",
-            DepositAmount: 18000m),
+            CompensationAmount: 18000m),
         new(
             ListingIds.HapePoundTapBench,
             "Hape Pound & Tap Bench",
@@ -651,7 +651,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Balls and mallet washed in warm soapy water; bench surface wiped and dried before each rental.",
             SafetyNotes: "Mallet has a rounded head and thick handle sized for toddler grip, no splinter risk.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
         new(
             ListingIds.Djeco100PieceFloorPuzzleFamilyReunion,
             "Djeco 100-Piece Floor Puzzle - Family Reunion",
@@ -664,7 +664,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Pieces wiped with a dry cloth; storage box interior vacuumed of dust between rentals.",
             SafetyNotes: "Thick cardboard pieces are larger than standard puzzle pieces, reducing choking risk.",
-            DepositAmount: 5000m,
+            CompensationAmount: 5000m,
             RejectionReason: "Photos show only the closed box, not the assembled puzzle -- please add a photo of the completed puzzle so renters can confirm all pieces are present."),
         new(
             ListingIds.HasbroGuessWhoClassic,
@@ -678,7 +678,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Character cards and flip panels wiped with a dry cloth; hinges checked for smooth movement.",
             SafetyNotes: "No small loose parts beyond the character cards, which exceed choking-hazard size.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.LittleTikesInflatableBounceHouse,
             "Little Tikes Inflatable Bounce House",
@@ -691,7 +691,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Interior and exterior surfaces wiped with a diluted disinfectant solution and fully air-dried before folding.",
             SafetyNotes: "Blower has a safety-rated cord and auto-shutoff. Maximum occupancy and weight limits are listed on the netting.",
-            DepositAmount: 35000m),
+            CompensationAmount: 35000m),
         new(
             ListingIds.ChiccoBabySensesActivityGym,
             "Chicco Baby Senses Activity Gym",
@@ -704,7 +704,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Play mat machine-washed at 60C; hanging toys hand-washed and air-dried between rentals.",
             SafetyNotes: "Hanging toys are securely clipped and too large to be a choking hazard. Battery compartment for the light star is screw-locked.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.MegaBloksFirstBuildersBigBuildingBag80Pcs,
             "Mega Bloks First Builders Big Building Bag (80 pcs)",
@@ -717,7 +717,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Blocks wiped with a damp cloth and child-safe disinfectant spray; carry bag wiped down and air-dried.",
             SafetyNotes: "Blocks are large-format and exceed small-parts size limits, safe for supervised toddler play.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
         new(
             ListingIds.LearningResourcesCodingCrittersRangerZip,
             "Learning Resources Coding Critters Ranger & Zip",
@@ -730,7 +730,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Robot shell wiped with disinfectant spray; code cards wiped clean and checked for bent corners.",
             SafetyNotes: "Small code cards are choke-hazard sized -- recommended for 4 years and up with supervision.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.IntexInflatableKiddiePoolOceanPlayCenter,
             "Intex Inflatable Kiddie Pool (Ocean Play Center)",
@@ -743,7 +743,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Fully deflated, scrubbed with pool-safe disinfectant and left to air-dry before each rental.",
             SafetyNotes: "Adult supervision required at all times near water. Repair patch kit included in case of small punctures.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.RadioFlyerClassicRedTricycle,
             "Radio Flyer Classic Red Tricycle",
@@ -756,7 +756,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Frame and handlebars wiped with disinfectant; seat cover wiped separately with antibacterial spray.",
             SafetyNotes: "Push handle allows parent control at low speeds. Pedals have a non-slip rubber tread.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.Step2FixerUpperToolBench,
             "Step2 Fixer Upper Tool Bench",
@@ -769,7 +769,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Tools and bench surface wiped with antibacterial spray; battery-powered drill sound module checked.",
             SafetyNotes: "All tools are soft plastic with rounded tips. Vice mechanism has a finger-pinch guard.",
-            DepositAmount: 13000m),
+            CompensationAmount: 13000m),
         new(
             ListingIds.MelissaDougShapeSortingCube,
             "Melissa & Doug Shape Sorting Cube",
@@ -782,7 +782,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Shapes wiped with a damp cloth and mild soap; cube interior vacuumed of dust between rentals.",
             SafetyNotes: "Shapes are large and rounded, exceeding standard small-parts thresholds for toddlers.",
-            DepositAmount: 5500m),
+            CompensationAmount: 5500m),
         new(
             ListingIds.Ravensburger200PieceDisneyPuzzle,
             "Ravensburger 200-Piece Disney Puzzle",
@@ -795,7 +795,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Pieces wiped with a lightly damp cloth and fully dried before boxing to prevent warping.",
             SafetyNotes: "Standard jigsaw piece size, recommended for ages 5 and up without supervision needed.",
-            DepositAmount: 5000m),
+            CompensationAmount: 5000m),
         new(
             ListingIds.HabaMyVeryFirstGamesOrchardCompare,
             "Haba My Very First Games - Orchard Compare",
@@ -808,7 +808,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wooden fruit pieces washed in warm soapy water; game box interior wiped clean.",
             SafetyNotes: "Fruit pieces are large and rounded, designed specifically for the 3+ age range to avoid choking risk.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.IntexBallPitWith100Balls,
             "Intex Ball Pit with 100 Balls",
@@ -821,7 +821,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Balls washed in a mesh laundry bag with mild detergent; pit walls wiped and fully dried between rentals.",
             SafetyNotes: "Balls are sized above the choking-hazard limit. Pit walls have no sharp seams.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.TinyLoveMeadowDaysGyminiPlayMat,
             "Tiny Love Meadow Days Gymini Play Mat",
@@ -834,7 +834,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Mat surface wiped with a damp cloth and mild soap; fabric toys washed on a gentle cycle.",
             SafetyNotes: "Arch legs are wide-set and stable on flat floors. All attached toys are stitched, not glued.",
-            DepositAmount: 8000m),
+            CompensationAmount: 8000m),
         new(
             ListingIds.LEGOCityFireStationPlayset,
             "LEGO City Fire Station Playset",
@@ -847,7 +847,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Minifigures and larger pieces wiped with disinfectant wipes; small connectors washed in a mesh bag.",
             SafetyNotes: "Contains small parts and is not suitable for children under 5. Ladder mechanism checked for sharp edges before each rental.",
-            DepositAmount: 20000m),
+            CompensationAmount: 20000m),
         new(
             ListingIds.VTechAlphabetTrain,
             "VTech Alphabet Train",
@@ -860,7 +860,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Letter blocks washed in warm soapy water; train body wiped with a damp cloth and dried fully.",
             SafetyNotes: "Blocks are large enough to meet toddler small-parts safety limits. Pull string is under 30 cm.",
-            DepositAmount: 7000m),
+            CompensationAmount: 7000m),
         new(
             ListingIds.LittleTikes45FootTrampoline,
             "Little Tikes 4.5-Foot Trampoline",
@@ -873,7 +873,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Jump mat and enclosure net wiped down with disinfectant spray and left to dry in the sun.",
             SafetyNotes: "Frame pads and net checked for tears before every rental. Maximum one child at a time, adult supervision required.",
-            DepositAmount: 25000m),
+            CompensationAmount: 25000m),
         new(
             ListingIds.RazorJrLilKickScooter,
             "Razor Jr. Lil' Kick Scooter",
@@ -886,7 +886,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Footboard and handlebar grips wiped with antibacterial wipes after every rental.",
             SafetyNotes: "Low centre of gravity for stability. Helmet not included -- owner recommends one for outdoor use.",
-            DepositAmount: 7000m),
+            CompensationAmount: 7000m),
         new(
             ListingIds.KidKraftVintageKitchenPlayset,
             "KidKraft Vintage Kitchen Playset",
@@ -899,7 +899,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Wood surfaces wiped with food-safe cleaner; plastic accessories washed in soapy water and air-dried.",
             SafetyNotes: "No glass or breakable parts. Oven and icebox doors have soft-close hinges.",
-            DepositAmount: 22000m),
+            CompensationAmount: 22000m),
         new(
             ListingIds.GrimmsWoodenRainbowStacker,
             "Grimm's Wooden Rainbow Stacker",
@@ -912,7 +912,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Wiped with a barely damp cloth only, per the manufacturer's care instructions to protect the finish.",
             SafetyNotes: "Smooth, splinter-free edges. Non-toxic water-based dyes, safe for mouthing by younger children.",
-            DepositAmount: 14000m),
+            CompensationAmount: 14000m),
         new(
             ListingIds.MelissaDougWoodenPegPuzzleFarmAnimals,
             "Melissa & Doug Wooden Peg Puzzle - Farm Animals",
@@ -925,7 +925,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Pegs and board wiped with a damp cloth and mild soap, dried fully before each handover.",
             SafetyNotes: "Knobs are glued and rounded, no splinters or detachable small parts.",
-            DepositAmount: 5000m),
+            CompensationAmount: 5000m),
         new(
             ListingIds.RavensburgerLabyrinthJunior,
             "Ravensburger Labyrinth Junior",
@@ -938,7 +938,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Board and tiles wiped with a dry cloth; box interior dividers wiped clean between rentals.",
             SafetyNotes: "No small detachable parts beyond the tiles, which are sized well above choking-hazard limits.",
-            DepositAmount: 7000m),
+            CompensationAmount: 7000m),
         new(
             ListingIds.KidsKaraokeMachineWithDiscoLights,
             "Kids Karaoke Machine with Disco Lights",
@@ -951,7 +951,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Microphone foam covers replaced between rentals; casing wiped with an electronics-safe disinfectant wipe.",
             SafetyNotes: "Volume is capped at a hearing-safe maximum. Runs on a low-voltage adapter, no exposed wiring.",
-            DepositAmount: 14000m),
+            CompensationAmount: 14000m),
         new(
             ListingIds.VTechSitToStandLearningWalker,
             "VTech Sit-to-Stand Learning Walker",
@@ -964,7 +964,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Wheels and handle wiped with antibacterial spray; activity panel buttons cleaned individually between rentals.",
             SafetyNotes: "Wheel resistance is adjustable to prevent the walker from running away from a new walker. No small detachable pieces.",
-            DepositAmount: 7000m),
+            CompensationAmount: 7000m),
         new(
             ListingIds.MagnaTilesClearColors32PieceSet,
             "Magna-Tiles Clear Colors 32-Piece Set",
@@ -977,7 +977,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Tiles wiped individually with a soft cloth and alcohol-free sanitiser; magnets checked for cracks.",
             SafetyNotes: "Magnets are fully sealed inside the plastic tiles and tested for secure casing before every rental.",
-            DepositAmount: 18000m),
+            CompensationAmount: 18000m),
         new(
             ListingIds.MelissaDougWoodenAlphabetPuzzleBoard,
             "Melissa & Doug Wooden Alphabet Puzzle Board",
@@ -990,7 +990,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Wooden pieces wiped with a barely damp cloth and air-dried fully before storage.",
             SafetyNotes: "Peg knobs are glued and sanded smooth; no loose or detachable small parts.",
-            DepositAmount: 6000m,
+            CompensationAmount: 6000m,
             RejectionReason: "The listed condition ('Like new') doesn't match the visible wear in the submitted photos -- please update the condition or provide clearer photos before resubmitting."),
         new(
             ListingIds.Step2NaturallyPlayfulSandTable,
@@ -1004,7 +1004,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Sand replaced between rentals; table basin scrubbed and rinsed, tools washed in soapy water.",
             SafetyNotes: "Rounded edges throughout; sand is non-toxic play sand certified for children's use.",
-            DepositAmount: 12000m),
+            CompensationAmount: 12000m),
         new(
             ListingIds.PegPeregoJohnDeereGroundForceRideOnTractor,
             "Peg Perego John Deere Ground Force Ride-On Tractor",
@@ -1017,7 +1017,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Seat and steering wheel wiped with disinfectant; battery contacts checked and cleaned of corrosion.",
             SafetyNotes: "Speed-limited to a safe walking pace. Battery charger included with clear charging instructions.",
-            DepositAmount: 30000m),
+            CompensationAmount: 30000m),
         new(
             ListingIds.FisherPriceLittlePeopleFarm,
             "Fisher-Price Little People Farm",
@@ -1030,7 +1030,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Figures and barn surfaces wiped with baby-safe disinfectant; sound module checked for sticky buttons.",
             SafetyNotes: "Figures are oversized to avoid choking hazards. Battery compartment is screw-secured.",
-            DepositAmount: 9000m),
+            CompensationAmount: 9000m),
         new(
             ListingIds.PlanToysWoodenSortingBoard,
             "Plan Toys Wooden Sorting Board",
@@ -1043,7 +1043,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Pegs and board wiped with a damp cloth; no submerging in water to protect the wood finish.",
             SafetyNotes: "Pegs are large-format and rounded. Board has no sharp corners.",
-            DepositAmount: 7000m),
+            CompensationAmount: 7000m),
         new(
             ListingIds.Educa300PieceKidsPuzzleDinosaurs,
             "Educa 300-Piece Kids Puzzle - Dinosaurs",
@@ -1056,7 +1056,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Pieces wiped with a dry microfibre cloth; tin interior wiped clean between rentals.",
             SafetyNotes: "Recommended for ages 6 and up given the piece count and puzzle complexity.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.CatanJunior,
             "Catan Junior",
@@ -1069,7 +1069,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Cards wiped with a dry cloth; plastic ship and building pieces washed in soapy water and dried.",
             SafetyNotes: "Small resource tokens are present -- recommended for ages 6 and up with adult supervision if younger siblings are nearby.",
-            DepositAmount: 9000m),
+            CompensationAmount: 9000m),
         new(
             ListingIds.NerfRivalPartyBlasterSetX4,
             "Nerf Rival Party Blaster Set (x4)",
@@ -1082,7 +1082,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Blasters wiped down with antibacterial wipes; foam rounds inspected and replaced if worn.",
             SafetyNotes: "Eye-protection glasses are included and required for all players. Foam rounds only, no hard projectiles.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.MunchkinBathToyOrganizerSquirtersSet,
             "Munchkin Bath Toy Organizer & Squirters Set",
@@ -1095,7 +1095,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: "Squirters boiled for two minutes and left to fully dry before each rental to prevent internal mould.",
             SafetyNotes: "No small removable parts. Suction hook tested on tile before handover; mesh bag is machine-washable.",
-            DepositAmount: 5000m),
+            CompensationAmount: 5000m),
         new(
             ListingIds.LEGOTechnicOffRoadBuggy,
             "LEGO Technic Off-Road Buggy",
@@ -1108,7 +1108,7 @@ internal static class DevelopmentSeedData
             Condition: "Good",
             HygieneNotes: "Pieces wiped down with a dry microfibre cloth; axle and gear mechanisms checked and cleaned of dust.",
             SafetyNotes: "Small technical pieces are recommended for children 7+ with supervision. No sharp edges on moving parts.",
-            DepositAmount: 16000m),
+            CompensationAmount: 16000m),
         new(
             ListingIds.OsmoGeniusStarterKitForIPad,
             "Osmo Genius Starter Kit for iPad",
@@ -1121,7 +1121,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "Base, mirror and game pieces wiped with screen-safe disinfectant wipes between rentals.",
             SafetyNotes: "Compatible with most iPad models but requires the renter's own tablet; base clips are tension-tested.",
-            DepositAmount: 15000m),
+            CompensationAmount: 15000m),
         new(
             ListingIds.HedstromRainbowWaterSprinklerPlayMat,
             "Hedstrom Rainbow Water Sprinkler Play Mat",
@@ -1134,7 +1134,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: "Rinsed inside and out with a hose after each use and left to air-dry fully to prevent mildew.",
             SafetyNotes: "Low-profile design with no deep water pooling. Adult supervision recommended near the hose connection.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.Strider12SportBalanceBike,
             "Strider 12 Sport Balance Bike",
@@ -1147,7 +1147,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Frame and grips wiped with disinfectant spray; tyres checked and wiped free of outdoor debris.",
             SafetyNotes: "No pedals or chain to catch fingers or clothing. Owner recommends a properly fitted helmet.",
-            DepositAmount: 11000m),
+            CompensationAmount: 11000m),
         new(
             ListingIds.PlaymobilGrandCastlePlayset,
             "Playmobil Grand Castle Playset",
@@ -1160,7 +1160,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Figures and accessories washed in a mesh laundry bag; castle towers wiped down individually.",
             SafetyNotes: "Catapult launches small foam projectiles only, no hard parts. Not recommended under 4 years due to small figures.",
-            DepositAmount: 16000m),
+            CompensationAmount: 16000m),
         new(
             ListingIds.LoveveryPlayKitTheBabbler,
             "Lovevery Play Kit - The Babbler",
@@ -1173,7 +1173,7 @@ internal static class DevelopmentSeedData
             Condition: "Excellent",
             HygieneNotes: "All pieces are dishwasher-safe on the top rack and are run through a cycle between every rental.",
             SafetyNotes: "Designed and lab-tested for mouthing at this age. No small detachable parts.",
-            DepositAmount: 10000m),
+            CompensationAmount: 10000m),
         new(
             ListingIds.JanodMagneticWoodenPuzzleBookSeasons,
             "Janod Magnetic Wooden Puzzle Book - Seasons",
@@ -1186,7 +1186,7 @@ internal static class DevelopmentSeedData
             Condition: "Like new",
             HygieneNotes: "Magnetic pieces wiped individually with a damp cloth; book cover wiped and dried before storage.",
             SafetyNotes: "Magnets are embedded in wooden pieces and glue-sealed; checked for any loose magnets before each rental.",
-            DepositAmount: 6000m),
+            CompensationAmount: 6000m),
         new(
             ListingIds.JengaClassicWoodenBlockGame,
             "Jenga Classic Wooden Block Game",
@@ -1199,7 +1199,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: "Wooden blocks wiped with a barely damp cloth; fully dried before restacking to prevent warping.",
             SafetyNotes: "Blocks are solid wood with no splinters. A falling tower poses no injury risk beyond minor bumps.",
-            DepositAmount: 5500m),
+            CompensationAmount: 5500m),
         new(
             ListingIds.PinataPartyFavorBundle,
             "Pinata & Party Favor Bundle",
@@ -1212,7 +1212,7 @@ internal static class DevelopmentSeedData
             Condition: "Used",
             HygieneNotes: "Pinata shell wiped clean after each use; favor bags are single-use and replaced fresh for every rental.",
             SafetyNotes: "Pinata stick is foam-padded. Adult supervision required during the pinata activity.",
-            DepositAmount: 6000m)
+            CompensationAmount: 6000m)
     ];
 
     // Seed images: primary source is Unsplash (downloaded and stored locally at startup).

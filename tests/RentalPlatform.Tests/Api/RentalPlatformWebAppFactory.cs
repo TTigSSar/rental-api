@@ -67,6 +67,11 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
             // Replace disk-backed file storage with an in-memory double.
             services.RemoveAll<IFileStorageService>();
             services.AddSingleton<IFileStorageService>(FakeStorage);
+
+            // Test-only: lets a test pin its simulated client IP (X-Test-Remote-Ip header) so
+            // rate-limit partitioning can be isolated per test class. See
+            // TestRemoteIpStartupFilter for why.
+            services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
         });
     }
 

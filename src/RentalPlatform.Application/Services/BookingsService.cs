@@ -487,7 +487,7 @@ public sealed class BookingsService : IBookingsService
             .FirstOrDefault(),
         Currency = booking.Listing.Currency,
         PricePerDay = booking.Listing.PricePerDay,
-        DepositAmount = booking.Listing.DepositAmount,
+        CompensationAmount = booking.Listing.CompensationAmount,
         OwnerFirstName = booking.Listing.Owner?.FirstName ?? string.Empty,
         OwnerLastName = booking.Listing.Owner?.LastName ?? string.Empty,
         StartDate = booking.StartDate,
@@ -529,7 +529,7 @@ public sealed class BookingsService : IBookingsService
         var listing = booking.Listing;
         var counterparty = callerParty == BookingParty.Renter ? listing.Owner : booking.Renter;
 
-        // Address and phone are revealed only once the booking is at least Approved.
+        // The pickup address is revealed only once the booking is at least Approved.
         var contactRevealed = booking.Status is BookingStatus.Approved
             or BookingStatus.Active
             or BookingStatus.Completed;
@@ -555,7 +555,7 @@ public sealed class BookingsService : IBookingsService
 
             Currency = listing.Currency,
             PricePerDay = listing.PricePerDay,
-            DepositAmount = listing.DepositAmount,
+            CompensationAmount = listing.CompensationAmount,
             TotalPrice = booking.TotalPrice,
             StartDate = booking.StartDate,
             EndDate = booking.EndDate,
@@ -572,8 +572,7 @@ public sealed class BookingsService : IBookingsService
             CounterpartyId = counterparty.Id,
             CounterpartyFirstName = counterparty.FirstName,
             CounterpartyLastName = counterparty.LastName,
-            CounterpartyAvatarUrl = counterparty.AvatarUrl,
-            CounterpartyPhoneNumber = contactRevealed ? counterparty.PhoneNumber : null
+            CounterpartyAvatarUrl = counterparty.AvatarUrl
         };
     }
 

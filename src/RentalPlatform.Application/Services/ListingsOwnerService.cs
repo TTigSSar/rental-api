@@ -104,6 +104,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         }
 
         var now = DateTime.UtcNow;
+        var deliveryOptions = DeliveryOptionsMapper.Combine(request.DeliveryTypes, request.DeliveryType);
         var listing = new Listing
         {
             Id = Guid.NewGuid(),
@@ -125,9 +126,10 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             Condition = NormalizeOptional(request.Condition),
             HygieneNotes = NormalizeOptional(request.HygieneNotes),
             SafetyNotes = NormalizeOptional(request.SafetyNotes),
-            DepositAmount = request.DepositAmount,
+            CompensationAmount = request.CompensationAmount,
             MinRentalDays = request.MinRentalDays,
-            DeliveryType = request.DeliveryType,
+            DeliveryOptions = deliveryOptions,
+            DeliveryType = DeliveryOptionsMapper.ToLegacy(deliveryOptions),
             Status = ListingStatus.PendingApproval,
             CreatedAt = now,
             UpdatedAt = now
@@ -199,9 +201,10 @@ public sealed class ListingsOwnerService : IListingsOwnerService
                 Condition = listing.Condition,
                 HygieneNotes = listing.HygieneNotes,
                 SafetyNotes = listing.SafetyNotes,
-                DepositAmount = listing.DepositAmount,
+                CompensationAmount = listing.CompensationAmount,
                 MinRentalDays = listing.MinRentalDays,
                 DeliveryType = listing.DeliveryType,
+                DeliveryTypes = DeliveryOptionsMapper.Expand(listing.DeliveryOptions, listing.DeliveryType),
                 Status = listing.Status,
                 RejectionReason = listing.RejectionReason,
                 Rejection = listing.Status == ListingStatus.Rejected && listing.RejectionReasonCode is { } code
@@ -380,9 +383,25 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         if (request.Country is not null) listing.Country = request.Country.Trim();
         if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
         if (request.AgeToMonths is not null) listing.AgeToMonths = request.AgeToMonths;
-        if (request.DepositAmount is not null) listing.DepositAmount = request.DepositAmount;
+        if (request.CompensationAmount is not null) listing.CompensationAmount = request.CompensationAmount;
         if (request.MinRentalDays is not null) listing.MinRentalDays = request.MinRentalDays;
-        if (request.DeliveryType is not null) listing.DeliveryType = request.DeliveryType;
+
+        if (request.DeliveryTypes is not null)
+        {
+            var deliveryOptions = DeliveryOptionsMapper.Combine(request.DeliveryTypes, request.DeliveryType);
+            listing.DeliveryOptions = deliveryOptions;
+            listing.DeliveryType = DeliveryOptionsMapper.ToLegacy(deliveryOptions);
+        }
+        else if (request.DeliveryType is { } legacyOnlyDeliveryType &&
+                 DeliveryOptionsMapper.ShouldApplyLegacyOnlyUpdate(listing.DeliveryOptions, legacyOnlyDeliveryType))
+        {
+            // Legacy-only submission (stale pre-deploy client) that is a real change — collapse to
+            // the single reported flag, same as the pre-fix behaviour. See ShouldApplyLegacyOnlyUpdate
+            // for the no-op case (current flags already include the legacy value).
+            var deliveryOptions = DeliveryOptionsMapper.Combine(null, legacyOnlyDeliveryType);
+            listing.DeliveryOptions = deliveryOptions;
+            listing.DeliveryType = DeliveryOptionsMapper.ToLegacy(deliveryOptions);
+        }
 
         // Explicit owner override (already validated to exist above). Update does not accept
         // Latitude/Longitude changes, so there is no re-derivation here — just a direct assignment.

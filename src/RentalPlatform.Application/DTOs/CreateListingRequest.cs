@@ -3,7 +3,7 @@ using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.DTOs;
 
-public sealed class CreateListingRequest
+public sealed class CreateListingRequest : IValidatableObject
 {
     [Required(ErrorMessage = "Category is required.")]
     public Guid CategoryId { get; init; }
@@ -67,14 +67,47 @@ public sealed class CreateListingRequest
     [MaxLength(1000, ErrorMessage = "Safety notes must be at most 1000 characters.")]
     public string? SafetyNotes { get; init; }
 
-    [Range(typeof(decimal), "0", "999999999999.99", ErrorMessage = "Deposit amount cannot be negative.")]
-    public decimal? DepositAmount { get; init; }
+    // Owner-facing "Loss & damage compensation": the amount the renter owes the owner if the toy
+    // is lost, seriously damaged, or not returned. Nothing is ever paid upfront and DoRent never
+    // collects, holds or refunds it (ADR-014). CLR type stays decimal? so an omitted field binds
+    // to null and trips [Required] as a 400, rather than silently defaulting to 0.
+    [Required(ErrorMessage = "Loss & damage compensation is required.")]
+    [Range(typeof(decimal), "1000", "10000000", ErrorMessage = "Loss & damage compensation must be between 1,000 and 10,000,000 AMD.")]
+    public decimal? CompensationAmount { get; init; }
 
     // Optional: shortest number of days a renter may book for. Omitted when the owner doesn't set one.
     [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]
     public int? MinRentalDays { get; init; }
 
     // Optional: how the toy is handed over (Pickup/Courier). Validated to be a defined enum value.
+    // Legacy single-select field — kept for backward compatibility. See DeliveryTypes below.
     [EnumDataType(typeof(DeliveryType), ErrorMessage = "Delivery type must be one of Pickup, Courier.")]
     public DeliveryType? DeliveryType { get; init; }
+
+    // Additive multi-select successor to DeliveryType: the wizard may now offer Pickup, Courier,
+    // or both. Optional; when supplied it must be non-empty and every value must be a defined
+    // DeliveryType (see Validate below) — duplicates are tolerated and collapsed by the service.
+    // When both this and DeliveryType are supplied, this list wins (see DeliveryOptionsMapper).
+    public IReadOnlyList<DeliveryType>? DeliveryTypes { get; init; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (DeliveryTypes is null)
+        {
+            yield break;
+        }
+
+        if (DeliveryTypes.Count == 0)
+        {
+            yield return new ValidationResult(
+                "Delivery types must not be empty when supplied.",
+                new[] { nameof(DeliveryTypes) });
+        }
+        else if (DeliveryTypes.Any(value => !Enum.IsDefined(typeof(DeliveryType), value)))
+        {
+            yield return new ValidationResult(
+                "Delivery types must each be one of Pickup, Courier.",
+                new[] { nameof(DeliveryTypes) });
+        }
+    }
 }

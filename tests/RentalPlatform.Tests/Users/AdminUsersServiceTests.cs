@@ -22,10 +22,15 @@ public sealed class AdminUsersServiceTests
     private static readonly Guid CategoryId = new("a1000000-0000-0000-0000-000000000003");
 
     private static AdminUsersService CreateService(AppDbContext context, Guid currentUserId) =>
+        CreateService(context, currentUserId, new FakeModerationNoteEmitter());
+
+    private static AdminUsersService CreateService(
+        AppDbContext context, Guid currentUserId, FakeModerationNoteEmitter moderationNoteEmitter) =>
         new(
             new FakeCurrentUserContext(currentUserId),
             new AdminUsersStore(context),
-            new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance));
+            new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance),
+            moderationNoteEmitter);
 
     private static async Task SeedAdminAsync(SqliteTestDatabase db) =>
         await db.SeedAsync(TestData.User(AdminId, "admin@test.local", role: UserRole.Admin, isIdConfirmed: true));
@@ -545,6 +550,48 @@ public sealed class AdminUsersServiceTests
         var log = await verify.ModerationLogEntries.SingleAsync(e => e.TargetId == userId);
         Assert.Equal(ModerationAction.UserSuspended, log.Action);
         Assert.Equal(ModerationTargetType.User, log.TargetType);
+    }
+
+    // Phase 2 (moderation messages): suspending an account must auto-post a Suspend note into the
+    // member's Moderation conversation, carrying the optional suspend reason through unchanged.
+    [Fact]
+    public async Task Suspend_With_Reason_Emits_Moderation_Note()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAdminAsync(db);
+        var userId = new Guid("a1000000-0000-0000-0000-000000000063");
+        await db.SeedAsync(TestData.User(userId, "suspend-reason@test.local"));
+
+        var noteEmitter = new FakeModerationNoteEmitter();
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId, noteEmitter)
+            .SuspendAsync(userId, "Repeated policy violations.");
+
+        Assert.True(result.IsSuccess);
+        var call = Assert.Single(noteEmitter.AccountSuspendedCalls);
+        Assert.Equal(AdminId, call.ModeratorId);
+        Assert.Equal(userId, call.MemberId);
+        Assert.Equal("Repeated policy violations.", call.Reason);
+    }
+
+    // A bodyless suspend request (no reason supplied — the pre-existing caller shape) must keep
+    // working unchanged: the note still fires, with a null reason.
+    [Fact]
+    public async Task Suspend_Without_Reason_Still_Succeeds_And_Emits_Moderation_Note_With_Null_Reason()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAdminAsync(db);
+        var userId = new Guid("a1000000-0000-0000-0000-000000000064");
+        await db.SeedAsync(TestData.User(userId, "suspend-noreason@test.local"));
+
+        var noteEmitter = new FakeModerationNoteEmitter();
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId, noteEmitter).SuspendAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(UserAccountStatus.Suspended, result.Value!.Status);
+        var call = Assert.Single(noteEmitter.AccountSuspendedCalls);
+        Assert.Null(call.Reason);
     }
 
     [Fact]

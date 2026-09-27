@@ -10,6 +10,45 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    env:
+      # Same ephemeral password as the SQL Server service container below — see the note there for
+      # why it is in plain sight. Passed to sqlcmd through SQLCMDPASSWORD rather than -P so it
+      # never appears on a command line.
+      SQLCMDPASSWORD: DorentCi_Sql2022-Ephemeral
+      # Consumed by RentalPlatform.Tests.TestSupport.SqlServerTestDatabase. Without it, that class
+      # falls back to "Server=.;Trusted_Connection=True" — a local SQL Server with Windows
+      # integrated auth, which cannot work on a Linux runner.
+      RENTALPLATFORM_TEST_SQLSERVER_CONNECTION_STRING: >-
+        Server=127.0.0.1,1433;User ID=sa;Password=DorentCi_Sql2022-Ephemeral;TrustServerCertificate=True;
+
+    # RentalPlatform.Tests.Infrastructure.ConversationsStoreModerationConcurrencyTests need a real
+    # SQL Server: they assert a concurrency convergence with genuinely parallel writers and run the
+    # real DeduplicateModerationConversations migration, neither of which SQLite models faithfully.
+    #
+    # The SA password is an ephemeral CI credential: this container is created for one job, is
+    # reachable only from that job, and is destroyed with it. It is deliberately in the workflow
+    # file and is NOT a secret to protect — routing it through GitHub Secrets would imply a
+    # confidentiality property it does not have and add a moving part for nothing.
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: DorentCi_Sql2022-Ephemeral
+        ports:
+          - 1433:1433
+        # SQL Server starts accepting TCP connections well after the container itself is up, so
+        # readiness here is "a real login answered a query", never "the container is running" —
+        # that race is exactly what bites migrations against a just-started SQL Server. sqlcmd
+        # ships only at /opt/mssql-tools18/bin in this image (not on PATH); -C trusts the
+        # container's self-signed certificate and -b makes a SQL error a non-zero exit.
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P $MSSQL_SA_PASSWORD -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
+          --health-start-period 10s
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,6 +63,24 @@ jobs:
 
       - name: Build
         run: dotnet build --no-restore
+
+      # The service healthcheck above already gates step execution; this repeats the check from the
+      # runner's own network namespace, over the mapped port the tests actually use, so a failure
+      # here is unambiguous (SQL Server unreachable) instead of surfacing as a confusing test error.
+      - name: Verify SQL Server accepts connections
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network host -e SQLCMDPASSWORD \
+                mcr.microsoft.com/mssql/server:2022-latest \
+                /opt/mssql-tools18/bin/sqlcmd -C -b -S 127.0.0.1,1433 -U sa -Q "SELECT @@VERSION"; then
+              echo "SQL Server answered a query on attempt $attempt."
+              exit 0
+            fi
+            echo "Attempt $attempt: SQL Server not accepting connections yet; retrying in 5s."
+            sleep 5
+          done
+          echo "SQL Server never accepted connections." >&2
+          exit 1
 
       - name: Test
         run: dotnet test --no-build --verbosity normal

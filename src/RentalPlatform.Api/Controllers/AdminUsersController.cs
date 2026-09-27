@@ -82,9 +82,10 @@ public sealed class AdminUsersController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AdminUserSummaryResponse>> Suspend(
         Guid id,
+        [FromBody] SuspendUserRequest? request,
         CancellationToken cancellationToken)
     {
-        var result = await _adminUsersService.SuspendAsync(id, cancellationToken);
+        var result = await _adminUsersService.SuspendAsync(id, request?.Reason, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);

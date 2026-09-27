@@ -21,6 +21,12 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
         builder.Property(message => message.AttachmentUrl)
             .HasMaxLength(1000);
 
+        builder.Property(message => message.NoteSubject)
+            .HasMaxLength(200);
+
+        builder.Property(message => message.NoteReason)
+            .HasMaxLength(200);
+
         builder.Property(message => message.CreatedAt)
             .IsRequired();
 

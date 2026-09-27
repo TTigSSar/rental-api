@@ -17,11 +17,20 @@ public sealed class ChatRealtimeMessage
     /// <summary>Author display name. Null for System messages.</summary>
     public string? SenderName { get; init; }
 
-    /// <summary>"text" | "image" | "system".</summary>
+    /// <summary>"text" | "image" | "system" | "moderationNote".</summary>
     public string Type { get; init; } = string.Empty;
 
     /// <summary>Booking-event token for System lines (see <c>ChatTokens.SystemKindToken</c>).</summary>
     public string? SystemKind { get; init; }
+
+    /// <summary>Admin-action token for ModerationNote lines (see <c>ChatTokens.ModerationNoteKindToken</c>).</summary>
+    public string? NoteKind { get; init; }
+
+    /// <summary>Subject of a ModerationNote (e.g. the listing title). Null otherwise.</summary>
+    public string? NoteSubject { get; init; }
+
+    /// <summary>Reason of a ModerationNote (e.g. the rejection reason label). Null otherwise.</summary>
+    public string? NoteReason { get; init; }
 
     public string? Body { get; init; }
     public string? AttachmentUrl { get; init; }

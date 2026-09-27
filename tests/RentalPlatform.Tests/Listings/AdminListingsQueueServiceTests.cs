@@ -19,13 +19,18 @@ public sealed class AdminListingsQueueServiceTests
     private static readonly Guid OtherCategoryId = new("e0000000-0000-0000-0000-000000000004");
 
     private static AdminListingsService CreateService(AppDbContext context, Guid currentUserId) =>
+        CreateService(context, currentUserId, new FakeModerationNoteEmitter());
+
+    private static AdminListingsService CreateService(
+        AppDbContext context, Guid currentUserId, FakeModerationNoteEmitter moderationNoteEmitter) =>
         new(
             new FakeCurrentUserContext(currentUserId),
             new AdminListingsStore(context),
             new ReviewsStore(context),
             new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance),
             new FakeEmailService(),
-            new FakeNotificationEmitter());
+            new FakeNotificationEmitter(),
+            moderationNoteEmitter);
 
     private static Listing MakeListing(
         Guid id, Guid ownerId, Guid categoryId, ListingStatus status, string title, DateTime createdAt, DateTime? moderatedAt = null)
@@ -237,6 +242,34 @@ public sealed class AdminListingsQueueServiceTests
         Assert.Equal(listingId, logEntry.TargetId);
         Assert.Equal(AdminId, logEntry.ActorUserId);
         Assert.Contains("Outdoor Toys", logEntry.DetailJson);
+    }
+
+    // Phase 2 (moderation messages): recategorising a listing must auto-post a Category note into
+    // the owner's Moderation conversation.
+    [Fact]
+    public async Task UpdateCategory_Emits_Moderation_Note()
+    {
+        using var db = new SqliteTestDatabase();
+        var listingId = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.User(AdminId, "admin@test.local", role: UserRole.Admin),
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.Category(CategoryId, name: "Building Blocks"),
+            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", Slug = "outdoor-toys" });
+
+        await db.SeedAsync(MakeListing(listingId, OwnerId, CategoryId, ListingStatus.PendingApproval, "Recategorise Me", DateTime.UtcNow));
+
+        var noteEmitter = new FakeModerationNoteEmitter();
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId, noteEmitter).UpdateCategoryAsync(listingId, OtherCategoryId);
+
+        Assert.True(result.IsSuccess);
+        var call = Assert.Single(noteEmitter.ListingRecategorisedCalls);
+        Assert.Equal(AdminId, call.ModeratorId);
+        Assert.Equal(OwnerId, call.MemberId);
+        Assert.Equal("Recategorise Me", call.ListingTitle);
+        Assert.Equal("Building Blocks", call.FromCategoryName);
+        Assert.Equal("Outdoor Toys", call.ToCategoryName);
     }
 
     [Fact]

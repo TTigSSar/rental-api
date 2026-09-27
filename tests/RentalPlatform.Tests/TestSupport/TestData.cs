@@ -19,11 +19,12 @@ public static class TestData
         string? firstName = null,
         string? lastName = null,
         bool isIdConfirmed = false,
-        DateTime? createdAt = null) => new()
+        DateTime? createdAt = null,
+        string? passwordHash = null) => new()
     {
         Id = id,
         Email = email,
-        PasswordHash = "x",
+        PasswordHash = passwordHash ?? "x",
         FirstName = firstName ?? "Test",
         LastName = lastName ?? "User",
         PreferredLanguage = "en",
@@ -63,10 +64,10 @@ public static class TestData
         Title = "LEGO Duplo Starter Set",
         Description = "A deterministic test listing.",
         PricePerDay = 10m,
-        Currency = "USD",
+        Currency = "AMD",
         Country = "Armenia",
         City = "Yerevan",
-        DepositAmount = 25m,
+        CompensationAmount = 25m,
         Status = status,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow

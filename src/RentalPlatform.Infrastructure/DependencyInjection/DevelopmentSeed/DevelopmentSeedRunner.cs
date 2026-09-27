@@ -349,7 +349,7 @@ internal sealed class DevelopmentSeedRunner
                 Condition = seed.Condition,
                 HygieneNotes = seed.HygieneNotes,
                 SafetyNotes = seed.SafetyNotes,
-                DepositAmount = seed.DepositAmount,
+                CompensationAmount = seed.CompensationAmount,
                 RejectionReason = seed.RejectionReason,
                 Status = seed.Status,
                 CreatedAt = now.AddDays(-seed.CreatedDaysAgo),

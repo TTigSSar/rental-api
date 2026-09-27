@@ -108,7 +108,7 @@ public sealed class ChatService : IChatService
             return Failure<ChatConversationDetailsResponse>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
         }
 
-        if (!IsParticipant(details.Conversation, userId))
+        if (!await IsParticipantAsync(details.Conversation, userId, knownUser: null, cancellationToken))
         {
             return Failure<ChatConversationDetailsResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
         }
@@ -177,7 +177,21 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
         }
 
-        if (user.IsBlocked)
+        // Fetched once, ahead of the block check, so the carve-out below can inspect its Kind —
+        // reused for the rest of this method instead of a second round trip.
+        var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);
+
+        // Deliberate, human-approved carve-out (admin console Phase 1, moderation messages): a
+        // suspended member must still be able to appeal in their Moderation thread, so the block
+        // guard is skipped only when this conversation is Moderation AND the sender is its member
+        // (RenterId) — never for the moderator side, and never for a Booking thread. A blocked
+        // moderator can't reach this path in practice: AdminUsersService.SuspendAsync refuses to
+        // suspend another Admin, so an Admin account is never IsBlocked.
+        var isAppealingSuspendedMember = user.IsBlocked
+            && conversation is { Kind: ConversationKind.Moderation }
+            && conversation.RenterId == userId;
+
+        if (user.IsBlocked && !isAppealingSuspendedMember)
         {
             return Failure<ChatMessageResponse>(ErrorCodes.UserBlocked, "Blocked users cannot send messages.");
         }
@@ -187,13 +201,12 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.MessageTooLong, "Message content must be 4000 characters or fewer.");
         }
 
-        var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);
         if (conversation is null)
         {
             return Failure<ChatMessageResponse>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
         }
 
-        if (!IsParticipant(conversation, userId))
+        if (!await IsParticipantAsync(conversation, userId, user, cancellationToken))
         {
             return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
         }
@@ -234,13 +247,23 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
         }
 
-        if (user.IsBlocked)
+        // Fetched once, ahead of the block check, so the carve-out below can inspect its Kind —
+        // reused later in this method (inside the try block) instead of a second round trip.
+        var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);
+
+        // Deliberate, human-approved carve-out (admin console Phase 1, moderation messages) —
+        // see the identical comment in SendMessageAsync.
+        var isAppealingSuspendedMember = user.IsBlocked
+            && conversation is { Kind: ConversationKind.Moderation }
+            && conversation.RenterId == userId;
+
+        if (user.IsBlocked && !isAppealingSuspendedMember)
         {
             return Failure<ChatMessageResponse>(ErrorCodes.UserBlocked, "Blocked users cannot send messages.");
         }
 
         // File validation happens here, in the same guard slot the text path uses for its
-        // length check — before touching the conversation at all. The bytes are only fully
+        // length check — before the participant/closed checks below. The bytes are only fully
         // buffered/inspected here; the actual disk write is deferred until every remaining
         // guard (participant/closed) has passed, mirroring ListingImagesOwnerService's
         // validate-then-persist passes so a rejected send never orphans a file on disk.
@@ -284,13 +307,12 @@ public sealed class ChatService : IChatService
                 return Failure<ChatMessageResponse>(ErrorCodes.AttachmentInvalidType, "File is not a valid or supported image.");
             }
 
-            var conversation = await _store.FindByIdAsync(request.ConversationId, cancellationToken);
             if (conversation is null)
             {
                 return Failure<ChatMessageResponse>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
             }
 
-            if (!IsParticipant(conversation, userId))
+            if (!await IsParticipantAsync(conversation, userId, user, cancellationToken))
             {
                 return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
             }
@@ -339,7 +361,7 @@ public sealed class ChatService : IChatService
             return Failure<bool>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
         }
 
-        if (!IsParticipant(conversation, userId))
+        if (!await IsParticipantAsync(conversation, userId, knownUser: null, cancellationToken))
         {
             return Failure<bool>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
         }
@@ -352,8 +374,38 @@ public sealed class ChatService : IChatService
         return ServiceResult<bool>.Success(true);
     }
 
-    private static bool IsParticipant(Conversation conversation, Guid userId) =>
-        conversation.OwnerId == userId || conversation.RenterId == userId;
+    // Booking threads: unchanged — exactly OwnerId/RenterId, no extra query, so the booking-chat
+    // hot path issues exactly the queries it did before this method existed. Moderation threads:
+    // the storage model deliberately pins OwnerId to whichever admin opened the thread (see
+    // Conversation's doc comment), but the admin console's Messages screen needs a SHARED inbox —
+    // any admin must be able to open/reply to a thread another admin started (design source shows
+    // notes from different moderators inside one thread). So for Moderation only, once the plain
+    // OwnerId/RenterId match has already failed, this falls back to a role check: the member
+    // (RenterId) is always a participant (already covered by the plain check above in practice,
+    // since RenterId IS the member — this branch is really "any Admin, not just the opener"), any
+    // other caller must hold the Admin role. ICurrentUserContext exposes no role, so this is
+    // resolved via a store lookup — reusing an already-loaded User (SendMessageAsync/
+    // SendImageMessageAsync already load the sender for the IsBlocked check) when the caller has
+    // one, so those two paths add zero extra queries even for the Moderation branch.
+    private async Task<bool> IsParticipantAsync(
+        Conversation conversation, Guid userId, User? knownUser, CancellationToken cancellationToken)
+    {
+        if (conversation.OwnerId == userId || conversation.RenterId == userId)
+        {
+            return true;
+        }
+
+        if (conversation.Kind != ConversationKind.Moderation)
+        {
+            return false;
+        }
+
+        var user = knownUser is { } loaded && loaded.Id == userId
+            ? loaded
+            : await _store.FindUserByIdAsync(userId, cancellationToken);
+
+        return user is { Role: UserRole.Admin };
+    }
 
     // Opportunistic self-heal for the ADR-001 read-only chat lock. Normally a conversation closes
     // the moment both party reviews land (ReviewsService.CloseConversationIfBothReviewsInAsync) or,
@@ -372,31 +424,43 @@ public sealed class ChatService : IChatService
             return false;
         }
 
-        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(conversation.BookingId, cancellationToken);
+        // A Moderation thread has no booking and never auto-closes — the ADR-001 close condition
+        // below is meaningless for it.
+        if (conversation.Kind == ConversationKind.Moderation)
+        {
+            return false;
+        }
+
+        var bookingId = conversation.BookingId!.Value;
+        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
         if (booking is null || booking.Status != BookingStatus.Completed)
         {
             return false;
         }
 
-        var hasOwnerReview = await _reviewsStore.HasOwnerReviewAsync(conversation.BookingId, cancellationToken);
-        var hasRenterReview = await _reviewsStore.HasRenterReviewAsync(conversation.BookingId, cancellationToken);
+        var hasOwnerReview = await _reviewsStore.HasOwnerReviewAsync(bookingId, cancellationToken);
+        var hasRenterReview = await _reviewsStore.HasRenterReviewAsync(bookingId, cancellationToken);
         if (!hasOwnerReview || !hasRenterReview)
         {
             return false;
         }
 
-        return await _store.CloseForBookingAsync(conversation.BookingId, DateTime.UtcNow, cancellationToken);
+        return await _store.CloseForBookingAsync(bookingId, DateTime.UtcNow, cancellationToken);
     }
 
     private static ChatConversationResponse MapListItem(ChatConversationListItem item, Guid userId, DateTime utcNow) => new()
     {
         Id = item.Conversation.Id,
+        Kind = ChatTokens.ConversationKindToken(item.Conversation.Kind),
         BookingId = item.Conversation.BookingId,
         CounterpartName = DisplayName(item.Counterpart),
         CounterpartAvatarUrl = item.Counterpart.AvatarUrl,
         ToyTitle = item.Conversation.ToyTitle,
         ToyImageUrl = item.Conversation.ToyImageUrl,
-        Status = ChatTokens.StatusToken(item.Booking.Status, item.Booking.EndDate, item.Conversation.ClosedAt, utcNow),
+        // item.Booking is null exactly when Kind == Moderation (no booking to derive a pill from).
+        Status = item.Conversation.Kind == ConversationKind.Moderation || item.Booking is null
+            ? ChatTokens.ModerationStatusToken
+            : ChatTokens.StatusToken(item.Booking.Status, item.Booking.EndDate, item.Conversation.ClosedAt, utcNow),
         LastMessageSnippet = item.Conversation.LastMessageSnippet,
         LastMessageAt = item.Conversation.LastMessageAt,
         LastMessageIsMine = item.LastMessageSenderId == userId,
@@ -407,6 +471,7 @@ public sealed class ChatService : IChatService
     private static ChatConversationDetailsResponse MapDetails(ChatConversationDetails details, Guid userId, DateTime utcNow) => new()
     {
         Id = details.Conversation.Id,
+        Kind = ChatTokens.ConversationKindToken(details.Conversation.Kind),
         BookingId = details.Conversation.BookingId,
         CounterpartId = details.Conversation.OwnerId == userId ? details.Conversation.RenterId : details.Conversation.OwnerId,
         CounterpartName = DisplayName(details.Counterpart),
@@ -414,9 +479,14 @@ public sealed class ChatService : IChatService
         CounterpartVerified = details.Counterpart.IsEmailConfirmed && details.Counterpart.IsPhoneConfirmed,
         ToyTitle = details.Conversation.ToyTitle,
         ToyImageUrl = details.Conversation.ToyImageUrl,
-        Status = ChatTokens.StatusToken(details.Booking.Status, details.Booking.EndDate, details.Conversation.ClosedAt, utcNow),
-        BookingDates = FormatDates(details.Booking.StartDate, details.Booking.EndDate),
-        BookingPrice = details.Booking.TotalPrice,
+        // details.Booking is null exactly when Kind == Moderation.
+        Status = details.Conversation.Kind == ConversationKind.Moderation || details.Booking is null
+            ? ChatTokens.ModerationStatusToken
+            : ChatTokens.StatusToken(details.Booking.Status, details.Booking.EndDate, details.Conversation.ClosedAt, utcNow),
+        BookingDates = details.Booking is null
+            ? null
+            : FormatDates(details.Booking.StartDate, details.Booking.EndDate),
+        BookingPrice = details.Booking?.TotalPrice,
         IsClosed = details.Conversation.ClosedAt is not null,
         Messages = details.Messages
             .Select(message => MapMessage(message, userId, details.Counterpart, details.CounterpartLastReadAt))
@@ -452,6 +522,9 @@ public sealed class ChatService : IChatService
             SenderName = senderName,
             Type = ChatTokens.MessageTypeToken(message.Type),
             SystemKind = ChatTokens.SystemKindToken(message.SystemKind),
+            NoteKind = ChatTokens.ModerationNoteKindToken(message.NoteKind),
+            NoteSubject = message.NoteSubject,
+            NoteReason = message.NoteReason,
             Body = message.Body,
             AttachmentUrl = message.AttachmentUrl,
             SentAt = message.CreatedAt,
@@ -470,6 +543,9 @@ public sealed class ChatService : IChatService
         SenderName = message.SenderId is null ? null : senderName,
         Type = ChatTokens.MessageTypeToken(message.Type),
         SystemKind = ChatTokens.SystemKindToken(message.SystemKind),
+        NoteKind = ChatTokens.ModerationNoteKindToken(message.NoteKind),
+        NoteSubject = message.NoteSubject,
+        NoteReason = message.NoteReason,
         Body = message.Body,
         AttachmentUrl = message.AttachmentUrl,
         SentAt = message.CreatedAt

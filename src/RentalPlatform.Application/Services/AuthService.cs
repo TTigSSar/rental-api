@@ -1,3 +1,4 @@
+using System.Text;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
@@ -19,6 +20,10 @@ public sealed class AuthService : IAuthService
         public const string ExternalEmailMissing = "auth.external_email_missing";
         public const string ExternalLinkConflict = "auth.external_link_conflict";
         public const string InvalidLanguage = "auth.invalid_language";
+        public const string InvalidCurrentPassword = "auth.invalid_current_password";
+        public const string PasswordNotSet = "auth.password_not_set";
+        public const string PasswordUnchanged = "auth.password_unchanged";
+        public const string PasswordTooLong = "auth.password_too_long";
     }
 
     private static readonly HashSet<string> AllowedPreferredLanguages =
@@ -57,6 +62,19 @@ public sealed class AuthService : IAuthService
             });
         }
 
+        // Enforced here (not a DataAnnotation) so the response carries an errorCode the Angular
+        // client can map to a translated message — see PasswordPolicy. Byte length, not char
+        // length: BCrypt truncates at 72 UTF-8 bytes, and a char-based cap under-counts
+        // multi-byte scripts (Armenian/Russian are 2 bytes/char in UTF-8).
+        if (Encoding.UTF8.GetByteCount(request.Password) > PasswordPolicy.MaxPasswordBytes)
+        {
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.PasswordTooLong,
+                Message = $"Password must be at most {PasswordPolicy.MaxPasswordBytes} bytes (UTF-8)."
+            });
+        }
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -90,7 +108,12 @@ public sealed class AuthService : IAuthService
     {
         var normalizedEmail = NormalizeEmail(request.Email);
         var user = await _userAuthStore.FindByEmailAsync(normalizedEmail, cancellationToken);
-        if (user is null || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        // Guard against an empty hash (external-auth users are created with
+        // PasswordHash = string.Empty) before calling VerifyPassword: BCrypt.Net.BCrypt.Verify
+        // throws SaltParseException on an empty hash instead of returning false, which would
+        // otherwise unwind to a 500 and still burn a rate-limit permit. Treated identically to
+        // a wrong password so we never reveal whether the account exists or is external-auth.
+        if (user is null || string.IsNullOrEmpty(user.PasswordHash) || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
         {
             return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
@@ -286,6 +309,81 @@ public sealed class AuthService : IAuthService
         await _userAuthStore.SaveChangesAsync(cancellationToken);
 
         return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
+    }
+
+    public async Task<ServiceResult<bool>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        if (user.IsBlocked)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "User account is blocked."
+            });
+        }
+
+        if (string.IsNullOrEmpty(user.PasswordHash))
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.PasswordNotSet,
+                Message = "This account signs in with an external provider and has no password."
+            });
+        }
+
+        if (!_passwordHasher.VerifyPassword(currentPassword, user.PasswordHash))
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidCurrentPassword,
+                Message = "Current password is incorrect."
+            });
+        }
+
+        // NewPassword is being CREATED, so (unlike currentPassword above) it is subject to the
+        // BCrypt 72-byte cap — see PasswordPolicy. Checked before the unchanged-password check
+        // and before hashing.
+        if (Encoding.UTF8.GetByteCount(newPassword) > PasswordPolicy.MaxPasswordBytes)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.PasswordTooLong,
+                Message = $"Password must be at most {PasswordPolicy.MaxPasswordBytes} bytes (UTF-8)."
+            });
+        }
+
+        if (_passwordHasher.VerifyPassword(newPassword, user.PasswordHash))
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.PasswordUnchanged,
+                Message = "New password must be different from the current password."
+            });
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(newPassword);
+        await _userAuthStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<bool>.Success(true);
     }
 
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();

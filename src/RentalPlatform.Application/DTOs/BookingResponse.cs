@@ -10,7 +10,7 @@ public sealed class BookingResponse
     public string? ListingPrimaryImageUrl { get; init; }
     public string Currency { get; init; } = string.Empty;
     public decimal PricePerDay { get; init; }
-    public decimal? DepositAmount { get; init; }
+    public decimal? CompensationAmount { get; init; }
     public DateOnly StartDate { get; init; }
     public DateOnly EndDate { get; init; }
     public decimal TotalPrice { get; init; }

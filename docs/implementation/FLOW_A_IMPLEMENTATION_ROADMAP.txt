@@ -1,3 +1,19 @@
+SUPERSEDED NOTE — 2026-09-14
+
+This roadmap describes an owner-phone reveal ("Phone hidden" / "Phone visible after
+booking request" / "Business Rule: Phone visibility only after booking request" /
+"see phone" under the Renter success criteria). That feature NO LONGER EXISTS.
+
+The phone number is never revealed to a renter or an owner at any booking status.
+Chat replaced it: chat threads are booking-scoped, so a renter can message an owner
+once a rental request exists and ask for the number there — the owner decides whether
+to give it. Admins still see member phone numbers for moderation.
+
+See ADR-013 (amended 2026-09-14) in knowledge/decisions.md. The rest of this document
+is unchanged.
+
+--------------------------------------------------------------------------------
+
 Phase 1 — Design System Foundation
 
 Goal:

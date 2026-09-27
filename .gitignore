@@ -4,6 +4,7 @@ obj/
 *.user
 *.suo
 .env
+src/RentalPlatform.Api/wwwroot/uploads/
 
 # Codex local tooling (mirrors .claude; kept machine-local)
 /AGENTS.md

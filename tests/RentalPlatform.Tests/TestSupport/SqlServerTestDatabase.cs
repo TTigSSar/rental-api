@@ -15,21 +15,44 @@ namespace RentalPlatform.Tests.TestSupport;
 // own SqliteException instead, which ConversationsStore.GetOrCreateForModerationAsync's precise
 // catch does not (and must not) match.
 //
-// Requires a local SQL Server reachable at "Server=.;Trusted_Connection=True" (the same instance
-// rental-api/CLAUDE.md's "Running locally" section assumes for RentalPlatformDbDev). Each
-// instance creates a uniquely-named throwaway database and drops it on Dispose.
+// Which SQL Server is used:
+//   - By default, a local SQL Server reachable at "Server=.;Trusted_Connection=True" (the same
+//     instance rental-api/CLAUDE.md's "Running locally" section assumes for RentalPlatformDbDev).
+//     A developer machine needs no setup beyond that instance.
+//   - If the environment variable RENTALPLATFORM_TEST_SQLSERVER_CONNECTION_STRING is set, its
+//     value is used instead as the connection string. It must be a full ADO.NET SQL Server
+//     connection string (any authentication mode); whatever database it names is ignored — this
+//     class always connects to "master" for the create/drop and swaps in its own throwaway
+//     database for everything else. Set by .github/workflows/backend-ci.yml, which has no local
+//     SQL Server and cannot use Windows integrated auth at all (Linux runner), so it points these
+//     tests at a SQL Server service container over SQL authentication.
+//
+// Each instance creates a uniquely-named throwaway database and drops it on Dispose.
 public sealed class SqlServerTestDatabase : IDisposable
 {
-    private const string MasterConnectionString =
-        "Server=.;Database=master;Trusted_Connection=True;TrustServerCertificate=True;";
+    /// <summary>
+    /// Environment variable that overrides which SQL Server these tests run against. Unset on a
+    /// developer machine (the local default applies); set in CI. See the class remarks.
+    /// </summary>
+    public const string ConnectionStringEnvironmentVariable =
+        "RENTALPLATFORM_TEST_SQLSERVER_CONNECTION_STRING";
+
+    private const string DefaultConnectionString =
+        "Server=.;Trusted_Connection=True;TrustServerCertificate=True;";
+
+    private static readonly string MasterConnectionString = BuildMasterConnectionString();
 
     private readonly string _databaseName = $"RentalPlatformDbTest_{Guid.NewGuid():N}";
     private readonly string _databaseConnectionString;
 
     public SqlServerTestDatabase()
     {
+        // Derive the per-test database connection string by swapping the catalog on the parsed
+        // connection string rather than interpolating a new one: interpolation would silently
+        // drop every other keyword (credentials above all) the configured connection carries.
         _databaseConnectionString =
-            $"Server=.;Database={_databaseName};Trusted_Connection=True;TrustServerCertificate=True;";
+            new SqlConnectionStringBuilder(MasterConnectionString) { InitialCatalog = _databaseName }
+                .ConnectionString;
 
         using (var master = new SqlConnection(MasterConnectionString))
         {
@@ -43,6 +66,17 @@ public sealed class SqlServerTestDatabase : IDisposable
         // Program.cs's ApplyMigrationsAsync uses at startup.
         using var context = CreateContext();
         context.Database.Migrate();
+    }
+
+    private static string BuildMasterConnectionString()
+    {
+        var configured = Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable);
+
+        return new SqlConnectionStringBuilder(
+            string.IsNullOrWhiteSpace(configured) ? DefaultConnectionString : configured)
+        {
+            InitialCatalog = "master"
+        }.ConnectionString;
     }
 
     /// <summary>

@@ -52,9 +52,21 @@ services:
       # idempotent, and a no-op if the account already exists. See DEPLOY-PRODUCTION.md.
       Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL}
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD}
-      # Initial public catalogue (DemoContentBootstrapRunner): one showcase owner account
-      # plus the curated Approved listings. Idempotent and additive-only — safe to leave
-      # enabled. See DEPLOY-PRODUCTION.md.
+      # Initial public catalogue (DemoContentBootstrapRunner): the showcase owner accounts
+      # plus the curated Approved listings. There is more than one owner, and that follows
+      # from the home-point model (ADR-024): a listing's location IS its owner's home point,
+      # so a single showcase owner would put the entire public catalogue on one pin and leave
+      # 11 of 12 district filters empty. The runner therefore creates a BASE account (the
+      # address below) plus one account per Yerevan district the catalogue reaches — 12
+      # districts today, 13 accounts in total — and spreads the listings across them.
+      #
+      # Only the base account is a login. BOOTSTRAP_DEMO_OWNER_PASSWORD applies to it alone;
+      # the per-district accounts get a cryptographically random password that is hashed and
+      # immediately discarded — never logged, never stored in plaintext, never reported — so
+      # there is no credential to leak and none to look up. ADR-005's published-password
+      # trade-off stays at that ONE account and is deliberately NOT widened to thirteen.
+      #
+      # Idempotent and additive-only — safe to leave enabled. See DEPLOY-PRODUCTION.md.
       #
       # The `:-false` default is load-bearing, not cosmetic. Compose interpolates an unset
       # or empty .env var to an empty string and STILL sets the key ("" is not "absent"),

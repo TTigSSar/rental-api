@@ -1,8 +1,9 @@
 using System.ComponentModel.DataAnnotations;
+using RentalPlatform.Application.Common;
 
 namespace RentalPlatform.Application.DTOs;
 
-public sealed class RegisterRequest
+public sealed class RegisterRequest : IValidatableObject
 {
     [Required]
     [EmailAddress]
@@ -29,4 +30,14 @@ public sealed class RegisterRequest
 
     [MaxLength(16)]
     public string? PreferredLanguage { get; set; }
+
+    // Optional home-point step (skippable at sign-up — the home-point model). Both-or-neither: see Validate.
+    [Range(typeof(decimal), "-90", "90", ErrorMessage = "Latitude must be between -90 and 90.")]
+    public decimal? HomeLatitude { get; set; }
+
+    [Range(typeof(decimal), "-180", "180", ErrorMessage = "Longitude must be between -180 and 180.")]
+    public decimal? HomeLongitude { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) =>
+        HomePointValidation.Validate(HomeLatitude, HomeLongitude, nameof(HomeLatitude), nameof(HomeLongitude));
 }

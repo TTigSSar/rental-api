@@ -16,6 +16,9 @@ public static class DevelopmentSeedExtensions
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
         var fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+        // Resolved from the same scope as the AppDbContext above, so the service's own store shares
+        // this context — the seed's inserts are visible to it without another round trip.
+        var homePointService = scope.ServiceProvider.GetRequiredService<IHomePointService>();
         var logger = scope.ServiceProvider
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger<DevelopmentSeedRunner>();
@@ -23,7 +26,7 @@ public static class DevelopmentSeedExtensions
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RentalPlatform-Seeder/1.0");
 
-        var runner = new DevelopmentSeedRunner(dbContext, passwordHasher, logger, fileStorage, http);
+        var runner = new DevelopmentSeedRunner(dbContext, passwordHasher, logger, fileStorage, http, homePointService);
         await runner.RunAsync(cancellationToken);
     }
 }

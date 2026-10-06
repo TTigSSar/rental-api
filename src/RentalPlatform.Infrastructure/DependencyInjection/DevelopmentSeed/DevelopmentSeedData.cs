@@ -17,6 +17,11 @@ internal static class DevelopmentSeedData
     // to the category id at seed time (same convention as SeedListing.CategorySlug).
     public sealed record SeedCategoryKeyword(string CategorySlug, string Keyword);
 
+    // HomeLatitude/HomeLongitude are the EXACT home point (home-point model). Only the exact pair is
+    // declared: the public (geohash-snapped) pair and the district are derived by the one service
+    // allowed to derive them, which the seed runner calls — the seed never duplicates that logic.
+    // Null for accounts that own nothing and therefore need no home point (admins, renters, the
+    // blocked account); those double as the seed's "user without a home point" fixtures.
     public sealed record SeedUser(
         Guid Id,
         string Email,
@@ -24,8 +29,14 @@ internal static class DevelopmentSeedData
         string LastName,
         UserRole Role,
         bool IsBlocked,
-        string? PhoneNumber = null);
+        string? PhoneNumber = null,
+        decimal? HomeLatitude = null,
+        decimal? HomeLongitude = null);
 
+    // No Latitude/Longitude: a listing has no location of its own any more (home-point model). It
+    // inherits its owner's home point, which the seed runner applies through IHomePointService after
+    // the rows are in place. City is still declared because it is NOT derivable — see
+    // ListingsOwnerService.ResolveCity — and must agree with the owner's home point.
     public sealed record SeedListing(
         Guid Id,
         string Title,
@@ -37,8 +48,6 @@ internal static class DevelopmentSeedData
         string Country,
         string City,
         string AddressLine,
-        decimal Latitude,
-        decimal Longitude,
         ListingStatus Status,
         int CreatedDaysAgo,
         int UpdatedDaysAgo,
@@ -266,6 +275,97 @@ internal static class DevelopmentSeedData
         new("party-toys", "party pack")
     ];
 
+    // ---- The 13 seeded home points ----------------------------------------------------------
+    // All 13 are inside Yerevan, covering all 12 districts, because a home point outside Yerevan
+    // can no longer be saved at all (IHomePointService.ValidateForSave). Every coordinate below was
+    // taken from a listing that already lived in that district before the home-point change, so they
+    // are verified against DistrictBoundaryProvider.FindDistrictCode by construction — and
+    // DistrictSeedDataTests re-checks every one of them on every test run.
+    //
+    // This spread is the whole point: a listing's pin is now its OWNER's pin, so a catalogue that
+    // renders across the map needs its owners across the map. Concentrate the owners and the map
+    // collapses into one marker.
+    private static class HomePoints
+    {
+        public static readonly (decimal Latitude, decimal Longitude) Kentron          = (40.1856m, 44.5126m);
+        public static readonly (decimal Latitude, decimal Longitude) Arabkir          = (40.2207m, 44.5253m);
+        public static readonly (decimal Latitude, decimal Longitude) Ajapnyak         = (40.2068m, 44.4417m);
+        public static readonly (decimal Latitude, decimal Longitude) Avan             = (40.2233m, 44.5641m);
+        public static readonly (decimal Latitude, decimal Longitude) Davtashen        = (40.2243m, 44.4771m);
+        public static readonly (decimal Latitude, decimal Longitude) Erebuni          = (40.1540m, 44.5420m);
+        public static readonly (decimal Latitude, decimal Longitude) KanakerZeytun    = (40.2158m, 44.5325m);
+        public static readonly (decimal Latitude, decimal Longitude) MalatiaSebastia  = (40.1788m, 44.4421m);
+        public static readonly (decimal Latitude, decimal Longitude) NorNork          = (40.1885m, 44.5682m);
+        public static readonly (decimal Latitude, decimal Longitude) NorkMarash       = (40.1854m, 44.5337m);
+        public static readonly (decimal Latitude, decimal Longitude) Nubarashen       = (40.0888m, 44.5224m);
+        public static readonly (decimal Latitude, decimal Longitude) Shengavit        = (40.1268m, 44.4711m);
+
+        // A SECOND point in Nubarashen, a few streets from the first, for the 13th owner.
+        //
+        // Thirteen owners across twelve districts means exactly one district gets two, and this is
+        // it: Nubarashen is one of the ten districts tied for fewest seeded listings (4, against 9
+        // in Arabkir and 12 in Kentron), and it is the most peripheral of them — so the extra owner
+        // widens a corner of the map that is otherwise a single marker instead of thickening the
+        // already-dense centre. Distinct coordinates on purpose, so the two owners render as two
+        // pins rather than one.
+        public static readonly (decimal Latitude, decimal Longitude) NubarashenEast   = (40.0838m, 44.5274m);
+    }
+
+    /// <summary>
+    /// A known-good home point for each of the 12 Yerevan districts, keyed by district code.
+    /// </summary>
+    /// <remarks>
+    /// Public because the demo-content bootstrap builds its per-district showcase owners from the
+    /// same table — production and development then place their owners on identical pins, and
+    /// there is one place to fix if a polygon ever moves.
+    /// </remarks>
+    public static readonly IReadOnlyDictionary<string, (decimal Latitude, decimal Longitude)> HomePointByDistrictCode =
+        new Dictionary<string, (decimal Latitude, decimal Longitude)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ajapnyak"] = HomePoints.Ajapnyak,
+            ["arabkir"] = HomePoints.Arabkir,
+            ["avan"] = HomePoints.Avan,
+            ["davtashen"] = HomePoints.Davtashen,
+            ["erebuni"] = HomePoints.Erebuni,
+            ["kanaker-zeytun"] = HomePoints.KanakerZeytun,
+            ["kentron"] = HomePoints.Kentron,
+            ["malatia-sebastia"] = HomePoints.MalatiaSebastia,
+            ["nor-nork"] = HomePoints.NorNork,
+            ["nork-marash"] = HomePoints.NorkMarash,
+            ["nubarashen"] = HomePoints.Nubarashen,
+            ["shengavit"] = HomePoints.Shengavit,
+        };
+
+    /// <summary>
+    /// Which district each seeded home point is expected to resolve to, keyed by owner email.
+    /// </summary>
+    /// <remarks>
+    /// Every value is a real district — no nulls. A home point outside Yerevan cannot be saved, so
+    /// the seed cannot declare one either: <see cref="DevelopmentSeedRunner"/> applies these through
+    /// the real IHomePointService, which would refuse it.
+    ///
+    /// Public because DistrictSeedDataTests asserts against it — it is the only place the intended
+    /// district per owner is written down, now that listings carry no coordinates of their own.
+    /// </remarks>
+    public static readonly IReadOnlyDictionary<string, string> ExpectedOwnerHomeDistrictCodes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DevelopmentSeedCredentials.OwnerEmail]       = "kentron",
+            [DevelopmentSeedCredentials.DemoOwnerEmail]   = "arabkir",
+            [DevelopmentSeedCredentials.OwnerAnahitEmail] = "ajapnyak",
+            [DevelopmentSeedCredentials.OwnerNarekEmail]  = "avan",
+            [DevelopmentSeedCredentials.OwnerLilitEmail]  = "davtashen",
+            [DevelopmentSeedCredentials.OwnerDavitEmail]  = "erebuni",
+            [DevelopmentSeedCredentials.OwnerMariamEmail] = "kanaker-zeytun",
+            [DevelopmentSeedCredentials.OwnerGoharEmail]  = "malatia-sebastia",
+            [DevelopmentSeedCredentials.OwnerKarenEmail]  = "nor-nork",
+            [DevelopmentSeedCredentials.OwnerArmenEmail]  = "nork-marash",
+            [DevelopmentSeedCredentials.OwnerSedaEmail]   = "nubarashen",
+            [DevelopmentSeedCredentials.OwnerVaheEmail]   = "shengavit",
+            // The 13th owner — see HomePoints.NubarashenEast for why this district doubles up.
+            [DevelopmentSeedCredentials.OwnerHasmikEmail] = "nubarashen",
+        };
+
     public static readonly SeedUser[] Users =
     [
         new(
@@ -277,7 +377,8 @@ internal static class DevelopmentSeedData
             new Guid("11111111-0002-4000-9000-000000000002"),
             DevelopmentSeedCredentials.OwnerEmail,
             "Olivia", "Owner",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 100 002"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 100 002",
+            HomeLatitude: HomePoints.Kentron.Latitude, HomeLongitude: HomePoints.Kentron.Longitude),
         new(
             new Guid("11111111-0003-4000-9000-000000000003"),
             DevelopmentSeedCredentials.RenterEmail,
@@ -304,7 +405,8 @@ internal static class DevelopmentSeedData
             new Guid("11111111-0007-4000-9000-000000000007"),
             DevelopmentSeedCredentials.DemoOwnerEmail,
             "Demo", "Owner",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 200 002"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 200 002",
+            HomeLatitude: HomePoints.Arabkir.Latitude, HomeLongitude: HomePoints.Arabkir.Longitude),
         new(
             new Guid("11111111-0008-4000-9000-000000000008"),
             DevelopmentSeedCredentials.DemoRenterEmail,
@@ -316,37 +418,88 @@ internal static class DevelopmentSeedData
             new Guid("11111111-0009-4000-9000-000000000009"),
             DevelopmentSeedCredentials.OwnerAnahitEmail,
             "Anahit", "Grigoryan",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 94 300 001"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 94 300 001",
+            HomeLatitude: HomePoints.Ajapnyak.Latitude, HomeLongitude: HomePoints.Ajapnyak.Longitude),
         new(
             new Guid("11111111-000a-4000-9000-00000000000a"),
             DevelopmentSeedCredentials.OwnerNarekEmail,
             "Narek", "Hakobyan",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 95 300 002"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 95 300 002",
+            HomeLatitude: HomePoints.Avan.Latitude, HomeLongitude: HomePoints.Avan.Longitude),
         new(
             new Guid("11111111-000b-4000-9000-00000000000b"),
             DevelopmentSeedCredentials.OwnerLilitEmail,
             "Lilit", "Sargsyan",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 96 300 003"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 96 300 003",
+            HomeLatitude: HomePoints.Davtashen.Latitude, HomeLongitude: HomePoints.Davtashen.Longitude),
         new(
             new Guid("11111111-000c-4000-9000-00000000000c"),
             DevelopmentSeedCredentials.OwnerDavitEmail,
             "Davit", "Petrosyan",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 97 300 004"),
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 97 300 004",
+            HomeLatitude: HomePoints.Erebuni.Latitude, HomeLongitude: HomePoints.Erebuni.Longitude),
         new(
             new Guid("11111111-000d-4000-9000-00000000000d"),
             DevelopmentSeedCredentials.OwnerMariamEmail,
             "Mariam", "Avetisyan",
-            UserRole.User, IsBlocked: false, PhoneNumber: "+374 98 300 005")
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 98 300 005",
+            HomeLatitude: HomePoints.KanakerZeytun.Latitude, HomeLongitude: HomePoints.KanakerZeytun.Longitude),
+
+        // ---- Home-point cohort (2026-09): the districts the owners above do not cover ----------
+        // Added so all 12 Yerevan districts have a resident owner, plus one owner outside Yerevan.
+        // They own expansion-cohort listings only — never anything with a booking, review or chat.
+        new(
+            new Guid("11111111-000e-4000-9000-00000000000e"),
+            DevelopmentSeedCredentials.OwnerGoharEmail,
+            "Gohar", "Manukyan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 94 400 001",
+            HomeLatitude: HomePoints.MalatiaSebastia.Latitude, HomeLongitude: HomePoints.MalatiaSebastia.Longitude),
+        new(
+            new Guid("11111111-000f-4000-9000-00000000000f"),
+            DevelopmentSeedCredentials.OwnerKarenEmail,
+            "Karen", "Melkonyan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 95 400 002",
+            HomeLatitude: HomePoints.NorNork.Latitude, HomeLongitude: HomePoints.NorNork.Longitude),
+        new(
+            new Guid("11111111-0010-4000-9000-000000000010"),
+            DevelopmentSeedCredentials.OwnerArmenEmail,
+            "Armen", "Ghazaryan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 96 400 003",
+            HomeLatitude: HomePoints.NorkMarash.Latitude, HomeLongitude: HomePoints.NorkMarash.Longitude),
+        new(
+            new Guid("11111111-0011-4000-9000-000000000011"),
+            DevelopmentSeedCredentials.OwnerSedaEmail,
+            "Seda", "Harutyunyan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 97 400 004",
+            HomeLatitude: HomePoints.Nubarashen.Latitude, HomeLongitude: HomePoints.Nubarashen.Longitude),
+        new(
+            new Guid("11111111-0012-4000-9000-000000000012"),
+            DevelopmentSeedCredentials.OwnerVaheEmail,
+            "Vahe", "Simonyan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 98 400 005",
+            HomeLatitude: HomePoints.Shengavit.Latitude, HomeLongitude: HomePoints.Shengavit.Longitude),
+        // The 13th owner. Shares Nubarashen with Seda, on a distinct point a few streets away.
+        new(
+            new Guid("11111111-0013-4000-9000-000000000013"),
+            DevelopmentSeedCredentials.OwnerHasmikEmail,
+            "Hasmik", "Karapetyan",
+            UserRole.User, IsBlocked: false, PhoneNumber: "+374 99 400 006",
+            HomeLatitude: HomePoints.NubarashenEast.Latitude, HomeLongitude: HomePoints.NubarashenEast.Longitude)
     ];
 
-    // 10 toy listings (7 Approved, 2 PendingApproval, 1 Rejected), all owned by demo owner, Yerevan-focused.
-    // Coordinates are deliberately spread across 8 of the 12 Yerevan districts (Kentron, Arabkir,
-    // Nork-Marash, Malatia-Sebastia, Nor Nork, Davtashen, Shengavit, Erebuni) so the district
-    // point-in-polygon lookup (P1-4) and the map/district UI have more than one district to render.
-    // The Gyumri listing (Birthday Party Toy Pack) is intentionally outside every Yerevan district
-    // boundary — it exercises the "no district match, DistrictId stays null" path. Every
-    // coordinate here was verified against DistrictBoundaryProvider.FindDistrictCode before being
-    // baked in (see the district assignment comment on each listing needing it, where non-obvious).
+    // The seeded catalogue. NO LISTING HERE CARRIES A COORDINATE any more (home-point model): each
+    // one inherits the home point of the owner named in its OwnerEmail field, applied by the seed
+    // runner through the real IHomePointService.
+    //
+    // The consequence for reading this file: a listing's position on the map is decided entirely by
+    // WHO owns it. The catalogue spans all 12 Yerevan districts because its 13 owners do (see
+    // HomePoints / ExpectedOwnerHomeDistrictCodes above) — so changing a listing's OwnerEmail moves
+    // it on the map, and that is the only way to move it.
+    //
+    // City is the one location field still written here, because there is no geocoder to derive it
+    // from (see ListingsOwnerService.ResolveCity). Every owner lives in Yerevan — nothing else can
+    // be saved as a home point — so every listing says "Yerevan", and DistrictSeedDataTests enforces
+    // that against each owner's declared district.
     public static readonly SeedListing[] Listings =
     [
         new(
@@ -355,7 +508,6 @@ internal static class DevelopmentSeedData
             "Classic LEGO Duplo starter set with 80+ chunky pieces. Sanitized between rentals and stored in a sealed box.",
             "building-blocks", DevelopmentSeedCredentials.OwnerEmail,
             2500m, "AMD", "Armenia", "Yerevan", "8 Saryan St",
-            40.1856m, 44.5126m,
             ListingStatus.Approved, CreatedDaysAgo: 14, UpdatedDaysAgo: 2,
             AgeFromMonths: 18, AgeToMonths: 60,
             Condition: "Excellent",
@@ -368,7 +520,6 @@ internal static class DevelopmentSeedData
             "Six-piece natural wood Montessori set: shape sorter, stacking rings, threading beads, peg board and counting bars.",
             "montessori-toys", DevelopmentSeedCredentials.OwnerEmail,
             3500m, "AMD", "Armenia", "Yerevan", "12 Kasyan St",
-            40.2140m, 44.5220m,
             ListingStatus.Approved, CreatedDaysAgo: 12, UpdatedDaysAgo: 3,
             AgeFromMonths: 24, AgeToMonths: 72,
             Condition: "Like new",
@@ -381,7 +532,6 @@ internal static class DevelopmentSeedData
             "Padded baby activity gym with detachable hanging toys, a mirror, a textured teether and a soft rattle.",
             "baby-toys", DevelopmentSeedCredentials.OwnerEmail,
             2000m, "AMD", "Armenia", "Yerevan", "19 Isahakyan St",
-            40.1887m, 44.5134m,
             ListingStatus.Approved, CreatedDaysAgo: 10, UpdatedDaysAgo: 1,
             AgeFromMonths: 0, AgeToMonths: 12,
             Condition: "Excellent",
@@ -394,7 +544,6 @@ internal static class DevelopmentSeedData
             "Lightweight 12-inch balance bike with adjustable seat (30-42 cm) and puncture-resistant tyres.",
             "ride-on-toys", DevelopmentSeedCredentials.OwnerEmail,
             3000m, "AMD", "Armenia", "Yerevan", "5 Titanyan St",
-            40.1810m, 44.5370m,
             ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 2,
             AgeFromMonths: 24, AgeToMonths: 60,
             Condition: "Good",
@@ -407,7 +556,6 @@ internal static class DevelopmentSeedData
             "Stable plastic backyard slide, ~1.2 m climb. Easy to wipe down. Great for small gardens and play days.",
             "outdoor-toys", DevelopmentSeedCredentials.OwnerEmail,
             4000m, "AMD", "Armenia", "Yerevan", "22 Gai Ave",
-            40.1745m, 44.4475m,
             ListingStatus.Approved, CreatedDaysAgo: 8, UpdatedDaysAgo: 1,
             AgeFromMonths: 18, AgeToMonths: 72,
             Condition: "Good",
@@ -420,7 +568,6 @@ internal static class DevelopmentSeedData
             "Bundle of four wooden puzzles (12, 24, 48 and 60 pieces). All pieces verified present before pickup.",
             "puzzles", DevelopmentSeedCredentials.OwnerEmail,
             1500m, "AMD", "Armenia", "Yerevan", "18 Pushkin St",
-            40.1831m, 44.5100m,
             ListingStatus.Approved, CreatedDaysAgo: 7, UpdatedDaysAgo: 2,
             AgeFromMonths: 36, AgeToMonths: 96,
             Condition: "Like new",
@@ -433,7 +580,6 @@ internal static class DevelopmentSeedData
             "Wooden play kitchen with stove, sink, oven door and 20 accessories (utensils, pots, play food).",
             "pretend-play", DevelopmentSeedCredentials.OwnerEmail,
             3500m, "AMD", "Armenia", "Yerevan", "5 Republic Square",
-            40.1776m, 44.5126m,
             ListingStatus.Approved, CreatedDaysAgo: 6, UpdatedDaysAgo: 1,
             AgeFromMonths: 30, AgeToMonths: 96,
             Condition: "Excellent",
@@ -448,7 +594,6 @@ internal static class DevelopmentSeedData
             "Family game-night bundle: three age-appropriate board games covering memory, strategy and cooperation.",
             "board-games", DevelopmentSeedCredentials.OwnerEmail,
             2000m, "AMD", "Armenia", "Yerevan", "12 Komitas Ave",
-            40.2016m, 44.4915m,
             ListingStatus.PendingApproval, CreatedDaysAgo: 3, UpdatedDaysAgo: 1,
             AgeFromMonths: 48, AgeToMonths: 144,
             Condition: "Like new",
@@ -459,9 +604,8 @@ internal static class DevelopmentSeedData
             ListingIds.BirthdayPartyToyPack,
             "Birthday Party Toy Pack",
             "Party toy pack: bean bags, foam darts, ring toss, pin-the-tail and a soft ball pool (50 balls).",
-            "party-toys", DevelopmentSeedCredentials.OwnerEmail,
-            5000m, "AMD", "Armenia", "Gyumri", "25 Abovyan St",
-            40.7850m, 43.8453m,
+            "party-toys", DevelopmentSeedCredentials.OwnerHasmikEmail,
+            5000m, "AMD", "Armenia", "Yerevan", "25 Abovyan St",
             ListingStatus.PendingApproval, CreatedDaysAgo: 2, UpdatedDaysAgo: 0,
             AgeFromMonths: 36, AgeToMonths: 144,
             Condition: "Good",
@@ -476,7 +620,6 @@ internal static class DevelopmentSeedData
             "Foam soft-play set submitted for moderation testing. Will be rejected because hygiene notes were left empty.",
             "educational-toys", DevelopmentSeedCredentials.OwnerEmail,
             3500m, "AMD", "Armenia", "Yerevan", "3 Mashtots Ave",
-            40.1833m, 44.5150m,
             ListingStatus.Rejected, CreatedDaysAgo: 6, UpdatedDaysAgo: 5,
             AgeFromMonths: 12, AgeToMonths: 60,
             Condition: "Used",
@@ -492,7 +635,6 @@ internal static class DevelopmentSeedData
             "Hands-on science kit with 20+ experiments: volcano, crystal growing, slime, and simple circuit activities. All chemicals are child-safe and pre-measured.",
             "educational-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
             3000m, "AMD", "Armenia", "Yerevan", "8 Sarmen St",
-            40.1840m, 44.5720m,
             ListingStatus.Approved, CreatedDaysAgo: 11, UpdatedDaysAgo: 2,
             AgeFromMonths: 60, AgeToMonths: 144,
             Condition: "Excellent",
@@ -505,7 +647,6 @@ internal static class DevelopmentSeedData
             "Three timeless board games in one bundle: Snakes & Ladders, Ludo, and a 100-piece junior jigsaw. All pieces verified complete.",
             "board-games", DevelopmentSeedCredentials.DemoOwnerEmail,
             2000m, "AMD", "Armenia", "Yerevan", "14 Aygestani St",
-            40.2215m, 44.4795m,
             ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 1,
             AgeFromMonths: 48, AgeToMonths: 144,
             Condition: "Like new",
@@ -518,7 +659,6 @@ internal static class DevelopmentSeedData
             "Complete party activity kit: parachute play cloth, bean bags, hula hoops (×2), jump rope, and a set of colourful cones. Perfect for birthdays and group play.",
             "party-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
             4500m, "AMD", "Armenia", "Yerevan", "22 Azatutyan Ave",
-            40.2102m, 44.4997m,
             ListingStatus.Approved, CreatedDaysAgo: 7, UpdatedDaysAgo: 1,
             AgeFromMonths: 36, AgeToMonths: 144,
             Condition: "Good",
@@ -531,7 +671,6 @@ internal static class DevelopmentSeedData
             "56-piece wooden train set with figure-of-eight track, bridges, tunnels, a station, two engines and six carriages. Compatible with major wooden-rail brands.",
             "building-blocks", DevelopmentSeedCredentials.DemoOwnerEmail,
             3500m, "AMD", "Armenia", "Yerevan", "30 Manandyan St",
-            40.1230m, 44.4770m,
             ListingStatus.Approved, CreatedDaysAgo: 5, UpdatedDaysAgo: 1,
             AgeFromMonths: 24, AgeToMonths: 84,
             Condition: "Excellent",
@@ -544,7 +683,6 @@ internal static class DevelopmentSeedData
             "Height-adjustable double-sided easel: whiteboard on one side, blackboard on the other, with a paper roll holder. Includes chalk, eraser, and 3 dry-erase markers.",
             "pretend-play", DevelopmentSeedCredentials.DemoOwnerEmail,
             2500m, "AMD", "Armenia", "Yerevan", "12 Ohanyan St",
-            40.1495m, 44.5470m,
             ListingStatus.Approved, CreatedDaysAgo: 4, UpdatedDaysAgo: 0,
             AgeFromMonths: 24, AgeToMonths: 96,
             Condition: "Like new",
@@ -553,21 +691,26 @@ internal static class DevelopmentSeedData
             CompensationAmount: 8000m),
 
         // ==================================================================================
-        // ---- 50-listing toy-catalogue expansion (2026-08) ----
-        // 5 listings per category (all 10 existing category slugs), owners spread across the
-        // 5 new owners (Anahit/Narek/Lilit/Davit/Mariam) plus demo_owner@toyrent.am (~8-9 each).
+        // ---- 50-listing toy-catalogue expansion (2026-08, re-owned 2026-09) ----
+        // 5 listings per category (all 10 existing category slugs).
         // Status split: 44 Approved / 4 PendingApproval / 2 Rejected.
-        // Coordinates spread across all 12 Yerevan districts (4-5 each), each one verified
-        // against DistrictBoundaryProvider.FindDistrictCode -- see DistrictSeedDataTests for the
-        // per-listing expected-district table this block is checked against.
+        //
+        // Re-owned for the home-point model: each listing went to the owner whose home point sits
+        // in the district that listing's own coordinates used to resolve to, so the map keeps the
+        // distribution it had — 4 per Yerevan district, with two handed to the 13th owner in
+        // Nubarashen. This cohort is the ONLY one that was re-owned: none of its listings has a
+        // booking, review or chat, so reassigning them breaks no history. (One original-cohort
+        // listing moved too — Birthday Party Toy Pack, which likewise has none of those, and which
+        // used to be the seed's single out-of-Yerevan listing before the Yerevan-only rule.)
+        //
+        // District coverage is now asserted per OWNER, not per listing — see DistrictSeedDataTests.
         // ==================================================================================
         new(
             ListingIds.FisherPrice4In1OceanWondersBouncer,
             "Fisher-Price 4-in-1 Ocean Wonders Bouncer",
             "Vibrating baby bouncer with a removable ocean-themed toy bar, three recline positions and a machine-washable seat pad. Includes calming vibration and two volume settings.",
-            "baby-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "baby-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
             2200m, "AMD", "Armenia", "Yerevan", "14 Halabyan St",
-            40.2068m, 44.4417m,
             ListingStatus.Approved, CreatedDaysAgo: 8, UpdatedDaysAgo: 5,
             AgeFromMonths: 0, AgeToMonths: 9,
             Condition: "Excellent",
@@ -578,9 +721,8 @@ internal static class DevelopmentSeedData
             ListingIds.LEGOClassicCreativeBricksBox500Pcs,
             "LEGO Classic Creative Bricks Box (500 pcs)",
             "500-piece LEGO Classic set in assorted colours and shapes, stored in the original sorting box. Piece count verified after every return.",
-            "building-blocks", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "building-blocks", DevelopmentSeedCredentials.DemoOwnerEmail,
             3200m, "AMD", "Armenia", "Yerevan", "33 Komitas Ave",
-            40.2207m, 44.5253m,
             ListingStatus.Approved, CreatedDaysAgo: 15, UpdatedDaysAgo: 9,
             AgeFromMonths: 48, AgeToMonths: 144,
             Condition: "Excellent",
@@ -593,7 +735,6 @@ internal static class DevelopmentSeedData
             "Interactive learning console with a stylus pen and two activity books covering letters, numbers and early reading.",
             "educational-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
             2800m, "AMD", "Armenia", "Yerevan", "22 Acharyan St",
-            40.2233m, 44.5641m,
             ListingStatus.Approved, CreatedDaysAgo: 22, UpdatedDaysAgo: 13,
             AgeFromMonths: 24, AgeToMonths: 84,
             Condition: "Excellent",
@@ -606,7 +747,6 @@ internal static class DevelopmentSeedData
             "Large plastic outdoor playhouse (approx. 1.5 x 1.3 m) with a working door, windows and a mailbox. Assembly and disassembly included at pickup/return.",
             "outdoor-toys", DevelopmentSeedCredentials.OwnerLilitEmail,
             8500m, "AMD", "Armenia", "Yerevan", "Davtashen 3rd District, Bldg 12",
-            40.2243m, 44.4771m,
             ListingStatus.Approved, CreatedDaysAgo: 29, UpdatedDaysAgo: 17,
             AgeFromMonths: 24, AgeToMonths: 96,
             Condition: "Good",
@@ -619,7 +759,6 @@ internal static class DevelopmentSeedData
             "Classic ride-on car with a working horn, opening doors and a floorboard storage compartment. No pedals -- foot-to-floor propulsion.",
             "ride-on-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
             3000m, "AMD", "Armenia", "Yerevan", "145 Arshakunyats Ave",
-            40.1540m, 44.5420m,
             ListingStatus.Approved, CreatedDaysAgo: 36, UpdatedDaysAgo: 21,
             AgeFromMonths: 18, AgeToMonths: 48,
             Condition: "Good",
@@ -632,7 +771,6 @@ internal static class DevelopmentSeedData
             "Three-storey wooden dollhouse with 12 rooms of furniture and a working front door and windows.",
             "pretend-play", DevelopmentSeedCredentials.OwnerMariamEmail,
             4500m, "AMD", "Armenia", "Yerevan", "44 Zoravar Andranik Ave",
-            40.2158m, 44.5325m,
             ListingStatus.Approved, CreatedDaysAgo: 43, UpdatedDaysAgo: 25,
             AgeFromMonths: 36, AgeToMonths: 96,
             Condition: "Excellent",
@@ -643,9 +781,8 @@ internal static class DevelopmentSeedData
             ListingIds.HapePoundTapBench,
             "Hape Pound & Tap Bench",
             "Wooden pound-and-tap bench with a xylophone base, wooden mallet and five colourful balls.",
-            "montessori-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "montessori-toys", DevelopmentSeedCredentials.OwnerEmail,
             2000m, "AMD", "Armenia", "Yerevan", "27 Abovyan St",
-            40.1833m, 44.5067m,
             ListingStatus.Approved, CreatedDaysAgo: 50, UpdatedDaysAgo: 29,
             AgeFromMonths: 10, AgeToMonths: 36,
             Condition: "Good",
@@ -656,9 +793,8 @@ internal static class DevelopmentSeedData
             ListingIds.Djeco100PieceFloorPuzzleFamilyReunion,
             "Djeco 100-Piece Floor Puzzle - Family Reunion",
             "Large-format 100-piece floor puzzle (assembled size 70 x 50 cm) with vivid illustrated artwork.",
-            "puzzles", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "puzzles", DevelopmentSeedCredentials.OwnerGoharEmail,
             1400m, "AMD", "Armenia", "Yerevan", "19 Sebastia St",
-            40.1788m, 44.4421m,
             ListingStatus.Rejected, CreatedDaysAgo: 9, UpdatedDaysAgo: 8,
             AgeFromMonths: 36, AgeToMonths: 84,
             Condition: "Good",
@@ -670,9 +806,8 @@ internal static class DevelopmentSeedData
             ListingIds.HasbroGuessWhoClassic,
             "Hasbro Guess Who? Classic",
             "Classic two-player guessing game with 24 character cards and two flip-panel boards, all pieces accounted for.",
-            "board-games", DevelopmentSeedCredentials.OwnerNarekEmail,
+            "board-games", DevelopmentSeedCredentials.OwnerArmenEmail,
             1500m, "AMD", "Armenia", "Yerevan", "Nork 3rd Microdistrict, Bldg 8",
-            40.1854m, 44.5337m,
             ListingStatus.Approved, CreatedDaysAgo: 4, UpdatedDaysAgo: 1,
             AgeFromMonths: 72, AgeToMonths: 144,
             Condition: "Good",
@@ -683,9 +818,8 @@ internal static class DevelopmentSeedData
             ListingIds.LittleTikesInflatableBounceHouse,
             "Little Tikes Inflatable Bounce House",
             "Compact inflatable bounce house (approx. 2.5 x 2.5 m) with an electric blower included, sets up in a garden or large room.",
-            "party-toys", DevelopmentSeedCredentials.OwnerLilitEmail,
+            "party-toys", DevelopmentSeedCredentials.OwnerKarenEmail,
             9000m, "AMD", "Armenia", "Yerevan", "Nor Nork 2nd Microdistrict, Bldg 15",
-            40.1885m, 44.5682m,
             ListingStatus.Approved, CreatedDaysAgo: 11, UpdatedDaysAgo: 3,
             AgeFromMonths: 36, AgeToMonths: 144,
             Condition: "Good",
@@ -696,9 +830,8 @@ internal static class DevelopmentSeedData
             ListingIds.ChiccoBabySensesActivityGym,
             "Chicco Baby Senses Activity Gym",
             "Padded activity gym with an arched frame, five hanging toys, a crinkly cloud and a soft-light star that plays lullabies.",
-            "baby-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
+            "baby-toys", DevelopmentSeedCredentials.OwnerSedaEmail,
             2400m, "AMD", "Armenia", "Yerevan", "Nubarashen 1st Microdistrict, Bldg 6",
-            40.0888m, 44.5224m,
             ListingStatus.Approved, CreatedDaysAgo: 18, UpdatedDaysAgo: 3,
             AgeFromMonths: 0, AgeToMonths: 12,
             Condition: "Like new",
@@ -709,9 +842,8 @@ internal static class DevelopmentSeedData
             ListingIds.MegaBloksFirstBuildersBigBuildingBag80Pcs,
             "Mega Bloks First Builders Big Building Bag (80 pcs)",
             "80 oversized, toddler-safe blocks in a zippered carry bag, compatible with other First Builders sets.",
-            "building-blocks", DevelopmentSeedCredentials.OwnerMariamEmail,
+            "building-blocks", DevelopmentSeedCredentials.OwnerVaheEmail,
             2000m, "AMD", "Armenia", "Yerevan", "88 Bagratunyats Ave",
-            40.1268m, 44.4711m,
             ListingStatus.Approved, CreatedDaysAgo: 25, UpdatedDaysAgo: 14,
             AgeFromMonths: 12, AgeToMonths: 60,
             Condition: "Good",
@@ -722,9 +854,8 @@ internal static class DevelopmentSeedData
             ListingIds.LearningResourcesCodingCrittersRangerZip,
             "Learning Resources Coding Critters Ranger & Zip",
             "Screen-free coding toy set: a robot pet and code cards that teach sequencing through play.",
-            "educational-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "educational-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
             3000m, "AMD", "Armenia", "Yerevan", "27 Gubkin St",
-            40.1968m, 44.4497m,
             ListingStatus.Approved, CreatedDaysAgo: 32, UpdatedDaysAgo: 25,
             AgeFromMonths: 48, AgeToMonths: 96,
             Condition: "Like new",
@@ -735,9 +866,8 @@ internal static class DevelopmentSeedData
             ListingIds.IntexInflatableKiddiePoolOceanPlayCenter,
             "Intex Inflatable Kiddie Pool (Ocean Play Center)",
             "Inflatable pool with a shaded canopy, built-in slide and ring toss game, holds approx. 190 L.",
-            "outdoor-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "outdoor-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
             3000m, "AMD", "Armenia", "Yerevan", "18 Vratsakan St",
-            40.2117m, 44.5153m,
             ListingStatus.Approved, CreatedDaysAgo: 39, UpdatedDaysAgo: 36,
             AgeFromMonths: 12, AgeToMonths: 72,
             Condition: "Good",
@@ -750,7 +880,6 @@ internal static class DevelopmentSeedData
             "Steel-frame tricycle with a rear step-plate for a parent push handle and an adjustable seat.",
             "ride-on-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
             2500m, "AMD", "Armenia", "Yerevan", "5 Davit Anhaght St",
-            40.2143m, 44.5731m,
             ListingStatus.PendingApproval, CreatedDaysAgo: 5, UpdatedDaysAgo: 3,
             AgeFromMonths: 24, AgeToMonths: 60,
             Condition: "Excellent",
@@ -763,7 +892,6 @@ internal static class DevelopmentSeedData
             "Plastic tool workbench with 20+ pretend tools, a working vice and realistic drill sounds.",
             "pretend-play", DevelopmentSeedCredentials.OwnerLilitEmail,
             3200m, "AMD", "Armenia", "Yerevan", "Davtashen 4th District, Bldg 5",
-            40.2183m, 44.4831m,
             ListingStatus.Approved, CreatedDaysAgo: 53, UpdatedDaysAgo: 5,
             AgeFromMonths: 24, AgeToMonths: 72,
             Condition: "Good",
@@ -776,7 +904,6 @@ internal static class DevelopmentSeedData
             "Wooden shape-sorting cube with 12 chunky shapes and a lift-off lid for storage.",
             "montessori-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
             1400m, "AMD", "Armenia", "Yerevan", "8 Nor Aresh St",
-            40.1430m, 44.5520m,
             ListingStatus.Approved, CreatedDaysAgo: 60, UpdatedDaysAgo: 9,
             AgeFromMonths: 12, AgeToMonths: 36,
             Condition: "Excellent",
@@ -789,7 +916,6 @@ internal static class DevelopmentSeedData
             "200-piece children's jigsaw featuring classic Disney characters, glare-free finish, complete piece count verified.",
             "puzzles", DevelopmentSeedCredentials.OwnerMariamEmail,
             1200m, "AMD", "Armenia", "Yerevan", "9 Kanaker St",
-            40.2068m, 44.5415m,
             ListingStatus.Approved, CreatedDaysAgo: 7, UpdatedDaysAgo: 2,
             AgeFromMonths: 60, AgeToMonths: 120,
             Condition: "Like new",
@@ -800,9 +926,8 @@ internal static class DevelopmentSeedData
             ListingIds.HabaMyVeryFirstGamesOrchardCompare,
             "Haba My Very First Games - Orchard Compare",
             "Cooperative matching game for young children with a wooden spinner and chunky wooden fruit pieces.",
-            "board-games", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "board-games", DevelopmentSeedCredentials.OwnerEmail,
             1600m, "AMD", "Armenia", "Yerevan", "54 Tumanyan St",
-            40.1763m, 44.5137m,
             ListingStatus.Approved, CreatedDaysAgo: 14, UpdatedDaysAgo: 13,
             AgeFromMonths: 36, AgeToMonths: 72,
             Condition: "Excellent",
@@ -813,9 +938,8 @@ internal static class DevelopmentSeedData
             ListingIds.IntexBallPitWith100Balls,
             "Intex Ball Pit with 100 Balls",
             "Round inflatable ball pit (120 cm diameter) that comes complete with 100 phthalate-free plastic balls.",
-            "party-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "party-toys", DevelopmentSeedCredentials.OwnerGoharEmail,
             3000m, "AMD", "Armenia", "Yerevan", "44 Raffi St",
-            40.1708m, 44.4511m,
             ListingStatus.Approved, CreatedDaysAgo: 21, UpdatedDaysAgo: 3,
             AgeFromMonths: 12, AgeToMonths: 72,
             Condition: "Good",
@@ -826,9 +950,8 @@ internal static class DevelopmentSeedData
             ListingIds.TinyLoveMeadowDaysGyminiPlayMat,
             "Tiny Love Meadow Days Gymini Play Mat",
             "Foldable tummy-time play mat with a detachable arch, four soft toys and a fold-up carry bag for storage.",
-            "baby-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
+            "baby-toys", DevelopmentSeedCredentials.OwnerArmenEmail,
             2000m, "AMD", "Armenia", "Yerevan", "14 Marash St",
-            40.1774m, 44.5417m,
             ListingStatus.Approved, CreatedDaysAgo: 28, UpdatedDaysAgo: 21,
             AgeFromMonths: 0, AgeToMonths: 12,
             Condition: "Good",
@@ -839,9 +962,8 @@ internal static class DevelopmentSeedData
             ListingIds.LEGOCityFireStationPlayset,
             "LEGO City Fire Station Playset",
             "Fire Station playset with a fire engine, helicopter, four minifigures and a working ladder function. All 250+ pieces checked against the parts list before pickup.",
-            "building-blocks", DevelopmentSeedCredentials.OwnerLilitEmail,
+            "building-blocks", DevelopmentSeedCredentials.OwnerKarenEmail,
             4200m, "AMD", "Armenia", "Yerevan", "Nor Nork 5th Microdistrict, Bldg 3",
-            40.1795m, 44.5772m,
             ListingStatus.Approved, CreatedDaysAgo: 35, UpdatedDaysAgo: 4,
             AgeFromMonths: 60, AgeToMonths: 144,
             Condition: "Excellent",
@@ -852,9 +974,8 @@ internal static class DevelopmentSeedData
             ListingIds.VTechAlphabetTrain,
             "VTech Alphabet Train",
             "Pull-along alphabet train with 26 letter blocks that snap onto the carriages.",
-            "educational-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
+            "educational-toys", DevelopmentSeedCredentials.OwnerSedaEmail,
             1800m, "AMD", "Armenia", "Yerevan", "Nubarashen 2nd Microdistrict, Bldg 2",
-            40.0838m, 44.5274m,
             ListingStatus.Approved, CreatedDaysAgo: 42, UpdatedDaysAgo: 15,
             AgeFromMonths: 12, AgeToMonths: 36,
             Condition: "Good",
@@ -865,9 +986,8 @@ internal static class DevelopmentSeedData
             ListingIds.LittleTikes45FootTrampoline,
             "Little Tikes 4.5-Foot Trampoline",
             "Toddler trampoline with a padded safety enclosure net and non-slip frame pads. Fits comfortably in a small yard.",
-            "outdoor-toys", DevelopmentSeedCredentials.OwnerMariamEmail,
+            "outdoor-toys", DevelopmentSeedCredentials.OwnerVaheEmail,
             6500m, "AMD", "Armenia", "Yerevan", "17 Manandyan St",
-            40.1178m, 44.4801m,
             ListingStatus.PendingApproval, CreatedDaysAgo: 2, UpdatedDaysAgo: 1,
             AgeFromMonths: 36, AgeToMonths: 96,
             Condition: "Excellent",
@@ -878,9 +998,8 @@ internal static class DevelopmentSeedData
             ListingIds.RazorJrLilKickScooter,
             "Razor Jr. Lil' Kick Scooter",
             "Three-wheeled kick scooter with a lean-to-steer frame and an extra-wide footboard for balance.",
-            "ride-on-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "ride-on-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
             1800m, "AMD", "Armenia", "Yerevan", "41 Halabyan St",
-            40.2048m, 44.4527m,
             ListingStatus.Approved, CreatedDaysAgo: 56, UpdatedDaysAgo: 37,
             AgeFromMonths: 24, AgeToMonths: 60,
             Condition: "Good",
@@ -891,9 +1010,8 @@ internal static class DevelopmentSeedData
             ListingIds.KidKraftVintageKitchenPlayset,
             "KidKraft Vintage Kitchen Playset",
             "Wooden play kitchen with an oven, stovetop, sink and icebox, plus 25 kitchen accessories included.",
-            "pretend-play", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "pretend-play", DevelopmentSeedCredentials.DemoOwnerEmail,
             5500m, "AMD", "Armenia", "Yerevan", "52 Komitas Ave",
-            40.2217m, 44.5183m,
             ListingStatus.Approved, CreatedDaysAgo: 3, UpdatedDaysAgo: 3,
             AgeFromMonths: 24, AgeToMonths: 96,
             Condition: "Excellent",
@@ -906,7 +1024,6 @@ internal static class DevelopmentSeedData
             "12-piece wooden rainbow stacking arc in natural, non-toxic dyed colours, a Montessori open-ended play classic.",
             "montessori-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
             3500m, "AMD", "Armenia", "Yerevan", "38 Acharyan St",
-            40.2223m, 44.5751m,
             ListingStatus.Approved, CreatedDaysAgo: 10, UpdatedDaysAgo: 9,
             AgeFromMonths: 12, AgeToMonths: 60,
             Condition: "Like new",
@@ -919,7 +1036,6 @@ internal static class DevelopmentSeedData
             "Chunky wooden peg puzzle with eight farm-animal pieces, each with an easy-grip knob for small hands.",
             "puzzles", DevelopmentSeedCredentials.OwnerLilitEmail,
             1300m, "AMD", "Armenia", "Yerevan", "Davtashen 3rd District, Bldg 27",
-            40.2273m, 44.4821m,
             ListingStatus.Approved, CreatedDaysAgo: 17, UpdatedDaysAgo: 1,
             AgeFromMonths: 18, AgeToMonths: 48,
             Condition: "Excellent",
@@ -932,7 +1048,6 @@ internal static class DevelopmentSeedData
             "Junior sliding-maze board game with double-sided tiles for two difficulty levels, all 24 tiles present.",
             "board-games", DevelopmentSeedCredentials.OwnerDavitEmail,
             1800m, "AMD", "Armenia", "Yerevan", "201 Arshakunyats Ave",
-            40.1520m, 44.5550m,
             ListingStatus.Approved, CreatedDaysAgo: 24, UpdatedDaysAgo: 9,
             AgeFromMonths: 48, AgeToMonths: 84,
             Condition: "Like new",
@@ -945,7 +1060,6 @@ internal static class DevelopmentSeedData
             "Bluetooth karaoke machine with two wireless microphones, built-in disco lights and a tablet holder.",
             "party-toys", DevelopmentSeedCredentials.OwnerMariamEmail,
             3500m, "AMD", "Armenia", "Yerevan", "67 Zoravar Andranik Ave",
-            40.2148m, 44.5435m,
             ListingStatus.Approved, CreatedDaysAgo: 31, UpdatedDaysAgo: 3,
             AgeFromMonths: 60, AgeToMonths: 144,
             Condition: "Excellent",
@@ -956,9 +1070,8 @@ internal static class DevelopmentSeedData
             ListingIds.VTechSitToStandLearningWalker,
             "VTech Sit-to-Stand Learning Walker",
             "Push-along learning walker with a removable activity panel (lights, sounds, shape sorter) and adjustable speed wheels for early walkers.",
-            "baby-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "baby-toys", DevelopmentSeedCredentials.OwnerEmail,
             1800m, "AMD", "Armenia", "Yerevan", "12 Nalbandyan St",
-            40.1823m, 44.5157m,
             ListingStatus.Approved, CreatedDaysAgo: 38, UpdatedDaysAgo: 21,
             AgeFromMonths: 9, AgeToMonths: 18,
             Condition: "Good",
@@ -969,9 +1082,8 @@ internal static class DevelopmentSeedData
             ListingIds.MagnaTilesClearColors32PieceSet,
             "Magna-Tiles Clear Colors 32-Piece Set",
             "32-piece magnetic building tile set in translucent colours, works on any flat surface or window.",
-            "building-blocks", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "building-blocks", DevelopmentSeedCredentials.OwnerGoharEmail,
             3800m, "AMD", "Armenia", "Yerevan", "72 Sebastia St",
-            40.1778m, 44.4521m,
             ListingStatus.Approved, CreatedDaysAgo: 45, UpdatedDaysAgo: 39,
             AgeFromMonths: 36, AgeToMonths: 96,
             Condition: "Like new",
@@ -982,9 +1094,8 @@ internal static class DevelopmentSeedData
             ListingIds.MelissaDougWoodenAlphabetPuzzleBoard,
             "Melissa & Doug Wooden Alphabet Puzzle Board",
             "Solid wood puzzle board with 26 chunky letter pieces, each with a matching picture peg.",
-            "educational-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
+            "educational-toys", DevelopmentSeedCredentials.OwnerArmenEmail,
             1500m, "AMD", "Armenia", "Yerevan", "Nork 3rd Microdistrict, Bldg 21",
-            40.1844m, 44.5427m,
             ListingStatus.Rejected, CreatedDaysAgo: 9, UpdatedDaysAgo: 8,
             AgeFromMonths: 24, AgeToMonths: 60,
             Condition: "Like new",
@@ -996,9 +1107,8 @@ internal static class DevelopmentSeedData
             ListingIds.Step2NaturallyPlayfulSandTable,
             "Step2 Naturally Playful Sand Table",
             "Two-level sand and water table with a sifting funnel, two buckets and four sand tools included.",
-            "outdoor-toys", DevelopmentSeedCredentials.OwnerLilitEmail,
+            "outdoor-toys", DevelopmentSeedCredentials.OwnerKarenEmail,
             3200m, "AMD", "Armenia", "Yerevan", "Nor Nork 2nd Microdistrict, Bldg 29",
-            40.1875m, 44.5792m,
             ListingStatus.Approved, CreatedDaysAgo: 59, UpdatedDaysAgo: 16,
             AgeFromMonths: 18, AgeToMonths: 60,
             Condition: "Good",
@@ -1009,9 +1119,8 @@ internal static class DevelopmentSeedData
             ListingIds.PegPeregoJohnDeereGroundForceRideOnTractor,
             "Peg Perego John Deere Ground Force Ride-On Tractor",
             "Battery-powered ride-on tractor with a working trailer, real engine sounds and two-speed forward plus reverse.",
-            "ride-on-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
+            "ride-on-toys", DevelopmentSeedCredentials.OwnerSedaEmail,
             7500m, "AMD", "Armenia", "Yerevan", "Nubarashen 1st Microdistrict, Bldg 14",
-            40.0878m, 44.5284m,
             ListingStatus.Approved, CreatedDaysAgo: 6, UpdatedDaysAgo: 3,
             AgeFromMonths: 36, AgeToMonths: 84,
             Condition: "Good",
@@ -1022,9 +1131,8 @@ internal static class DevelopmentSeedData
             ListingIds.FisherPriceLittlePeopleFarm,
             "Fisher-Price Little People Farm",
             "Animal-sound farm playset with a barn, silo, tractor and six Little People figures.",
-            "pretend-play", DevelopmentSeedCredentials.OwnerMariamEmail,
+            "pretend-play", DevelopmentSeedCredentials.OwnerVaheEmail,
             2200m, "AMD", "Armenia", "Yerevan", "112 Bagratunyats Ave",
-            40.1258m, 44.4821m,
             ListingStatus.Approved, CreatedDaysAgo: 13, UpdatedDaysAgo: 9,
             AgeFromMonths: 12, AgeToMonths: 48,
             Condition: "Good",
@@ -1035,9 +1143,8 @@ internal static class DevelopmentSeedData
             ListingIds.PlanToysWoodenSortingBoard,
             "Plan Toys Wooden Sorting Board",
             "Sustainably made wooden sorting board with geometric pegs in four shapes and four colours.",
-            "montessori-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "montessori-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
             1800m, "AMD", "Armenia", "Yerevan", "9 Gubkin St",
-            40.1998m, 44.4427m,
             ListingStatus.Approved, CreatedDaysAgo: 20, UpdatedDaysAgo: 9,
             AgeFromMonths: 18, AgeToMonths: 48,
             Condition: "Good",
@@ -1048,9 +1155,8 @@ internal static class DevelopmentSeedData
             ListingIds.Educa300PieceKidsPuzzleDinosaurs,
             "Educa 300-Piece Kids Puzzle - Dinosaurs",
             "300-piece dinosaur-themed jigsaw with an anti-slip finish, includes the original storage tin.",
-            "puzzles", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "puzzles", DevelopmentSeedCredentials.DemoOwnerEmail,
             1500m, "AMD", "Armenia", "Yerevan", "7 Vratsakan St",
-            40.2107m, 44.5263m,
             ListingStatus.Approved, CreatedDaysAgo: 27, UpdatedDaysAgo: 21,
             AgeFromMonths: 72, AgeToMonths: 144,
             Condition: "Good",
@@ -1063,7 +1169,6 @@ internal static class DevelopmentSeedData
             "Pirate-themed junior version of Catan for 2-4 players, includes all ships, resource cards and building pieces.",
             "board-games", DevelopmentSeedCredentials.OwnerNarekEmail,
             2200m, "AMD", "Armenia", "Yerevan", "11 Davit Anhaght St",
-            40.2153m, 44.5651m,
             ListingStatus.Approved, CreatedDaysAgo: 34, UpdatedDaysAgo: 19,
             AgeFromMonths: 72, AgeToMonths: 144,
             Condition: "Good",
@@ -1076,7 +1181,6 @@ internal static class DevelopmentSeedData
             "Set of four Nerf Rival blasters with foam rounds and eye-protection glasses for each player, ideal for backyard party games.",
             "party-toys", DevelopmentSeedCredentials.OwnerLilitEmail,
             2500m, "AMD", "Armenia", "Yerevan", "Davtashen 4th District, Bldg 9",
-            40.2193m, 44.4751m,
             ListingStatus.PendingApproval, CreatedDaysAgo: 2, UpdatedDaysAgo: 1,
             AgeFromMonths: 96, AgeToMonths: 168,
             Condition: "Good",
@@ -1089,7 +1193,6 @@ internal static class DevelopmentSeedData
             "Mesh bath toy organizer with a suction-mount hook, plus eight squirter toys (boats, ducks and sea animals).",
             "baby-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
             1200m, "AMD", "Armenia", "Yerevan", "15 Nor Aresh St",
-            40.1450m, 44.5430m,
             ListingStatus.Approved, CreatedDaysAgo: 48, UpdatedDaysAgo: 21,
             AgeFromMonths: 6, AgeToMonths: 36,
             Condition: "Used",
@@ -1102,7 +1205,6 @@ internal static class DevelopmentSeedData
             "Advanced LEGO Technic buggy with working suspension and steering, 374 pieces. Built and rebuilt twice to confirm no pieces are missing.",
             "building-blocks", DevelopmentSeedCredentials.OwnerMariamEmail,
             3500m, "AMD", "Armenia", "Yerevan", "13 Kanaker St",
-            40.2078m, 44.5335m,
             ListingStatus.Approved, CreatedDaysAgo: 55, UpdatedDaysAgo: 39,
             AgeFromMonths: 84, AgeToMonths: 168,
             Condition: "Good",
@@ -1113,9 +1215,8 @@ internal static class DevelopmentSeedData
             ListingIds.OsmoGeniusStarterKitForIPad,
             "Osmo Genius Starter Kit for iPad",
             "Osmo Genius Starter Kit (base, reflective mirror and five game sets) for interactive tablet-based learning. Tablet not included.",
-            "educational-toys", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "educational-toys", DevelopmentSeedCredentials.OwnerEmail,
             3500m, "AMD", "Armenia", "Yerevan", "63 Abovyan St",
-            40.1773m, 44.5067m,
             ListingStatus.Approved, CreatedDaysAgo: 2, UpdatedDaysAgo: 1,
             AgeFromMonths: 36, AgeToMonths: 96,
             Condition: "Excellent",
@@ -1126,9 +1227,8 @@ internal static class DevelopmentSeedData
             ListingIds.HedstromRainbowWaterSprinklerPlayMat,
             "Hedstrom Rainbow Water Sprinkler Play Mat",
             "Inflatable splash pad that connects to a garden hose, with colourful sprinkler jets around the rim.",
-            "outdoor-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "outdoor-toys", DevelopmentSeedCredentials.OwnerGoharEmail,
             1800m, "AMD", "Armenia", "Yerevan", "8 Raffi St",
-            40.1718m, 44.4431m,
             ListingStatus.Approved, CreatedDaysAgo: 9, UpdatedDaysAgo: 3,
             AgeFromMonths: 12, AgeToMonths: 72,
             Condition: "Used",
@@ -1139,9 +1239,8 @@ internal static class DevelopmentSeedData
             ListingIds.Strider12SportBalanceBike,
             "Strider 12 Sport Balance Bike",
             "Ultra-light 12-inch balance bike with a footrest and adjustable seat/handlebar height for growing riders.",
-            "ride-on-toys", DevelopmentSeedCredentials.OwnerNarekEmail,
+            "ride-on-toys", DevelopmentSeedCredentials.OwnerArmenEmail,
             2800m, "AMD", "Armenia", "Yerevan", "23 Marash St",
-            40.1784m, 44.5327m,
             ListingStatus.Approved, CreatedDaysAgo: 16, UpdatedDaysAgo: 9,
             AgeFromMonths: 18, AgeToMonths: 60,
             Condition: "Like new",
@@ -1152,9 +1251,8 @@ internal static class DevelopmentSeedData
             ListingIds.PlaymobilGrandCastlePlayset,
             "Playmobil Grand Castle Playset",
             "Detailed medieval castle playset with a working drawbridge, catapult and eight knight and royal figures.",
-            "pretend-play", DevelopmentSeedCredentials.OwnerLilitEmail,
+            "pretend-play", DevelopmentSeedCredentials.OwnerKarenEmail,
             4000m, "AMD", "Armenia", "Yerevan", "Nor Nork 5th Microdistrict, Bldg 11",
-            40.1805m, 44.5692m,
             ListingStatus.Approved, CreatedDaysAgo: 23, UpdatedDaysAgo: 23,
             AgeFromMonths: 48, AgeToMonths: 108,
             Condition: "Like new",
@@ -1165,9 +1263,8 @@ internal static class DevelopmentSeedData
             ListingIds.LoveveryPlayKitTheBabbler,
             "Lovevery Play Kit - The Babbler",
             "Stage-based Montessori play kit for 6-9 months: textured balls, a rolling drum and a first mirror toy.",
-            "montessori-toys", DevelopmentSeedCredentials.OwnerDavitEmail,
+            "montessori-toys", DevelopmentSeedCredentials.OwnerSedaEmail,
             2600m, "AMD", "Armenia", "Yerevan", "Nubarashen 2nd Microdistrict, Bldg 9",
-            40.0848m, 44.5234m,
             ListingStatus.PendingApproval, CreatedDaysAgo: 5, UpdatedDaysAgo: 3,
             AgeFromMonths: 6, AgeToMonths: 9,
             Condition: "Excellent",
@@ -1178,9 +1275,8 @@ internal static class DevelopmentSeedData
             ListingIds.JanodMagneticWoodenPuzzleBookSeasons,
             "Janod Magnetic Wooden Puzzle Book - Seasons",
             "Magnetic travel puzzle book with four seasonal scenes and 30+ magnetic wooden pieces stored inside the cover.",
-            "puzzles", DevelopmentSeedCredentials.OwnerMariamEmail,
+            "puzzles", DevelopmentSeedCredentials.OwnerVaheEmail,
             1600m, "AMD", "Armenia", "Yerevan", "29 Manandyan St",
-            40.1188m, 44.4721m,
             ListingStatus.Approved, CreatedDaysAgo: 37, UpdatedDaysAgo: 4,
             AgeFromMonths: 36, AgeToMonths: 84,
             Condition: "Like new",
@@ -1191,9 +1287,8 @@ internal static class DevelopmentSeedData
             ListingIds.JengaClassicWoodenBlockGame,
             "Jenga Classic Wooden Block Game",
             "Original 54-piece wooden stacking tower game, blocks sanded smooth and warp-checked.",
-            "board-games", DevelopmentSeedCredentials.DemoOwnerEmail,
+            "board-games", DevelopmentSeedCredentials.OwnerHasmikEmail,
             1400m, "AMD", "Armenia", "Yerevan", "64 Komitas Ave",
-            40.2187m, 44.5283m,
             ListingStatus.Approved, CreatedDaysAgo: 44, UpdatedDaysAgo: 29,
             AgeFromMonths: 72, AgeToMonths: 168,
             Condition: "Used",
@@ -1204,9 +1299,8 @@ internal static class DevelopmentSeedData
             ListingIds.PinataPartyFavorBundle,
             "Pinata & Party Favor Bundle",
             "Reusable star-shaped pinata frame with a party favor refill kit (confetti, small toys and wrapped candy bags).",
-            "party-toys", DevelopmentSeedCredentials.OwnerAnahitEmail,
+            "party-toys", DevelopmentSeedCredentials.OwnerHasmikEmail,
             1800m, "AMD", "Armenia", "Yerevan", "38 Tumanyan St",
-            40.1843m, 44.5127m,
             ListingStatus.Approved, CreatedDaysAgo: 51, UpdatedDaysAgo: 3,
             AgeFromMonths: 36, AgeToMonths: 144,
             Condition: "Used",

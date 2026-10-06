@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading;
 using RentalPlatform.Tests.TestSupport;
@@ -61,6 +62,63 @@ public sealed class RateLimitingTests
         });
 
         Assert.Equal(HttpStatusCode.TooManyRequests, overLimitResponse.StatusCode);
+    }
+
+    // The home-point policy is partitioned per ACCOUNT, not per IP, because moving a home point
+    // rewrites every listing the owner has and can notify every renter with a booking in flight.
+    // So this test does NOT need an IP tag to be isolated — a fresh user id is its own bucket — and
+    // proving that is half the point: two different users must not share a budget.
+    [Fact]
+    public async Task HomePoint_Put_Returns_429_After_PermitLimit_Exceeded_Per_User()
+    {
+        const int permitLimit = 10; // matches RateLimiterExtensions.HomePointPolicy PermitLimit
+
+        var userId = Guid.NewGuid();
+        var email = $"{userId:N}@rate-limit.local";
+        await _factory.SeedAsync(TestData.User(userId, email));
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", TestJwtTokenHelper.GenerateToken(userId, email));
+
+        // Each request nudges the point so none of them is the unchanged-point no-op — the limiter
+        // runs before the service either way, but this keeps the calls representative.
+        for (var i = 0; i < permitLimit; i++)
+        {
+            var response = await client.PutAsJsonAsync("/api/auth/me/home-point", new
+            {
+                latitude = TestData.KentronPoint.Latitude + (i * 0.0001m),
+                longitude = TestData.KentronPoint.Longitude
+            });
+
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
+        }
+
+        var overLimitResponse = await client.PutAsJsonAsync("/api/auth/me/home-point", new
+        {
+            latitude = TestData.KentronPoint.Latitude,
+            longitude = TestData.KentronPoint.Longitude
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, overLimitResponse.StatusCode);
+
+        // A different account, same IP, same moment: unaffected. If the partition were per IP, a
+        // household behind one NAT address would lock each other out.
+        var otherUserId = Guid.NewGuid();
+        var otherEmail = $"{otherUserId:N}@rate-limit.local";
+        await _factory.SeedAsync(TestData.User(otherUserId, otherEmail));
+
+        var otherClient = _factory.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", TestJwtTokenHelper.GenerateToken(otherUserId, otherEmail));
+
+        var otherResponse = await otherClient.PutAsJsonAsync("/api/auth/me/home-point", new
+        {
+            latitude = TestData.KentronPoint.Latitude,
+            longitude = TestData.KentronPoint.Longitude
+        });
+
+        Assert.Equal(HttpStatusCode.OK, otherResponse.StatusCode);
     }
 
     // A simulated private-range IPv4 address unique within this test run, so repeated runs of

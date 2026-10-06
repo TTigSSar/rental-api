@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using RentalPlatform.Application.Services;
 using RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 using RentalPlatform.Infrastructure.Persistence;
 using RentalPlatform.Infrastructure.Services;
@@ -29,7 +30,14 @@ public sealed class DevelopmentSeedCategoryKeywordsIdempotencyTests
         new BcryptPasswordHasher(),
         NullLogger<DevelopmentSeedRunner>.Instance,
         new FakeFileStorageService(),
-        new HttpClient(new NeverSucceedsHandler()));
+        new HttpClient(new NeverSucceedsHandler()),
+        // The real home-point service over the SAME context the runner uses, mirroring DI: the
+        // seed applies its owners' home points through the one writer allowed to derive them.
+        new HomePointService(
+            new HomePointStore(context),
+            new GeohashSnapper(),
+            new DistrictBoundaryProvider(),
+            new FakeNotificationEmitter()));
 
     [Fact]
     public async Task RunAsync_Seeds_CategoryKeywords_For_Every_Seeded_Category_Exactly_Once()

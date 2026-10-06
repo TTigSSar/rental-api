@@ -34,19 +34,22 @@ public sealed class AuthService : IAuthService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IExternalIdentityTokenValidator _externalIdentityTokenValidator;
+    private readonly IHomePointService _homePointService;
 
     public AuthService(
         IUserAuthStore userAuthStore,
         IPasswordHasher passwordHasher,
         IJwtTokenService jwtTokenService,
         ICurrentUserContext currentUserContext,
-        IExternalIdentityTokenValidator externalIdentityTokenValidator)
+        IExternalIdentityTokenValidator externalIdentityTokenValidator,
+        IHomePointService homePointService)
     {
         _userAuthStore = userAuthStore;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
         _currentUserContext = currentUserContext;
         _externalIdentityTokenValidator = externalIdentityTokenValidator;
+        _homePointService = homePointService;
     }
 
     public async Task<ServiceResult<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
@@ -75,6 +78,23 @@ public sealed class AuthService : IAuthService
             });
         }
 
+        // Checked BEFORE the account exists. The home-point step is optional but, when supplied, it
+        // must be inside Yerevan — and rejecting it after the insert would leave a registered user
+        // behind, so the obvious retry would then fail on a duplicate email instead of on the pin.
+        if (request.HomeLatitude is not null || request.HomeLongitude is not null)
+        {
+            // Both-or-neither is already enforced by RegisterRequest.Validate; the null-coalesce
+            // keeps this honest if a caller bypasses model validation.
+            var areaCheck = _homePointService.ValidateForSave(
+                request.HomeLatitude ?? 0m,
+                request.HomeLongitude ?? 0m);
+
+            if (!areaCheck.IsSuccess)
+            {
+                return ServiceResult<AuthResponse>.Failure(areaCheck.Error!);
+            }
+        }
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -94,6 +114,21 @@ public sealed class AuthService : IAuthService
 
         await _userAuthStore.AddAsync(user, cancellationToken);
         await _userAuthStore.SaveChangesAsync(cancellationToken);
+
+        // Optional home-point step (the sign-up wizard lets it be skipped). Routed through the same
+        // single writer every other caller uses (home-point model) so the public pair and the
+        // district are derived in exactly one place. Both-or-neither is already enforced by
+        // RegisterRequest.Validate; re-checked here because a service must not depend on its
+        // caller's validation. A brand-new user owns no listings, so this can never fan out.
+        if (request.HomeLatitude is { } homeLatitude && request.HomeLongitude is { } homeLongitude)
+        {
+            await _homePointService.SetHomePointAsync(user.Id, homeLatitude, homeLongitude, cancellationToken);
+
+            // Re-read so HomeDistrict is loaded (FindByIdAsync Includes it) — without this the
+            // registration response would carry a home point whose `district` is null even when the
+            // point did resolve to one, and the client would have to call GET /me to find out.
+            user = await _userAuthStore.FindByIdAsync(user.Id, cancellationToken) ?? user;
+        }
 
         var token = _jwtTokenService.GenerateAccessToken(user);
 
@@ -386,6 +421,67 @@ public sealed class AuthService : IAuthService
         return ServiceResult<bool>.Success(true);
     }
 
+    // Both endpoints delegate the actual write to IHomePointService — the single writer for
+    // User.Home*/Listing location fields (home-point model). AuthService only resolves "who is
+    // asking" and re-reads the user afterwards so the response carries the loaded HomeDistrict.
+    public async Task<ServiceResult<CurrentUserResponse>> UpdateHomePointAsync(
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var result = await _homePointService.SetHomePointAsync(userId, latitude, longitude, cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(result.Error!);
+        }
+
+        return await ReadCurrentUserAsync(userId, cancellationToken);
+    }
+
+    public async Task<ServiceResult<CurrentUserResponse>> ClearHomePointAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var result = await _homePointService.ClearHomePointAsync(userId, cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(result.Error!);
+        }
+
+        return await ReadCurrentUserAsync(userId, cancellationToken);
+    }
+
+    private async Task<ServiceResult<CurrentUserResponse>> ReadCurrentUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
+    }
+
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 
     private static string? NormalizeOptional(string? value) =>
@@ -429,6 +525,39 @@ public sealed class AuthService : IAuthService
         AvatarUrl = user.AvatarUrl,
         CreatedAt = user.CreatedAt,
         IsBlocked = user.IsBlocked,
-        Role = user.Role
+        Role = user.Role,
+        HomePoint = MapHomePoint(user)
     };
+
+    // Self-view only (home-point model). CurrentUserResponse is the ONLY DTO carrying the exact
+    // home coordinates, and it is only ever returned to the account that owns them — every other
+    // surface (public profile, listing detail, map pins, search) sees the geohash-snapped public
+    // pair on the listing instead, exactly as ADR-008 requires. There is a privacy test asserting
+    // the exact decimals never appear anywhere else.
+    private static HomePointResponse? MapHomePoint(User user)
+    {
+        if (user.HomeLatitude is not { } latitude || user.HomeLongitude is not { } longitude)
+        {
+            return null;
+        }
+
+        return new HomePointResponse
+        {
+            Latitude = latitude,
+            Longitude = longitude,
+            PublicLatitude = user.HomePublicLatitude,
+            PublicLongitude = user.HomePublicLongitude,
+            District = user.HomeDistrict is { } district
+                ? new ListingDistrictResponse
+                {
+                    Id = district.Id,
+                    Code = district.Code,
+                    NameEn = district.NameEn,
+                    NameHy = district.NameHy,
+                    NameRu = district.NameRu
+                }
+                : null,
+            UpdatedAt = user.HomePointUpdatedAt
+        };
+    }
 }

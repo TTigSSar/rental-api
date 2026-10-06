@@ -19,6 +19,14 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 ///
 /// Additional catalogue-expansion owners (toyrent.am domain, no bookings/reviews/favorites):
 ///   anahit@toyrent.am, narek@toyrent.am, lilit@toyrent.am, davit@toyrent.am, mariam@toyrent.am
+///
+/// Home-point cohort (toyrent.am domain, no bookings/reviews/favorites):
+///   gohar@toyrent.am, karen@toyrent.am, armen@toyrent.am, seda@toyrent.am, vahe@toyrent.am,
+///   hasmik@toyrent.am
+/// A listing's location is now its owner's home point, so a catalogue that is spread across the map
+/// needs OWNERS spread across the map. These six bring the seed to 13 owners with a home point,
+/// covering all 12 Yerevan districts (hasmik@toyrent.am shares Nubarashen with seda@toyrent.am, on
+/// a different street). All 13 are inside Yerevan because nothing else can be saved as a home point.
 /// </remarks>
 internal static class DevelopmentSeedCredentials
 {
@@ -42,4 +50,14 @@ internal static class DevelopmentSeedCredentials
     public const string OwnerLilitEmail  = "lilit@toyrent.am";
     public const string OwnerDavitEmail  = "davit@toyrent.am";
     public const string OwnerMariamEmail = "mariam@toyrent.am";
+
+    // Home-point cohort (2026-09): one owner per remaining Yerevan district, plus a 13th sharing
+    // Nubarashen — see DevelopmentSeedData.HomePoints for why that district doubles up.
+    // See DevelopmentSeedData.OwnerHomePoints for the district each of these lives in.
+    public const string OwnerGoharEmail  = "gohar@toyrent.am";
+    public const string OwnerKarenEmail  = "karen@toyrent.am";
+    public const string OwnerArmenEmail  = "armen@toyrent.am";
+    public const string OwnerSedaEmail   = "seda@toyrent.am";
+    public const string OwnerVaheEmail   = "vahe@toyrent.am";
+    public const string OwnerHasmikEmail = "hasmik@toyrent.am";
 }

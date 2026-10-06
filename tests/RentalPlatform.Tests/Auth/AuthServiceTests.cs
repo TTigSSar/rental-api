@@ -19,7 +19,8 @@ public sealed class AuthServiceTests
             new FakePasswordHasher(),
             new FakeJwtTokenService(),
             new FakeCurrentUserContext(currentUserId),
-            new FakeExternalIdentityTokenValidator());
+            new FakeExternalIdentityTokenValidator(),
+            new FakeHomePointService(store));
 
     // Real BCrypt hasher for the tests that need genuine hash behavior (empty-hash guard,
     // end-to-end hash change) — FakePasswordHasher returns false instead of throwing on an
@@ -30,7 +31,8 @@ public sealed class AuthServiceTests
             new BcryptPasswordHasher(),
             new FakeJwtTokenService(),
             new FakeCurrentUserContext(currentUserId),
-            new FakeExternalIdentityTokenValidator());
+            new FakeExternalIdentityTokenValidator(),
+            new FakeHomePointService(store));
 
     [Fact]
     public async Task UpdatePreferredLanguage_Valid_Code_Is_Normalized_And_Persisted()

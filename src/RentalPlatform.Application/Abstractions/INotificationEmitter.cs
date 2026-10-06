@@ -23,4 +23,10 @@ public interface INotificationEmitter
 
     /// <summary>A listing was sent back by moderation → notify the owner.</summary>
     Task ListingRejectedAsync(Listing listing, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// An owner moved their home point while this booking is Pending/Approved/Active (home-point model) →
+    /// notify the renter. Only emitted when the public pair or district actually changed.
+    /// </summary>
+    Task PickupAreaChangedAsync(Booking booking, User owner, District? newDistrict, CancellationToken cancellationToken = default);
 }

@@ -11,4 +11,8 @@ public interface IAuthService
     Task<ServiceResult<CurrentUserResponse>> GetCurrentUserAsync(CancellationToken cancellationToken = default);
     Task<ServiceResult<CurrentUserResponse>> UpdatePreferredLanguageAsync(string? preferredLanguage, CancellationToken cancellationToken = default);
     Task<ServiceResult<bool>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default);
+
+    // Home-point model: the home point is the only source of a user's listings' location.
+    Task<ServiceResult<CurrentUserResponse>> UpdateHomePointAsync(decimal latitude, decimal longitude, CancellationToken cancellationToken = default);
+    Task<ServiceResult<CurrentUserResponse>> ClearHomePointAsync(CancellationToken cancellationToken = default);
 }

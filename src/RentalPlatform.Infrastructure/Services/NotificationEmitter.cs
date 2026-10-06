@@ -151,6 +151,71 @@ public sealed class NotificationEmitter : INotificationEmitter
             CreatedAt = DateTime.UtcNow
         }, cancellationToken);
 
+    // The one emit site whose copy is rendered per-recipient rather than in English only: it is the
+    // first notification a renter can receive about something the OWNER did to a booking already in
+    // flight, and it names a place. Rendered at emit time in booking.Renter.PreferredLanguage (with
+    // the English fallback) from NotificationCopy — see that file for why the language is frozen
+    // here rather than resolved at read time.
+    //
+    // It is also the only emit site that does real work BEFORE handing a finished Notification to
+    // EmitAsync — resolving a language, rendering copy, reading booking.Listing.Title. EmitAsync's
+    // try/catch cannot cover any of that, so a booking whose Listing navigation is not loaded (or
+    // whose row has since been deleted) threw straight out of this method, past HomePointService's
+    // fan-out loop, and cost EVERY remaining renter their notification with nothing logged. The
+    // whole body is therefore guarded here, which is what makes the callers' "the emitter logs its
+    // own failures" contract actually true rather than aspirational.
+    public async Task PickupAreaChangedAsync(Booking booking, User owner, District? newDistrict, CancellationToken cancellationToken = default)
+    {
+        Notification notification;
+        try
+        {
+            var language = NotificationCopy.ResolveLanguage(booking.Renter?.PreferredLanguage);
+            var districtName = newDistrict is null ? null : NotificationCopy.DistrictName(newDistrict, language);
+            var copy = NotificationCopy.PickupAreaChanged(language, booking.Listing.Title, districtName);
+
+            notification = new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = booking.RenterId,
+                Kind = NotificationKind.Pickup,
+                Category = NotificationCategory.Booking,
+                Urgent = false,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = null,
+                ActorName = FullName(owner),
+                ActorAvatarUrl = owner.AvatarUrl,
+                ActorVerified = owner.IsIdConfirmed,
+                EntityType = NotificationEntityType.Booking,
+                EntityId = booking.Id,
+                // Deep-links to the booking, whose page hosts the chat thread for this rental — the
+                // handover details the copy tells the renter to go and check.
+                DeepLink = $"/bookings/{booking.Id}",
+                ToyTitle = booking.Listing.Title,
+                ToyImageUrl = PrimaryImageUrl(booking.Listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = $"/bookings/{booking.Id}",
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+        catch (Exception exception)
+        {
+            // Logged, not rethrown: same contract as EmitAsync below. The identifiers come off the
+            // booking row itself, so they are readable even when its navigations are not — which is
+            // the failure this catch exists for, and the one detail that makes the log line
+            // actionable (it names the booking to go and look at).
+            _logger.LogError(
+                exception,
+                "Failed to build the {Kind} notification for booking {BookingId} (recipient {RecipientId}) — it was not sent.",
+                NotificationKind.Pickup,
+                booking.Id,
+                booking.RenterId);
+            return;
+        }
+
+        await EmitAsync(notification, cancellationToken);
+    }
+
     private async Task EmitAsync(Notification notification, CancellationToken cancellationToken)
     {
         try

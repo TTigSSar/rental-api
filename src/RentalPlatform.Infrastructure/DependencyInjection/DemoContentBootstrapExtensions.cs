@@ -12,8 +12,11 @@ public static class DemoContentBootstrapExtensions
     internal const string DemoContentEnabledKey = "Bootstrap:DemoContentEnabled";
 
     // Reads Bootstrap:DemoContentEnabled / Bootstrap:DemoOwnerEmail / Bootstrap:DemoOwnerPassword
-    // from configuration and, if enabled and both owner values are set, idempotently ensures a
-    // showcase owner account and the catalogue's Approved listings (+ images) exist. Intended for
+    // from configuration and, if enabled and both owner values are set, idempotently ensures the
+    // showcase owner accounts and the catalogue's Approved listings (+ images) exist. The
+    // configured password is the BASE account's and only its own; the per-district accounts that
+    // merely own listings get a random one each and are not logins (see
+    // DemoContentBootstrapRunner's remarks). Intended for
     // non-Development environments — Development already has a full catalogue via the dev seed.
     // Safe to call unconditionally: a no-op whenever DemoContentEnabled is false/unset, the owner
     // values are absent, or the content already exists.
@@ -38,7 +41,12 @@ public static class DemoContentBootstrapExtensions
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("RentalPlatform-DemoContentBootstrap/1.0");
 
-        var runner = new DemoContentBootstrapRunner(dbContext, passwordHasher, fileStorage, http, logger);
+        var districtBoundaryProvider = scope.ServiceProvider.GetRequiredService<IDistrictBoundaryProvider>();
+        // Same scope as the AppDbContext above, so the service's store shares this context.
+        var homePointService = scope.ServiceProvider.GetRequiredService<IHomePointService>();
+
+        var runner = new DemoContentBootstrapRunner(
+            dbContext, passwordHasher, fileStorage, http, logger, districtBoundaryProvider, homePointService);
         await runner.RunAsync(enabled, ownerEmail, ownerPassword, cancellationToken);
     }
 

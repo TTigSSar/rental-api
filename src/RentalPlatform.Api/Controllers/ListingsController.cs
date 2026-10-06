@@ -349,6 +349,9 @@ public sealed class ListingsController : ControllerBase
             "listing.not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "listing.category_not_found" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "listing.invalid_age_range" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            // 409, not 400: the request itself is well-formed and nothing about it can be fixed by
+            // editing the form — the owner has to go and set a home point first (home-point model).
+            "listing.home_point_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "listing.image_empty" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "listing.image_invalid_type" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "listing.image_too_many" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),

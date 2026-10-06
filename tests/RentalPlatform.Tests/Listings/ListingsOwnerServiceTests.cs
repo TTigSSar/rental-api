@@ -16,19 +16,18 @@ public sealed class ListingsOwnerServiceTests
     private static readonly Guid CategoryId = new("c0000000-0000-0000-0000-000000000002");
     private static readonly Guid ListingId = new("c0000000-0000-0000-0000-000000000003");
 
+    // The owner is seeded WITH a home point: creating a listing requires one (home-point model),
+    // and these tests are about the listing lifecycle, not about that gate. The gate itself lives
+    // in ListingLocationDerivationTests.
     private static async Task SeedBaselineAsync(SqliteTestDatabase db, bool ownerBlocked = false)
     {
         await db.SeedAsync(
-            TestData.User(OwnerId, "owner@test.local", isBlocked: ownerBlocked),
+            TestData.OwnerWithHome(OwnerId, "owner@test.local", isBlocked: ownerBlocked),
             TestData.Category(CategoryId));
     }
 
     private static ListingsOwnerService CreateService(AppDbContext context, Guid currentUserId) =>
-        new(
-            new FakeCurrentUserContext(currentUserId),
-            new ListingsOwnerStore(context),
-            new GeohashSnapper(),
-            new DistrictBoundaryProvider());
+        new(new FakeCurrentUserContext(currentUserId), new ListingsOwnerStore(context));
 
     private static CreateListingRequest ValidCreate(
         Guid? categoryId = null,
@@ -44,8 +43,6 @@ public sealed class ListingsOwnerServiceTests
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
         PriceUnit = priceUnit,
-        Country = "Armenia",
-        City = "Yerevan",
         AgeFromMonths = ageFromMonths,
         AgeToMonths = ageToMonths,
         MinRentalDays = minRentalDays,

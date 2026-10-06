@@ -72,6 +72,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChatSystemMessageEmitter, ChatSystemMessageEmitter>();
         services.AddScoped<IAdminMessagesService, AdminMessagesService>();
         services.AddScoped<IModerationNoteEmitter, ModerationNoteEmitter>();
+        services.AddScoped<IHomePointService, HomePointService>();
+        services.AddScoped<IHomePointStore, HomePointStore>();
         services.AddScoped<IListingsOwnerStore, ListingsOwnerStore>();
         services.AddScoped<IBookingsStore, BookingsStore>();
         services.AddScoped<IFavoritesStore, FavoritesStore>();

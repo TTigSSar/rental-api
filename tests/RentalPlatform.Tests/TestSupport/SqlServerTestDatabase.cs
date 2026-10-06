@@ -1,3 +1,4 @@
+﻿using System.Globalization;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -68,6 +69,68 @@ public sealed class SqlServerTestDatabase : IDisposable
         context.Database.Migrate();
     }
 
+    /// <summary>
+    /// Whether the SQL Server these tests need is actually reachable, probed once per test run.
+    /// </summary>
+    /// <remarks>
+    /// Read by <see cref="SqlServerFactAttribute"/>, which turns "no SQL Server on this machine"
+    /// into a VISIBLE xUnit skip. The probe only opens a connection to master: it deliberately
+    /// does not create, migrate or drop a database, so it is cheap enough to run at test-discovery
+    /// time. Only a genuine connection failure counts as unavailable — a malformed
+    /// <see cref="ConnectionStringEnvironmentVariable"/> still fails loudly rather than quietly
+    /// skipping the whole SQL Server tier.
+    /// </remarks>
+    public static bool IsAvailable => LazyIsAvailable.Value;
+
+    private static readonly Lazy<bool> LazyIsAvailable =
+        new(ProbeAvailability, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// Whether <see cref="ConnectionStringEnvironmentVariable"/> is set, i.e. whether this machine
+    /// has explicitly DECLARED a SQL Server for these tests.
+    /// </summary>
+    /// <remarks>
+    /// This is the load-bearing half of the skip contract, and it is not a simplification waiting
+    /// to happen:
+    ///
+    ///   - Variable UNSET (a developer machine): no SQL Server means the SQL Server tier is
+    ///     SKIPPED with a reason. The suite stays runnable without SQL Server.
+    ///   - Variable SET (CI, per ADR-022): the environment has declared it HAS a SQL Server, so an
+    ///     unreachable one is a broken environment, not an absent dependency. It must FAIL, never
+    ///     skip. Without this, a SQL Server service container that failed to come up would make CI
+    ///     pass with the migration tier silently unexecuted - the same false green this attribute
+    ///     exists to remove from developer machines, relocated to where nobody is watching.
+    ///
+    /// <see cref="SqlServerFactAttribute"/> enforces it by declining to skip in the SET case: the
+    /// test then runs and fails on the real connection error, which names the unreachable server.
+    /// </remarks>
+    public static bool IsExplicitlyConfigured =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable));
+
+    private static bool ProbeAvailability()
+    {
+        // Deliberately non-throwing: this runs while xUnit CONSTRUCTS SqlServerFactAttribute at
+        // discovery time, and an exception there is not reliably reported as a failed run. The
+        // "must fail when explicitly configured" half of the contract is therefore enforced by the
+        // attribute (which declines to skip) and lands as an ordinary test failure.
+        //
+        // A short connect timeout keeps the probe from stalling the run on a machine with no
+        // SQL Server, where the default 15s would be paid before the first skip is reported.
+        var probeConnectionString =
+            new SqlConnectionStringBuilder(MasterConnectionString) { ConnectTimeout = 5 }.ConnectionString;
+
+        try
+        {
+            using var probe = new SqlConnection(probeConnectionString);
+            probe.Open();
+            return true;
+        }
+        catch (SqlException)
+        {
+            return false;
+        }
+    }
+
     private static string BuildMasterConnectionString()
     {
         var configured = Environment.GetEnvironmentVariable(ConnectionStringEnvironmentVariable);
@@ -102,6 +165,111 @@ public sealed class SqlServerTestDatabase : IDisposable
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlServer(_databaseConnectionString)
             .Options);
+
+    /// <summary>
+    /// Inserts minimal Users rows with raw SQL, naming only the columns that have existed since
+    /// InitialCreate.
+    /// </summary>
+    /// <remarks>
+    /// Use this — not <see cref="SeedAsync"/> — in a test that seeds against an OLDER schema via
+    /// <see cref="MigrateTo"/>. Seeding through the entity model writes every column the CURRENT
+    /// model has, so the moment any migration adds a column to Users, every such test breaks with
+    /// "Invalid column name" on a column that has nothing to do with what it is testing (which is
+    /// exactly what AddUserHomePoint did). Raw SQL pins the insert to the old schema's shape.
+    /// </remarks>
+    public async Task SeedLegacyUsersAsync(params (Guid Id, string Email, int Role)[] users)
+    {
+        await using var context = CreateContext();
+        foreach (var (id, email, role) in users)
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO [Users] ([Id], [Email], [PasswordHash], [FirstName], [LastName], [CreatedAt], [IsBlocked], [Role])
+                VALUES ({0}, {1}, 'x', 'Test', 'User', SYSUTCDATETIME(), 0, {2});
+                """,
+                id, email, role);
+        }
+    }
+
+    /// <summary>Inserts a minimal Categories row with raw SQL. Same reason as <see cref="SeedLegacyUsersAsync"/>.</summary>
+    public async Task SeedLegacyCategoryAsync(Guid id, string name, string slug)
+    {
+        await using var context = CreateContext();
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO [Categories] ([Id], [Name], [Slug], [DisplayOrder], [IsVisible])
+            VALUES ({0}, {1}, {2}, 0, 1);
+            """,
+            id, name, slug);
+    }
+
+    /// <summary>
+    /// Inserts a minimal Listings row with raw SQL, naming only columns that exist at the schema
+    /// state the caller migrated to. Same reason as <see cref="SeedLegacyUsersAsync"/>.
+    /// </summary>
+    /// <param name="latitude">Exact latitude, or null for a listing that never had a coordinate.</param>
+    /// <param name="longitude">Exact longitude, or null for a listing that never had a coordinate.</param>
+    /// <param name="status">
+    /// Raw <c>Listings.Status</c> value. Left as a plain int rather than the ListingStatus enum on
+    /// purpose: this method writes the OLD schema, and taking today's enum here would invite the
+    /// same coupling the raw SQL exists to avoid.
+    /// </param>
+    /// <param name="updatedDaysAgo">
+    /// How far in the past <c>UpdatedAt</c> is stamped. Defaults to a value well clear of "now" so a
+    /// test can tell a preserved UpdatedAt from one a migration re-stamped with SYSUTCDATETIME().
+    /// </param>
+    /// <param name="city">
+    /// Authored <c>City</c>. Parameterised because the pre-home-point schema let one owner's
+    /// listings sit in different cities, and a migration that relocates a listing without moving
+    /// its City can only be caught by seeding that shape.
+    /// </param>
+    /// <param name="country">Authored <c>Country</c>. Parameterised for the same reason as <paramref name="city"/>.</param>
+    public async Task SeedLegacyListingAsync(
+        Guid id,
+        Guid ownerId,
+        Guid categoryId,
+        decimal? latitude,
+        decimal? longitude,
+        int createdDaysAgo,
+        int status = 2,
+        int updatedDaysAgo = 45,
+        string city = "Yerevan",
+        string country = "Armenia")
+    {
+        await using var context = CreateContext();
+
+        // Coordinates are passed as STRINGS and converted in SQL. EF's raw-SQL parameter inference
+        // maps a CLR decimal to decimal(18,2), which silently rounds 40.187400 to 40.19 — and a
+        // migration test about preserving exact coordinates cannot start by losing four digits of
+        // them. CONVERT pins the scale to the column's own decimal(9,6).
+        //
+        // A null coordinate is passed as the EMPTY STRING and turned back into NULL by NULLIF,
+        // rather than as DBNull.Value: ExecuteSqlRawAsync infers a store type from each parameter's
+        // CLR type and has no mapping for DBNull ("The current provider doesn't have a store type
+        // mapping for properties of type 'DBNull'"). Every parameter here therefore stays nvarchar.
+        await context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO [Listings]
+                ([Id], [OwnerId], [CategoryId], [Title], [Description], [PricePerDay], [PriceUnit],
+                 [Currency], [Country], [City], [Latitude], [Longitude], [LocationKind], [Status],
+                 [CreatedAt], [UpdatedAt])
+            VALUES
+                ({0}, {1}, {2}, 'Seeded listing', 'A long enough description to satisfy validation rules.',
+                 2500, 1, 'AMD', {8}, {9},
+                 CONVERT(decimal(9,6), NULLIF({3}, '')), CONVERT(decimal(9,6), NULLIF({4}, '')), 0, {6},
+                 DATEADD(day, -{5}, SYSUTCDATETIME()), DATEADD(day, -{7}, SYSUTCDATETIME()));
+            """,
+            id,
+            ownerId,
+            categoryId,
+            latitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            longitude?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            createdDaysAgo,
+            status,
+            updatedDaysAgo,
+            country,
+            city);
+    }
 
     public async Task SeedAsync(params object[] entities)
     {

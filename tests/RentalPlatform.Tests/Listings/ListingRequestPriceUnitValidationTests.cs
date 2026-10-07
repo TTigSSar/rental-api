@@ -23,8 +23,6 @@ public sealed class ListingRequestPriceUnitValidationTests
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
         PriceUnit = priceUnit,
-        Country = "Armenia",
-        City = "Yerevan",
         CompensationAmount = 5000m
     };
 

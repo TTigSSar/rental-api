@@ -17,7 +17,7 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.30")
+                .HasAnnotation("ProductVersion", "8.0.31")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -623,6 +623,40 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("ListingImages", (string)null);
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.ListingLocationBeforeHomePoint", b =>
+                {
+                    b.Property<Guid>("ListingId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("DistrictId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Latitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.HasKey("ListingId");
+
+                    b.ToTable("ListingLocationsBeforeHomePoint", (string)null);
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ModerationLogEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1025,6 +1059,28 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<Guid?>("HomeDistrictId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("HomeLatitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<decimal?>("HomeLongitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<DateTime?>("HomePointUpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("HomePublicLatitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<decimal?>("HomePublicLongitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
                     b.Property<bool>("IsBlocked")
                         .HasColumnType("bit");
 
@@ -1065,6 +1121,8 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("HomeDistrictId");
 
                     b.HasIndex("ExternalAuthProvider", "ExternalProviderId")
                         .IsUnique()
@@ -1341,6 +1399,16 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Listing");
 
                     b.Navigation("Reviewer");
+                });
+
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.User", b =>
+                {
+                    b.HasOne("RentalPlatform.Domain.Entities.District", "HomeDistrict")
+                        .WithMany()
+                        .HasForeignKey("HomeDistrictId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("HomeDistrict");
                 });
 
             modelBuilder.Entity("RentalPlatform.Domain.Entities.Category", b =>

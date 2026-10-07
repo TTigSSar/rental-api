@@ -27,8 +27,6 @@ public sealed class ListingDeliveryOptionsTests
         Title = "Wooden Train Set",
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
-        Country = "Armenia",
-        City = "Yerevan",
         CompensationAmount = 5000m,
         DeliveryTypes = deliveryTypes,
         MinRentalDays = minRentalDays

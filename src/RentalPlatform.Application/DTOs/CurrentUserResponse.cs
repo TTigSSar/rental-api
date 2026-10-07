@@ -14,4 +14,8 @@ public sealed class CurrentUserResponse
     public DateTime CreatedAt { get; init; }
     public bool IsBlocked { get; init; }
     public UserRole Role { get; init; }
+
+    // Self-view only (home-point model) — never appears on any other DTO. Null when the user has no home
+    // point set yet.
+    public HomePointResponse? HomePoint { get; init; }
 }

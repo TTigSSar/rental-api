@@ -19,16 +19,16 @@ public sealed class UpdateListingRequest : IValidatableObject
     [EnumDataType(typeof(PriceUnit), ErrorMessage = "Price unit must be one of Hourly, Daily, Weekly, Monthly, Yearly.")]
     public PriceUnit? PriceUnit { get; init; }
 
-    [MaxLength(120, ErrorMessage = "City must be at most 120 characters.")]
-    public string? City { get; init; }
-
-    [MaxLength(100, ErrorMessage = "Country must be at most 100 characters.")]
-    public string? Country { get; init; }
-
-    // Optional owner override for the district (see CreateListingRequest.DistrictId). Update does
-    // not currently accept Latitude/Longitude changes, so this is a direct override only — there
-    // is no re-derivation path here; null leaves the existing district unchanged.
-    public Guid? DistrictId { get; init; }
+    // Country, city and district overrides were removed (home-point model) — a listing's country,
+    // city and district are always derived from the owner's home point, and only HomePointService
+    // (or create) ever writes them. A stale client that still sends `country`/`city`/`districtId`
+    // binds harmlessly: unknown JSON members are ignored, so nothing is applied.
+    //
+    // Country went last, and it was the inconsistency rather than the rule: it stayed writable
+    // behind nothing but a length check while HomePointService re-asserts it on every move and
+    // create hardcodes it, so `{"country":"Neverland"}` stuck forever — no re-moderation, and
+    // neither City nor Country is reconciled by ListingLocationBackfillRunner — on a listing
+    // publishing a Yerevan district and a Yerevan pin beside it.
 
     [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]
     public int? AgeFromMonths { get; init; }

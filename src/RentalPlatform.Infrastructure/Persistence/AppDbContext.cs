@@ -27,6 +27,10 @@ public sealed class AppDbContext : DbContext
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<CategoryKeyword> CategoryKeywords => Set<CategoryKeyword>();
 
+    // Pre-migration listing locations, captured once by AddUserHomePoint. The undo tape for that
+    // migration, and the source the demo bootstrap uses to redistribute the showcase by district.
+    public DbSet<ListingLocationBeforeHomePoint> ListingLocationsBeforeHomePoint => Set<ListingLocationBeforeHomePoint>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

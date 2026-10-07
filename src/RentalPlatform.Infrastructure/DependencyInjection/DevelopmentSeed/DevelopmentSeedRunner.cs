@@ -24,19 +24,22 @@ internal sealed class DevelopmentSeedRunner
     private readonly ILogger<DevelopmentSeedRunner> _logger;
     private readonly IFileStorageService _fileStorage;
     private readonly HttpClient _http;
+    private readonly IHomePointService _homePointService;
 
     public DevelopmentSeedRunner(
         AppDbContext dbContext,
         IPasswordHasher passwordHasher,
         ILogger<DevelopmentSeedRunner> logger,
         IFileStorageService fileStorage,
-        HttpClient http)
+        HttpClient http,
+        IHomePointService homePointService)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _logger = logger;
         _fileStorage = fileStorage;
         _http = http;
+        _homePointService = homePointService;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -60,19 +63,154 @@ internal sealed class DevelopmentSeedRunner
             insertedImages + insertedFavorites + insertedBookings + insertedReviews + insertedChat +
             insertedReports;
 
-        if (totalInserted == 0)
+        if (totalInserted > 0)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        // Both steps below run on EVERY seed pass, including one that inserted nothing: they
+        // reconcile rows that already exist, which is exactly the case a "nothing new to insert"
+        // early return used to skip. They also both need everything above to be persisted first —
+        // the owner reassignment queries bookings, and IHomePointService fans the home point out to
+        // listings by querying them.
+        var reassignedListings = await ReassignSeedListingOwnersAsync(cancellationToken);
+        var appliedHomePoints = await ReconcileHomePointsAsync(cancellationToken);
+
+        if (totalInserted == 0 && reassignedListings == 0 && appliedHomePoints == 0)
         {
             _logger.LogInformation("Development seed skipped: demo data already present.");
             return;
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
         _logger.LogInformation(
-            "Development seed completed. Categories: {Categories}, Users: {Users}, Listings: {Listings}, Images: {Images}, Favorites: {Favorites}, Bookings: {Bookings}. Demo password for all demo accounts: {DemoPassword}",
+            "Development seed completed. Categories: {Categories}, Users: {Users}, Listings: {Listings}, Images: {Images}, Favorites: {Favorites}, Bookings: {Bookings}, Listings re-owned: {Reassigned}, Home points applied: {HomePoints}. Demo password for all demo accounts: {DemoPassword}",
             insertedCategories, insertedUsers, insertedListings,
             insertedImages, insertedFavorites, insertedBookings,
+            reassignedListings, appliedHomePoints,
             DevelopmentSeedCredentials.Password);
+    }
+
+    /// <summary>
+    /// Brings an EXISTING seed listing's owner into line with the seed data when the two disagree.
+    /// </summary>
+    /// <remarks>
+    /// Inserting a listing already uses the seed's OwnerEmail, so this only matters on a dev
+    /// database seeded by an older build — where, since a listing's location is now its owner's
+    /// home point, a stale owner means a pin in the wrong district.
+    ///
+    /// A listing with ANY booking is never reassigned, only logged. Moving it would hand a
+    /// stranger someone else's rental history and re-point a live handover at a different address.
+    /// The seed only ever re-owns listings that have no booking, review or chat, so hitting this
+    /// guard means the seed data itself is wrong and wants a human — hence a warning, not silence.
+    /// </remarks>
+    private async Task<int> ReassignSeedListingOwnersAsync(CancellationToken cancellationToken)
+    {
+        var seedOwnerEmailByListingId = DevelopmentSeedData.Listings
+            .ToDictionary(listing => listing.Id, listing => NormalizeEmail(listing.OwnerEmail));
+
+        var seedListingIds = seedOwnerEmailByListingId.Keys.ToArray();
+
+        var listings = await _dbContext.Listings
+            .Where(listing => seedListingIds.Contains(listing.Id))
+            .ToListAsync(cancellationToken);
+
+        var seedEmails = seedOwnerEmailByListingId.Values.Distinct().ToArray();
+        var userIdsByEmail = await _dbContext.Users
+            .Where(user => seedEmails.Contains(user.Email))
+            .ToDictionaryAsync(user => user.Email, user => user.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+        var reassigned = 0;
+        foreach (var listing in listings)
+        {
+            var expectedEmail = seedOwnerEmailByListingId[listing.Id];
+            if (!userIdsByEmail.TryGetValue(expectedEmail, out var expectedOwnerId) ||
+                listing.OwnerId == expectedOwnerId)
+            {
+                continue;
+            }
+
+            if (await _dbContext.Bookings.AnyAsync(booking => booking.ListingId == listing.Id, cancellationToken))
+            {
+                _logger.LogWarning(
+                    "Development seed: listing '{Title}' ({ListingId}) should now belong to {OwnerEmail}, but it has bookings — leaving the owner unchanged. Its location will keep following its CURRENT owner's home point.",
+                    listing.Title, listing.Id, expectedEmail);
+                continue;
+            }
+
+            listing.OwnerId = expectedOwnerId;
+            reassigned++;
+        }
+
+        if (reassigned > 0)
+        {
+            // Saved before the home-point pass so the fan-out below sees the new ownership.
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Development seed: re-owned {Count} listing(s) to match the seed data.", reassigned);
+        }
+
+        return reassigned;
+    }
+
+    /// <summary>
+    /// Applies each seed user's declared home point through the real <see cref="IHomePointService"/>.
+    /// </summary>
+    /// <remarks>
+    /// Through the real service on purpose: it is the single writer of User.Home*/Listing location
+    /// fields, so routing the seed through it is what guarantees seeded data goes through exactly
+    /// the same snapping, district derivation and listing fan-out a real owner's save does — rather
+    /// than a second, seed-only implementation that can drift from it (M-012 territory).
+    ///
+    /// Idempotent for free: setting the point a user already has is a no-op inside the service, so a
+    /// repeat boot returns 0 here and never re-fans-out or re-notifies.
+    /// </remarks>
+    private async Task<int> ReconcileHomePointsAsync(CancellationToken cancellationToken)
+    {
+        var seedsWithHome = DevelopmentSeedData.Users
+            .Where(user => user.HomeLatitude is not null && user.HomeLongitude is not null)
+            .ToArray();
+
+        var emails = seedsWithHome.Select(user => NormalizeEmail(user.Email)).ToArray();
+        var userIdsByEmail = await _dbContext.Users
+            .Where(user => emails.Contains(user.Email))
+            .ToDictionaryAsync(user => user.Email, user => user.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+        var applied = 0;
+        foreach (var seed in seedsWithHome)
+        {
+            if (!userIdsByEmail.TryGetValue(NormalizeEmail(seed.Email), out var userId))
+            {
+                _logger.LogWarning(
+                    "Development seed: cannot apply a home point for {Email} — the user row is missing.",
+                    seed.Email);
+                continue;
+            }
+
+            var result = await _homePointService.SetHomePointAsync(
+                userId, seed.HomeLatitude!.Value, seed.HomeLongitude!.Value, cancellationToken);
+
+            if (!result.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Development seed: could not set the home point for {Email} — {ErrorCode}.",
+                    seed.Email, result.Error?.Code);
+                continue;
+            }
+
+            // Success(false) means "already at this point" — nothing was written.
+            if (result.Value)
+            {
+                applied++;
+            }
+        }
+
+        if (applied > 0)
+        {
+            _logger.LogInformation(
+                "Development seed: applied {Count} home point(s); every listing of those owners moved with them.",
+                applied);
+        }
+
+        return applied;
     }
 
     private async Task<int> SeedCategoriesAsync(CancellationToken cancellationToken)
@@ -342,8 +480,9 @@ internal sealed class DevelopmentSeedRunner
                 Country = seed.Country,
                 City = seed.City,
                 AddressLine = seed.AddressLine,
-                Latitude = seed.Latitude,
-                Longitude = seed.Longitude,
+                // No coordinates: the row is inserted location-less and picks up its owner's home
+                // point in ReconcileHomePointsAsync below (home-point model). The seed deliberately
+                // does not compute the snapped pair or the district itself — one writer only.
                 AgeFromMonths = seed.AgeFromMonths,
                 AgeToMonths = seed.AgeToMonths,
                 Condition = seed.Condition,

@@ -2,6 +2,7 @@ using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
+using RentalPlatform.Infrastructure.Services;
 
 namespace RentalPlatform.Tests.TestSupport;
 
@@ -20,19 +21,98 @@ public static class TestData
         string? lastName = null,
         bool isIdConfirmed = false,
         DateTime? createdAt = null,
-        string? passwordHash = null) => new()
+        string? passwordHash = null,
+        // Home point (home-point model). Deliberately NULL by default — an owner without one cannot
+        // create a listing, and defaulting these would quietly hide that gate from every test that
+        // did not think about it. A test that needs a listable owner says so, e.g. with Yerevan().
+        decimal? homeLatitude = null,
+        decimal? homeLongitude = null,
+        decimal? homePublicLatitude = null,
+        decimal? homePublicLongitude = null,
+        Guid? homeDistrictId = null,
+        string? preferredLanguage = "en") => new()
     {
         Id = id,
         Email = email,
         PasswordHash = passwordHash ?? "x",
         FirstName = firstName ?? "Test",
         LastName = lastName ?? "User",
-        PreferredLanguage = "en",
+        PreferredLanguage = preferredLanguage,
         CreatedAt = createdAt ?? DateTime.UtcNow,
         IsBlocked = isBlocked,
         Role = role,
-        IsIdConfirmed = isIdConfirmed
+        IsIdConfirmed = isIdConfirmed,
+        HomeLatitude = homeLatitude,
+        HomeLongitude = homeLongitude,
+        HomePublicLatitude = homePublicLatitude,
+        HomePublicLongitude = homePublicLongitude,
+        HomeDistrictId = homeDistrictId,
+        HomePointUpdatedAt = homeLatitude is null ? null : DateTime.UtcNow
     };
+
+    /// <summary>
+    /// A point inside Kentron, Yerevan — the default "this owner can list toys" home point. Verified
+    /// against DistrictBoundaryProvider.FindDistrictCode, same convention as the dev seed.
+    /// </summary>
+    public static readonly (decimal Latitude, decimal Longitude) KentronPoint = (40.1856m, 44.5126m);
+
+    /// <summary>A point in Arabkir — used wherever a test needs a SECOND, different Yerevan district.</summary>
+    public static readonly (decimal Latitude, decimal Longitude) ArabkirPoint = (40.2010m, 44.5090m);
+
+    /// <summary>
+    /// Gyumri — a real Armenian city, and outside every Yerevan district. The canonical "this point
+    /// must be refused" fixture: DoRent operates in Yerevan only, so being in the right country buys
+    /// a home point nothing (see IHomePointService.ValidateForSave).
+    /// </summary>
+    public static readonly (decimal Latitude, decimal Longitude) OutsideYerevanPoint = (40.7894m, 43.8475m);
+
+    // Fixed district Guids from DistrictConfiguration.HasData (seeded by EnsureCreated), so a test
+    // can assert on a district without querying for it first.
+    public static readonly Guid KentronDistrictId = new("d0000007-0000-4000-9000-000000000007");
+    public static readonly Guid ArabkirDistrictId = new("d0000002-0000-4000-9000-000000000002");
+
+    /// <summary>
+    /// A user who already has a home point, i.e. one allowed to create listings.
+    /// </summary>
+    /// <remarks>
+    /// The derived half of the home point (the snapped public pair and the district) is filled in
+    /// the way the real service would: the public pair through the real GeohashSnapper, the district
+    /// from the point's known answer. This matters because those derived values are what the rest of
+    /// the system reads — an owner with an exact point but no district behaves like an owner living
+    /// outside Yerevan, which is a different test.
+    /// </remarks>
+    public static User OwnerWithHome(
+        Guid id,
+        string email,
+        (decimal Latitude, decimal Longitude)? point = null,
+        Guid? homeDistrictId = null,
+        bool isBlocked = false,
+        string? preferredLanguage = "en")
+    {
+        var resolved = point ?? KentronPoint;
+        var (latitude, longitude) = resolved;
+        var (publicLatitude, publicLongitude) = new GeohashSnapper().SnapToCellCenter(latitude, longitude);
+
+        return User(
+            id,
+            email,
+            isBlocked: isBlocked,
+            homeLatitude: latitude,
+            homeLongitude: longitude,
+            homePublicLatitude: publicLatitude,
+            homePublicLongitude: publicLongitude,
+            homeDistrictId: homeDistrictId ?? DistrictIdFor(resolved),
+            preferredLanguage: preferredLanguage);
+    }
+
+    // Only the points this file declares are known here; anything else is treated as
+    // "outside Yerevan" and the caller passes homeDistrictId explicitly if that is wrong.
+    private static Guid? DistrictIdFor((decimal Latitude, decimal Longitude) point)
+    {
+        if (point == KentronPoint) return KentronDistrictId;
+        if (point == ArabkirPoint) return ArabkirDistrictId;
+        return null;
+    }
 
     public static Category Category(
         Guid id,

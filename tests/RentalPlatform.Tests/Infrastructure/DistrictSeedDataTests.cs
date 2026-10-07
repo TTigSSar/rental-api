@@ -68,14 +68,91 @@ public sealed class DistrictSeedDataTests
         Assert.Equal(12, seededDistricts.Select(d => d.Id).Distinct().Count());
     }
 
-    // Guards every Yerevan-city dev-seed listing's (Latitude, Longitude) against the district
-    // polygon it is meant to render in. SeedListing carries no district field (DistrictId,
-    // PublicLatitude and PublicLongitude are all derived at startup by
-    // ListingLocationBackfillRunner), so this table is the only place the intended district per
-    // listing is recorded — it must be kept in sync whenever a Yerevan listing's coordinates
-    // change. The single non-Yerevan listing (Birthday Party Toy Pack, Gyumri) legitimately
-    // resolves to no district and is intentionally excluded below.
-    private static readonly (Guid ListingId, string ExpectedDistrictCode)[] ExpectedYerevanListingDistricts =
+    // ---- Per-OWNER district coverage (home-point model) --------------------------------------
+    //
+    // Listings no longer carry coordinates: a listing's pin is its owner's home point. So the
+    // question "does the seeded catalogue cover the map?" is now a question about OWNERS, and these
+    // tests ask it of DevelopmentSeedData.Users / ExpectedOwnerHomeDistrictCodes rather than of the
+    // listing rows.
+    //
+    // Three things have to hold, and each has its own test below:
+    //   1. every seeded home point resolves to the district the seed says it does;
+    //   2. all 12 Yerevan districts have an owner, plus one owner outside Yerevan — otherwise the
+    //      catalogue map collapses toward a handful of pins;
+    //   3. every listing's declared City agrees with its owner's home point, since City is the one
+    //      location field the seed still writes by hand and nothing derives it.
+
+    [Fact]
+    public void Every_Seeded_Home_Point_Resolves_To_Its_Expected_District()
+    {
+        var provider = new DistrictBoundaryProvider();
+
+        var ownersWithHome = DevelopmentSeedData.Users
+            .Where(user => user.HomeLatitude is not null && user.HomeLongitude is not null)
+            .ToList();
+
+        // The expectations table and the seeded users must describe the same set of owners, so
+        // neither can drift silently as owners are added or removed.
+        var ownerEmails = ownersWithHome.Select(user => user.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tableEmails = DevelopmentSeedData.ExpectedOwnerHomeDistrictCodes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missingFromTable = ownerEmails.Except(tableEmails, StringComparer.OrdinalIgnoreCase).ToList();
+        Assert.True(missingFromTable.Count == 0,
+            $"{missingFromTable.Count} seeded owner(s) with a home point have no expected-district entry: {string.Join(", ", missingFromTable)}");
+
+        var extraInTable = tableEmails.Except(ownerEmails, StringComparer.OrdinalIgnoreCase).ToList();
+        Assert.True(extraInTable.Count == 0,
+            $"{extraInTable.Count} expected-district entr(ies) no longer correspond to a seeded owner with a home point: {string.Join(", ", extraInTable)}");
+
+        foreach (var owner in ownersWithHome)
+        {
+            var expectedCode = DevelopmentSeedData.ExpectedOwnerHomeDistrictCodes[owner.Email];
+            var actualCode = provider.FindDistrictCode((double)owner.HomeLatitude!.Value, (double)owner.HomeLongitude!.Value);
+
+            Assert.True(actualCode == expectedCode,
+                $"Owner '{owner.Email}' home point ({owner.HomeLatitude}, {owner.HomeLongitude}) " +
+                $"resolved to district '{actualCode ?? "<null>"}' but expected '{expectedCode ?? "<null>"}'.");
+        }
+    }
+
+    // The catalogue is only spread across the map if its OWNERS are, so every district needs at
+    // least one resident owner. And every seeded owner must resolve to SOME district: a home point
+    // outside Yerevan can no longer be saved, so the seed runner — which applies these through the
+    // real IHomePointService — would simply be refused and the owner would end up with no location.
+    [Fact]
+    public void Every_Seed_Owner_Lives_In_A_Real_District_And_Together_They_Cover_All_Twelve()
+    {
+        var codes = DevelopmentSeedData.ExpectedOwnerHomeDistrictCodes.Values.ToList();
+
+        Assert.All(codes, code => Assert.False(string.IsNullOrWhiteSpace(code)));
+        Assert.Equal(12, codes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        var expectedFromAsset = LoadExpectedDistrictsFromGeoJson().Select(district => district.Code);
+        Assert.Empty(expectedFromAsset.Except(codes, StringComparer.OrdinalIgnoreCase));
+    }
+
+    // City is the one location field still authored by hand in the seed (nothing can derive a place
+    // name — see ListingsOwnerService.ResolveCity), so it is the one that can contradict the pin.
+    // Every owner is in Yerevan, so every listing says Yerevan.
+    [Fact]
+    public void Every_Seed_Listings_City_Agrees_With_Its_Owners_Home_Point()
+    {
+        foreach (var listing in DevelopmentSeedData.Listings)
+        {
+            Assert.True(
+                DevelopmentSeedData.ExpectedOwnerHomeDistrictCodes.ContainsKey(listing.OwnerEmail),
+                $"Listing '{listing.Title}' is owned by {listing.OwnerEmail}, who has no seeded home point — it would have no location at all.");
+
+            Assert.True(listing.City == "Yerevan",
+                $"Listing '{listing.Title}' says City '{listing.City}', but every seeded owner lives in Yerevan.");
+        }
+    }
+
+    // Kept only as documentation of where each listing USED to sit before the home-point change —
+    // the pre-migration district every one of these listings' own coordinates resolved to. Nothing
+    // derives from it any more; the demo bootstrap reads the equivalent fact from the
+    // ListingLocationsBeforeHomePoint snapshot table on a live database instead.
+    private static readonly (Guid ListingId, string ExpectedDistrictCode)[] HistoricalYerevanListingDistricts =
     [
         // ---- Original toy-MVP cohort (pre-2026-08) ----
         (DevelopmentSeedData.ListingIds.LegoDuploStarterSet, "kentron"),
@@ -147,44 +224,19 @@ public sealed class DistrictSeedDataTests
         (DevelopmentSeedData.ListingIds.PinataPartyFavorBundle, "kentron"),
     ];
 
+    // The historical table still has to name districts that exist, otherwise it is a record of
+    // something that never happened. Cheap guard on a piece of documentation whose only remaining
+    // job is to be accurate.
     [Fact]
-    public void Every_Yerevan_Seed_Listing_Resolves_To_Its_Expected_District()
+    public void The_Historical_Listing_District_Table_Names_Only_Real_Districts()
     {
-        var provider = new DistrictBoundaryProvider();
-        var expectedById = ExpectedYerevanListingDistricts.ToDictionary(x => x.ListingId, x => x.ExpectedDistrictCode);
+        var known = LoadExpectedDistrictsFromGeoJson().Select(district => district.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var yerevanListings = DevelopmentSeedData.Listings.Where(l => l.City == "Yerevan").ToList();
-
-        // Every Yerevan listing must have an entry in the table above (and vice versa) so the
-        // table can't silently drift out of sync as listings are added.
-        var yerevanIds = yerevanListings.Select(l => l.Id).ToHashSet();
-        var missingFromTable = yerevanIds.Except(expectedById.Keys).ToList();
-        Assert.True(missingFromTable.Count == 0,
-            $"{missingFromTable.Count} Yerevan listing(s) have no expected-district entry in the test table: {string.Join(", ", missingFromTable)}");
-
-        var extraInTable = expectedById.Keys.Except(yerevanIds).ToList();
-        Assert.True(extraInTable.Count == 0,
-            $"{extraInTable.Count} listing id(s) in the test table no longer correspond to a Yerevan seed listing: {string.Join(", ", extraInTable)}");
-
-        foreach (var listing in yerevanListings)
+        foreach (var (listingId, code) in HistoricalYerevanListingDistricts)
         {
-            var expectedCode = expectedById[listing.Id];
-            var actualCode = provider.FindDistrictCode((double)listing.Latitude, (double)listing.Longitude);
-            Assert.True(actualCode == expectedCode,
-                $"Listing '{listing.Title}' ({listing.Id}) at ({listing.Latitude}, {listing.Longitude}) " +
-                $"resolved to district '{actualCode ?? "<null>"}' but expected '{expectedCode}'.");
+            Assert.True(known.Contains(code),
+                $"Historical district '{code}' recorded for listing {listingId} is not one of the 12 Yerevan districts.");
         }
-    }
-
-    [Fact]
-    public void The_NonYerevan_Seed_Listing_Resolves_To_No_District()
-    {
-        var provider = new DistrictBoundaryProvider();
-        var gyumriListings = DevelopmentSeedData.Listings.Where(l => l.City != "Yerevan").ToList();
-
-        Assert.Single(gyumriListings);
-        var listing = gyumriListings[0];
-        var actualCode = provider.FindDistrictCode((double)listing.Latitude, (double)listing.Longitude);
-        Assert.Null(actualCode);
     }
 }

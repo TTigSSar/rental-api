@@ -7,6 +7,15 @@ namespace RentalPlatform.Domain.Entities;
 /// data are denormalised (captured at emit time) so the feed reads with no joins
 /// and system senders render uniformly — matching the "copy produced server-side"
 /// contract the client relies on.
+///
+/// <para>
+/// That contract extends to LANGUAGE: <see cref="Title"/>, <see cref="Body"/>, <see cref="Meta"/>
+/// and the action labels are finished strings, never translation keys, so they are rendered in the
+/// recipient's preferred language at emit time and frozen there. A recipient who changes their
+/// language afterwards sees the new language only on notifications emitted from then on. The
+/// translations themselves live in one table on the Infrastructure side (NotificationCopy) — never
+/// interpolated ad hoc at an emit site.
+/// </para>
 /// </summary>
 public sealed class Notification
 {

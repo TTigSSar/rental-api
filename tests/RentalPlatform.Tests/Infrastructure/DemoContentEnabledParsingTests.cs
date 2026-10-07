@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Services;
 using RentalPlatform.Infrastructure.DependencyInjection;
 using RentalPlatform.Infrastructure.Persistence;
 using RentalPlatform.Infrastructure.Services;
@@ -104,6 +105,14 @@ public sealed class DemoContentEnabledParsingTests
         services.AddSingleton(db.CreateContext());
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddSingleton<IFileStorageService, FakeFileStorageService>();
+        // The bootstrap now also resolves the district lookup and the home-point writer, because a
+        // showcase owner per district is what keeps the catalogue off a single map pin.
+        services.AddSingleton<IDistrictBoundaryProvider, DistrictBoundaryProvider>();
+        services.AddSingleton<IGeohashSnapper, GeohashSnapper>();
+        services.AddSingleton<INotificationsStore, NotificationsStore>();
+        services.AddSingleton<INotificationEmitter, NotificationEmitter>();
+        services.AddSingleton<IHomePointStore, HomePointStore>();
+        services.AddSingleton<IHomePointService, HomePointService>();
         var provider = services.BuildServiceProvider();
 
         var configuration = BuildConfiguration(""); // no owner creds either -> stays a full no-op
@@ -122,6 +131,14 @@ public sealed class DemoContentEnabledParsingTests
         services.AddSingleton(db.CreateContext());
         services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
         services.AddSingleton<IFileStorageService, FakeFileStorageService>();
+        // The bootstrap now also resolves the district lookup and the home-point writer, because a
+        // showcase owner per district is what keeps the catalogue off a single map pin.
+        services.AddSingleton<IDistrictBoundaryProvider, DistrictBoundaryProvider>();
+        services.AddSingleton<IGeohashSnapper, GeohashSnapper>();
+        services.AddSingleton<INotificationsStore, NotificationsStore>();
+        services.AddSingleton<INotificationEmitter, NotificationEmitter>();
+        services.AddSingleton<IHomePointStore, HomePointStore>();
+        services.AddSingleton<IHomePointService, HomePointService>();
         var provider = services.BuildServiceProvider();
 
         var configuration = BuildConfiguration("yes"); // no owner creds either -> stays a full no-op

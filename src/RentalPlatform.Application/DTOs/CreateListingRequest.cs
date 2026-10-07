@@ -28,28 +28,20 @@ public sealed class CreateListingRequest : IValidatableObject
     [StringLength(3, MinimumLength = 3, ErrorMessage = "Currency must be a 3-letter ISO code (e.g. USD, AMD).")]
     public string? Currency { get; init; }
 
-    [Required(ErrorMessage = "Country is required.")]
-    [MaxLength(100, ErrorMessage = "Country must be at most 100 characters.")]
-    public string Country { get; init; } = string.Empty;
-
-    [Required(ErrorMessage = "City is required.")]
-    [MaxLength(120, ErrorMessage = "City must be at most 120 characters.")]
-    public string City { get; init; } = string.Empty;
-
     [MaxLength(250, ErrorMessage = "Address must be at most 250 characters.")]
     public string? AddressLine { get; init; }
 
-    [Range(typeof(decimal), "-90", "90", ErrorMessage = "Latitude must be between -90 and 90.")]
-    public decimal? Latitude { get; init; }
-
-    [Range(typeof(decimal), "-180", "180", ErrorMessage = "Longitude must be between -180 and 180.")]
-    public decimal? Longitude { get; init; }
-
-    // Optional owner override for the derived district (point-in-polygon against Latitude/
-    // Longitude — see IDistrictBoundaryProvider). When supplied it must reference an existing
-    // District row and wins over derivation; when omitted, the district is derived from the exact
-    // point (and may be null if that point falls outside every known Yerevan district).
-    public Guid? DistrictId { get; init; }
+    // Location is no longer supplied on create (home-point model). All five of the fields that used
+    // to live here — latitude, longitude, districtId, city and country — now come from the owner's
+    // home point: ListingsOwnerService.CreateAsync copies Latitude/Longitude/PublicLatitude/
+    // PublicLongitude/DistrictId straight from the owner's User.Home* fields, sets Country to
+    // "Armenia" and derives City from the resolved home district (see ResolveCity there). Create
+    // returns 409 listing.home_point_required when the owner has no home point set yet.
+    //
+    // A stale client that still sends any of those five binds harmlessly — unknown JSON members are
+    // ignored by the configured serializer, so the values are dropped, never applied. There is a
+    // regression test asserting exactly that (M-036: a narrow legacy write must never overwrite the
+    // authoritative state).
 
     // ---- Toy-rental MVP: optional toy-specific metadata ----
     [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]

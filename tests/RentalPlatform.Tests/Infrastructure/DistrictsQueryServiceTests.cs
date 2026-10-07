@@ -15,7 +15,7 @@ public sealed class DistrictsQueryServiceTests
     {
         using var database = new SqliteTestDatabase();
         await using var context = database.CreateContext();
-        var service = new DistrictsQueryService(context);
+        var service = new DistrictsQueryService(context, new DistrictBoundaryProvider());
 
         var districts = await service.GetAllAsync();
 

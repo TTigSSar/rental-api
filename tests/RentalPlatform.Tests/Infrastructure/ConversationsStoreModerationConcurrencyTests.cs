@@ -143,10 +143,13 @@ public sealed class ConversationsStoreModerationConcurrencyTests
         loserConversation.LastMessageSnippet = loserMessage.Body;
         loserConversation.LastMessageAt = loserMessage.CreatedAt;
 
-        await db.SeedAsync(
-            TestData.User(memberId, "member@dedupe.test"),
-            TestData.User(moderatorOneId, "moderator-one@dedupe.test", role: UserRole.Admin),
-            TestData.User(moderatorTwoId, "moderator-two@dedupe.test", role: UserRole.Admin));
+        // Raw-SQL user seeding, because this test runs against the schema as it stood BEFORE the
+        // migration under test: seeding through the entity model would write every column today's
+        // User has, including ones added by later migrations that have not been applied yet.
+        await db.SeedLegacyUsersAsync(
+            (memberId, "member@dedupe.test", (int)UserRole.User),
+            (moderatorOneId, "moderator-one@dedupe.test", (int)UserRole.Admin),
+            (moderatorTwoId, "moderator-two@dedupe.test", (int)UserRole.Admin));
 
         await db.SeedAsync(
             keeperConversation,

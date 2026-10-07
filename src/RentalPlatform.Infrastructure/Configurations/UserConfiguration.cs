@@ -58,5 +58,25 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(user => user.Role)
             .IsRequired();
+
+        // Home point (home-point model). Same precision/scale as the listing location columns (ADR-008).
+        builder.Property(user => user.HomeLatitude)
+            .HasPrecision(9, 6);
+
+        builder.Property(user => user.HomeLongitude)
+            .HasPrecision(9, 6);
+
+        builder.Property(user => user.HomePublicLatitude)
+            .HasPrecision(9, 6);
+
+        builder.Property(user => user.HomePublicLongitude)
+            .HasPrecision(9, 6);
+
+        builder.HasOne(user => user.HomeDistrict)
+            .WithMany()
+            .HasForeignKey(user => user.HomeDistrictId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(user => user.HomeDistrictId);
     }
 }

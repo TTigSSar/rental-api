@@ -600,6 +600,22 @@ docker compose -f docker-compose.production.yml logs --no-color --since 15m api 
      правильно (M-038: правило, введённое позже, не превращает старые строки в
      сломанные).
 
+**Всё перечисленное выше подтверждено живой репетицией 2026-10-07** (ADR-023,
+на восстановленном `RentalPlatformDb_2026-10-07_1235.bak`, образ `api`
+собранный из `3552cdb`): ровно одна строка
+`Applying migration '20260927200321_AddUserHomePoint'.`, `Application started.`,
+ноль совпадений по `error|exception|unhandled`,
+`Demo content bootstrap completed. Showcase owners: 12, listings created: 0,
+images: 0, listings redistributed by district: 54, home points applied: 12.`,
+ровно 2 ожидаемых `WARNING` (`Outdoor Backyard Slide`,
+`Kids Double-Sided Art Easel` — оба в Кентроне и с бронями), и строка бэкфилла
+`Home points derived: 1; ... included: 2; of the 0 remaining ... filled: 0,
+districts assigned: 0.` — буквально как предсказано выше. Отпечаток на
+репетиционной копии: `users=6 -> 18`, `listings=58`, `bookings=6`, лента
+отката `58`, `distinctPins=13 distinctDistricts=12`, «координаты без
+производных» `0`, статусы `2=56 3=1 4=1` без изменений, `MAX(UpdatedAt)`
+не сдвинулся. Числа ниже — это те же проверки, но уже на боевой базе.
+
 **Снимок-отпечаток, который надо сверить после `up -d`** (тот же, что снимался
 до деплоя по ADR-023; помощники `qp`/`ex` — в разделе «Репетиция миграций»):
 
@@ -1229,6 +1245,35 @@ qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD
    # а не ошибка: контейнер не должен завершаться сам.
    ```
 
+   **Равнозначный вариант через `docker run` — и он изолирован строже.**
+   `compose run` берёт из сервиса `api` ещё и его `volumes`, то есть
+   **монтирует боевые тома `uploads`/`chat-uploads`**: репетиция, в которой
+   раннер решит записать картинку, пишет её в production-данные. Вариант ниже
+   не монтирует ничего и не публикует портов, а окружение берёт с живого
+   контейнера `api` — это ровно то, что получил бы новый контейнер, **при
+   условии что delta `docker-compose.production.yml` между развёрнутым и новым
+   sha не трогает секцию `environment`** (проверять `git diff` по файлу; если
+   трогает — брать окружение из `compose config`, а не из контейнера).
+   Применялся живьём 2026-10-07.
+
+   ```bash
+   CID_API="$(docker compose -f docker-compose.production.yml ps -q api </dev/null)"
+   umask 077
+   docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CID_API" \
+     | grep -vE '^\s*$' | grep -v '^ConnectionStrings__DefaultConnection=' > /tmp/rehearsal.env
+   printf 'ConnectionStrings__DefaultConnection=Server=db,1433;Database=%s;User Id=sa;Password=%s;TrustServerCertificate=True;\n' \
+     "$DB" "$P" >> /tmp/rehearsal.env
+   # проверить глазами ИМЕНА ключей (не значения) и что цель — репетиционная база:
+   cut -d= -f1 /tmp/rehearsal.env | sort
+   grep -o 'Database=[A-Za-z_]*' /tmp/rehearsal.env
+   NET="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$CID_API")"
+
+   timeout 300 docker run --rm --name dorent-rehearsal-api --network "$NET" \
+     --env-file /tmp/rehearsal.env rental-api-api:latest > /tmp/rehearsal.log 2>&1 </dev/null
+   # ожидается: код возврата 124 (как и выше)
+   # /tmp/rehearsal.env содержит все секреты api — mode 600, и shred в шаге 7
+   ```
+
 5. **Проверить, что именно применилось** — по одной строке на каждую миграцию
    из деплоя, и ни одной ошибки:
 
@@ -1282,3 +1327,12 @@ qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD
 >    Поэтому у каждого docker-вызова в таком скрипте стоит `</dev/null`.
 >    Замечено на живом прогоне 2026-09-27 дважды, прежде чем стало понятно,
 >    почему вывод обрывается на середине.
+> 4. **Обратная сторона той же ловушки: `</dev/null` ставится ТОЛЬКО на
+>    docker-вызов, а не на то, что стоит справа от конвейера.** На живом
+>    прогоне 2026-10-07 строка
+>    `docker images --format ... | grep -E "rental-api-(api|ui)" </dev/null`
+>    вернула пустой список: `</dev/null` переназначил stdin не docker-у, а
+>    `grep`-у, и тот прочитал пустоту вместо конвейера. Выглядит это как
+>    «образов нет» — то есть как осмысленный, но ложный ответ. Правильно:
+>    `docker ... </dev/null | grep ...`, либо, если docker в начале конвейера,
+>    он stdin и так не читает.

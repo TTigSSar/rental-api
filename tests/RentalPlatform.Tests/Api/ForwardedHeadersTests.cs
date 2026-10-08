@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using RentalPlatform.Tests.TestSupport;
 using Xunit;
@@ -125,6 +128,49 @@ public sealed class ForwardedHeadersTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, clientA));
         Assert.NotEqual(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, clientB));
+    }
+
+    // ADR-027: only X-Forwarded-For is honored. Cloudflare's X-Forwarded-Proto passes through nginx
+    // untouched, so honoring it would flip Request.Scheme to https in prod. A test-only startup
+    // filter reports the scheme the app sees at response start (after UseForwardedHeaders ran).
+    [Fact]
+    public async Task TrustedProxy_XForwardedProto_IsIgnored_SchemeStaysHttp()
+    {
+        var client = _factory.WithWebHostBuilder(b =>
+        {
+            b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(TrustedNetworkConfig()));
+            b.ConfigureTestServices(s => s.AddSingleton<IStartupFilter, SchemeProbeStartupFilter>());
+        }).CreateClient();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new { email = "nobody@forwarded-headers.local", password = "Password123!" })
+        };
+        request.Headers.Add(TestRemoteIpStartupFilter.HeaderName, ProxyMapped);
+        request.Headers.Add("X-Forwarded-For", NextIp());
+        request.Headers.Add("X-Forwarded-Proto", "https");
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal("http", Assert.Single(response.Headers.GetValues(SchemeProbeStartupFilter.HeaderName)));
+    }
+
+    private sealed class SchemeProbeStartupFilter : IStartupFilter
+    {
+        public const string HeaderName = "X-Test-Scheme";
+
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (context, nextMiddleware) =>
+            {
+                context.Response.OnStarting(() =>
+                {
+                    context.Response.Headers[HeaderName] = context.Request.Scheme;
+                    return Task.CompletedTask;
+                });
+                await nextMiddleware();
+            });
+            next(app);
+        };
     }
 
     [Fact]

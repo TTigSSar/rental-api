@@ -36,7 +36,7 @@ public static class ForwardedHeadersExtensions
                 ? limit
                 : 1;
 
-            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor; // ADR-027: X-Forwarded-Proto is deliberately not honored
             options.ForwardLimit = forwardLimit;
 
             // Start from an empty trust list; only the explicitly configured proxies/networks are honored.

@@ -81,6 +81,18 @@ services:
       # (same contract as the admin pair above).
       Bootstrap__DemoOwnerEmail: ${BOOTSTRAP_DEMO_OWNER_EMAIL}
       Bootstrap__DemoOwnerPassword: ${BOOTSTRAP_DEMO_OWNER_PASSWORD}
+      # Real client IP for every per-IP rate limit (ADR-027). Without this, RemoteIpAddress is
+      # the ui/nginx container for EVERY public request, i.e. one global bucket for all users.
+      # nginx (Rental-Ui/nginx.conf) overwrites X-Forwarded-For with Cloudflare's
+      # CF-Connecting-IP; the API honours that header only when the TCP peer is inside the
+      # stack network pinned at the bottom of this file. The subnet is written ONCE, here, as
+      # the YAML anchor &stack_subnet; `networks.default` below reuses it via *stack_subnet, so
+      # the trusted range and the real range cannot drift apart.
+      # Literal values, deliberately NOT ${...} from .env: no empty value can ever reach the
+      # parser (M-016), and the trust boundary is reviewable in this one file.
+      ForwardedHeaders__Enabled: "true"
+      ForwardedHeaders__KnownNetworks__0: &stack_subnet "172.18.0.0/16"
+      ForwardedHeaders__ForwardLimit: "1"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat
@@ -151,3 +163,23 @@ volumes:
   sqldata:
   uploads:
   chat-uploads:
+
+# The stack network (`rental-api_default`), with its subnet PINNED (ADR-027): the api trusts
+# X-Forwarded-For only from peers inside this range (ForwardedHeaders__KnownNetworks__0 above,
+# the same &stack_subnet anchor), so the range must not depend on what Docker happens to hand
+# out on the next recreate.
+# 172.18.0.0/16 is exactly what Docker had already assigned to this network in production
+# (verified 2026-10-08), so pinning it changes nothing on the wire:
+#   - if the live network was created by a Compose that labels networks with a config hash,
+#     `up -d` recreates it (stop all four containers, recreate network, start in
+#     healthcheck order) — same subnet, volumes untouched;
+#   - if it carries no such label, Compose silently keeps the existing network — which is
+#     ALREADY 172.18.0.0/16, so the trusted range is still right.
+# A different range would be wrong in that second case without any error (silent fallback to
+# one global rate-limit bucket). Never pin a range without checking the live subnet after
+# `up -d`: docker network inspect rental-api_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: *stack_subnet

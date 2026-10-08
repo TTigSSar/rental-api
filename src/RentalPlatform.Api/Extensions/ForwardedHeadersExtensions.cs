@@ -19,18 +19,23 @@ public static class ForwardedHeadersExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var section = configuration.GetSection(SectionName);
-        if (!section.GetValue("Enabled", false))
+        // Bound lazily (when the options are first resolved) so the final host configuration is
+        // what counts. Parsing is tolerant on purpose (M-016): compose renders an unset variable as
+        // an empty string, and a throwing parse here would take the whole site down at startup.
+        services.AddOptions<ForwardedHeadersOptions>().Configure<IConfiguration>((options, config) =>
         {
-            return services;
-        }
+            var section = config.GetSection(SectionName);
+            if (!bool.TryParse(section["Enabled"]?.Trim(), out var enabled) || !enabled)
+            {
+                return;
+            }
 
-        var trustedProxies = section.GetSection("KnownProxies").Get<string[]>() ?? Array.Empty<string>();
-        var trustedNetworks = section.GetSection("KnownNetworks").Get<string[]>() ?? Array.Empty<string>();
-        var forwardLimit = section.GetValue<int?>("ForwardLimit");
+            var trustedProxies = section.GetSection("KnownProxies").Get<string[]>() ?? Array.Empty<string>();
+            var trustedNetworks = section.GetSection("KnownNetworks").Get<string[]>() ?? Array.Empty<string>();
+            int? forwardLimit = int.TryParse(section["ForwardLimit"]?.Trim(), out var limit) && limit > 0
+                ? limit
+                : 1;
 
-        services.Configure<ForwardedHeadersOptions>(options =>
-        {
             options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
             options.ForwardLimit = forwardLimit;
 
@@ -66,7 +71,9 @@ public static class ForwardedHeadersExtensions
         var parts = value.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 2 ||
             !IPAddress.TryParse(parts[0], out var parsedPrefix) ||
-            !int.TryParse(parts[1], out var parsedLength))
+            !int.TryParse(parts[1], out var parsedLength) ||
+            parsedLength < 0 ||
+            parsedLength > (parsedPrefix.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128))
         {
             return false;
         }

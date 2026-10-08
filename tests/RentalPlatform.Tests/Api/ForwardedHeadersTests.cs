@@ -49,6 +49,12 @@ public sealed class ForwardedHeadersTests
         return $"198.18.{(n >> 8) & 0xFF}.{n & 0xFF}";
     }
 
+    // Unique address inside the trusted 172.30.0.0/24 (.10-.254). Used as a rightmost XFF hop that
+    // is itself trusted, and (mapped) as a distinct proxy address per test.
+    private static int _trustedCounter = 9;
+
+    private static string NextTrustedIp() => $"172.30.0.{Interlocked.Increment(ref _trustedCounter)}";
+
     private static async Task<HttpStatusCode> LoginAsync(HttpClient client, string remoteIp, string? xff)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
@@ -108,9 +114,28 @@ public sealed class ForwardedHeadersTests
             ["ForwardedHeaders:KnownNetworks:0"] = "172.30.0.0/24",
             ["ForwardedHeaders:ForwardLimit"] = "",
         });
+        // Source is inside the (configured but inactive) trusted range, so only "disabled" can
+        // explain XFF being ignored: varying forged values still share the proxy's bucket.
+        var proxy = "::ffff:" + NextTrustedIp();
+
+        await ExhaustAsync(client, proxy, _ => NextIp());
+        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, proxy, NextIp()));
+    }
+
+    [Theory]
+    [InlineData("garbage")]
+    [InlineData("172.30.0.0/33")]
+    [InlineData("")]
+    public async Task Enabled_WithNoValidTrustEntry_FailsClosed_AndIgnoresForwardedFor(string network)
+    {
+        var client = CreateClient(new()
+        {
+            ["ForwardedHeaders:Enabled"] = "true",
+            ["ForwardedHeaders:KnownNetworks:0"] = network,
+        });
         var source = NextIp();
 
-        // XFF is not honored when not enabled: varying forged values still share the source bucket.
+        // With empty trust lists the middleware would trust every peer; we must stay off instead.
         await ExhaustAsync(client, source, _ => NextIp());
         Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, source, NextIp()));
     }
@@ -121,13 +146,14 @@ public sealed class ForwardedHeadersTests
     public async Task EmptyOrGarbageForwardLimit_StartsUp_AndDefaultsToOne(string forwardLimit)
     {
         var client = CreateClient(TrustedNetworkConfig(forwardLimit));
-        var clientA = NextIp();
-        var clientB = NextIp();
+        var proxy = "::ffff:" + NextTrustedIp();
+        var trustedHop = NextTrustedIp();
 
-        await ExhaustAsync(client, ProxyMapped, _ => clientA);
+        // Rightmost hop is itself trusted: with limit 1 the client is that hop; with an unlimited
+        // limit the middleware would keep walking left and the (varying) leftmost value would win.
+        await ExhaustAsync(client, proxy, _ => $"{NextIp()}, {trustedHop}");
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, clientA));
-        Assert.NotEqual(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, clientB));
+        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, proxy, $"{NextIp()}, {trustedHop}"));
     }
 
     // ADR-027: only X-Forwarded-For is honored. Cloudflare's X-Forwarded-Proto passes through nginx
@@ -177,14 +203,20 @@ public sealed class ForwardedHeadersTests
     public async Task TrustedProxy_MultiValueForwardedFor_ForwardLimitOne_UsesRightmostValue()
     {
         var client = CreateClient(TrustedNetworkConfig());
+        var proxy = "::ffff:" + NextTrustedIp();
         var rightmost = NextIp();
         var otherRightmost = NextIp();
+        var trustedHop = NextTrustedIp();
 
         // Leftmost value (attacker-controlled) changes every request; the bucket is keyed by the
         // rightmost one, so the 6th request is still limited.
-        await ExhaustAsync(client, ProxyMapped, _ => $"{NextIp()}, {rightmost}");
+        await ExhaustAsync(client, proxy, _ => $"{NextIp()}, {rightmost}");
+        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, proxy, $"{NextIp()}, {rightmost}"));
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, await LoginAsync(client, proxy, $"{NextIp()}, {otherRightmost}"));
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, $"{NextIp()}, {rightmost}"));
-        Assert.NotEqual(HttpStatusCode.TooManyRequests, await LoginAsync(client, ProxyMapped, $"{NextIp()}, {otherRightmost}"));
+        // A trusted rightmost hop is NOT walked past with ForwardLimit=1.
+        var proxy2 = "::ffff:" + NextTrustedIp();
+        await ExhaustAsync(client, proxy2, _ => $"{NextIp()}, {trustedHop}");
+        Assert.Equal(HttpStatusCode.TooManyRequests, await LoginAsync(client, proxy2, $"{NextIp()}, {trustedHop}"));
     }
 }

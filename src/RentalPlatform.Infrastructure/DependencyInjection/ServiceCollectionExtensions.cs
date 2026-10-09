@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<EmailVerificationSettings>();
         services.AddSingleton<IEmailVerificationSettings>(sp => sp.GetRequiredService<EmailVerificationSettings>());
         services.AddSingleton<IEmailSendBudget, EmailSendBudget>();
+        services.AddSingleton<IEmailVerificationMonitor, EmailVerificationMonitor>();
         services.AddHostedService<EmailConfigurationStartupCheck>();
         services.AddScoped<LoggingEmailSender>();
         services.AddHttpClient<ResendEmailSender>();

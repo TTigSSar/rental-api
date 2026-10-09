@@ -36,6 +36,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
     private readonly IEmailService _emailService;
     private readonly IEmailVerificationSettings _settings;
     private readonly IEmailSendBudget _budget;
+    private readonly IEmailVerificationMonitor _monitor;
     private readonly TimeProvider _timeProvider;
 
     public EmailVerificationService(
@@ -45,6 +46,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
         IEmailService emailService,
         IEmailVerificationSettings settings,
         IEmailSendBudget budget,
+        IEmailVerificationMonitor monitor,
         TimeProvider timeProvider)
     {
         _store = store;
@@ -53,6 +55,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
         _emailService = emailService;
         _settings = settings;
         _budget = budget;
+        _monitor = monitor;
         _timeProvider = timeProvider;
     }
 
@@ -268,6 +271,8 @@ public sealed class EmailVerificationService : IEmailVerificationService
     // promising 60 s here would be wrong.
     private async Task<ServiceResult<bool>> CapFailureAsync(Guid userId, DateTime now, CancellationToken cancellationToken)
     {
+        _monitor.PerRecipientCapReached(userId);
+
         var oldest = await _store.GetOldestTokenCreatedAtSinceAsync(
             userId, TokenPurpose.EmailVerification, now - SendCapWindow, cancellationToken);
 

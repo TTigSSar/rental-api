@@ -395,6 +395,19 @@ public sealed class EmailSettingsAndBudgetTests
         Assert.Equal(25, results.Count(granted => granted));
     }
 
+    [Fact]
+    public void Cap_Monitor_Writes_A_Warning_With_The_User_Id_And_Nothing_Else()
+    {
+        var logger = new ListLogger<EmailVerificationMonitor>();
+        var userId = Guid.NewGuid();
+
+        new EmailVerificationMonitor(logger).PerRecipientCapReached(userId);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal($"Email verification per-recipient cap reached for user {userId}.", entry.Message);
+    }
+
     // ---- Logging transport ----
 
     [Fact]

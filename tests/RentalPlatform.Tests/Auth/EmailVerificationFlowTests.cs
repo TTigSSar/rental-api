@@ -792,6 +792,9 @@ public sealed class EmailVerificationFlowTests
         // The daily cap reports the REAL wait: the first token (created 4 x 61 s + 61 s ago) leaves
         // the 24 h window at firstCreatedAt + 24 h, i.e. 24 h minus 5 x 61 s from now. Never 60.
         Assert.Equal((int)(TimeSpan.FromHours(24) - TimeSpan.FromSeconds(5 * 61)).TotalSeconds, sixth.Error.RetryAfterSeconds);
+
+        // The over-cap case is signalled for monitoring, by user id.
+        Assert.Equal(before.Id, Assert.Single(h.Monitor.CapReached));
         var after = await UserAsync(db, "new.user@test.local");
         Assert.Equal(before.PasswordHash, after.PasswordHash);
         Assert.Equal(before.FirstName, after.FirstName);
@@ -817,6 +820,7 @@ public sealed class EmailVerificationFlowTests
 
         Assert.Equal("auth.verification_cooldown", again.Error!.Code);
         Assert.Equal(35, again.Error.RetryAfterSeconds);
+        Assert.Empty(h.Monitor.CapReached); // a plain cooldown is NOT a cap event
     }
 
     [Fact]

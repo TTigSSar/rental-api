@@ -169,6 +169,7 @@ public sealed class HomePointCoordinatePrivacyTests
                 new FakeEmailService(),
                 new FakeEmailVerificationSettings(),
                 new FakeEmailSendBudget(),
+                new FakeEmailVerificationMonitor(),
                 TimeProvider.System),
             new EmailVerificationStore(context),
             TimeProvider.System);

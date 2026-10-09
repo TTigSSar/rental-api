@@ -193,6 +193,7 @@ public static class AuthServiceFactory
             new FakeEmailService(),
             new FakeEmailVerificationSettings(),
             new FakeEmailSendBudget(),
+            new FakeEmailVerificationMonitor(),
             timeProvider);
 
         return new RentalPlatform.Application.Services.AuthService(
@@ -257,7 +258,7 @@ public sealed class AuthHarness
             Microsoft.Extensions.Logging.Abstractions.NullLogger<RentalPlatform.Infrastructure.Services.EmailService>.Instance);
 
         Verification = new RentalPlatform.Application.Services.EmailVerificationService(
-            verificationStore, PasswordHasher, homePoints, emailService, Settings, Budget, Clock);
+            verificationStore, PasswordHasher, homePoints, emailService, Settings, Budget, Monitor, Clock);
 
         Auth = new RentalPlatform.Application.Services.AuthService(
             authUserStore,
@@ -277,6 +278,7 @@ public sealed class AuthHarness
     public IPasswordHasher PasswordHasher { get; }
     public FakeEmailVerificationSettings Settings { get; } = new();
     public FakeEmailSendBudget Budget { get; } = new();
+    public FakeEmailVerificationMonitor Monitor { get; } = new();
     public StubExternalIdentityTokenValidator External { get; } = new();
     public RentalPlatform.Infrastructure.Persistence.UserAuthStore UserStore { get; }
     public RentalPlatform.Infrastructure.Persistence.EmailVerificationStore Store { get; }
@@ -302,4 +304,12 @@ public sealed class AuthHarness
         HomeLatitude = latitude,
         HomeLongitude = longitude
     };
+}
+
+// Records cap signals so a test can assert the monitor fired (or did not).
+public sealed class FakeEmailVerificationMonitor : IEmailVerificationMonitor
+{
+    public List<Guid> CapReached { get; } = new();
+
+    public void PerRecipientCapReached(Guid userId) => CapReached.Add(userId);
 }

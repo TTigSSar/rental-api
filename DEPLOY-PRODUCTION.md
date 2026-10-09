@@ -203,6 +203,12 @@ nano .env
   `BOOTSTRAP_DEMO_OWNER_PASSWORD` — начальный каталог, см. пункт e. Необязательные:
   если оставить пустыми или вовсе не задавать — каталог просто не создаётся,
   остальной стек работает как обычно.
+- `EMAIL_PROVIDER` / `EMAIL_RESEND_API_KEY` (+ необязательные `EMAIL_FROM`,
+  `EMAIL_SEND_BUDGET_LIMIT`, `EMAIL_SEND_BUDGET_WINDOW_HOURS`,
+  `APP_PUBLIC_BASE_URL`) — отправка писем подтверждения email (ADR-028, ADR-029).
+  Ключ API вписывает в `.env` только Тигран. Без `EMAIL_PROVIDER=Resend` и ключа
+  API не падает, но **регистрация закрыта** (503) — см. «Релиз email-верификации»
+  в конце файла.
 
 `.env` не коммитится (уже в `.gitignore`).
 
@@ -847,6 +853,18 @@ Access» ниже), плюс предупреждающие проверки: о
 разделе g). Равенства «пинов ровно столько же, сколько объявлений» она
 намеренно не требует: координаты у объявления необязательны, так что
 объявление без точки на карте — нормальное объявление.
+
+Второе «молчаливое» место — `email-gate` (обязательная). При неполной
+настройке почты в Production API **не падает** (так задумано, M-016), все
+остальные проверки зелёные, а регистрация и повторная отправка письма отвечают
+503 `auth.registration_unavailable`. Единственный след — одна строка `crit:`
+при старте процесса: `Email verification is NOT operational in Production:
+<что именно не так>`. Проверка читает лог **текущего** процесса `api` (с его
+`State.StartedAt`, а не последние N строк, из которых разовая стартовая строка
+быстро уходит) и падает, если строка там есть. Только `docker inspect` +
+`docker logs`, без запросов к API. На образах до релиза email-верификации
+строки нет никогда — проверка проходит. С ней проверок на одну больше:
+в полном зелёном прогоне от `dorent` — `pass=21 warn=0`.
 
 **Правило рабочего процесса: деплой не считается завершённым, пока
 `smoke.sh` не отработал без `FAIL`.** Запускать после каждого обновления
@@ -1599,3 +1617,305 @@ config-hash сети, и Compose (если метка есть) ещё раз п
 доверяет). Тома не трогаются ни в одну сторону. Откат только доверия, без
 смены сети, — это `ForwardedHeaders__Enabled: "false"` в compose-файле, то
 есть отдельный коммит через PR, а не правка на сервере.
+
+## Релиз email-верификации (ADR-028, ADR-029)
+
+**Что меняется.** Деплоятся вместе, по отдельности несовместимы:
+
+- **Образ `api`**: жёсткая верификация email. `register` больше не выдаёт токен
+  (201 `{ email, verificationRequired: true }`), вход неподтверждённого
+  аккаунта — 403 `auth.email_not_verified`, новые `verify-email` и
+  `resend-verification`, отправка писем через Resend.
+- **Образ `ui`**: страница `/auth/verify-email` и новый поток регистрации.
+  Старый UI с новым API регистрироваться не сможет — он ждёт токен.
+- **Миграция `20261009104046_AddEmailVerification`**: таблица `UserTokens`,
+  колонка `Users.EmailConfirmedAt`, и данные —
+  `UPDATE [Users] SET [IsEmailConfirmed] = 1` (все существующие пользователи
+  наследуются подтверждёнными; `EmailConfirmedAt` у них остаётся `NULL` —
+  это и есть пометка «grandfathered»). Применяется сама при старте `api`.
+  `Down` удаляет таблицу и колонку и **ни с кого не снимает подтверждение**.
+- **`docker-compose.production.yml`**: в `environment` сервиса `api` шесть
+  новых ключей `Email__*` и `App__PublicBaseUrl`, у каждого `:-default`
+  (M-016). Больше в файле не меняется ничего: **ни `networks`/`ipam`, ни
+  томов, ни сервиса `db`**.
+- **`.env`**: новые ключи `EMAIL_PROVIDER`, `EMAIL_RESEND_API_KEY` (+
+  необязательные, см. `.env.production.example`).
+
+**Risk: MEDIUM** — миграция EF + изменение окружения `api`. Сеть не
+меняется, поэтому `up -d` пересоздаёт только `api` (образ и окружение) и `ui`
+(образ); `db` и `cloudflared` остаются как есть. Сценарий M-055 (потеря
+алиаса `db` при пересоздании сети) в этом релизе возникнуть не должен — но
+проверка алиаса после `up -d` всё равно обязательна: это проверка, а не
+предположение.
+
+**Простой.** Пересоздание `api` (холодный старт + миграция) и `ui` —
+ориентировочно 1–3 минуты, верхняя граница по healthcheck-у `api`
+(`start_period` 180 с) — около 5 минут. Сборка в простой не входит.
+
+### Предусловия — делает Тигран, ДО деплоя
+
+Агент их не выполняет и ключа не видит; он только проверяет факт (ниже).
+
+1. **Домен в Resend подтверждён** (статус *Verified* в дашборде Resend):
+   DKIM `resend._domainkey.dorent.am`, SPF и MX на `send.dorent.am`, DMARC
+   `_dmarc.dorent.am` с `p=none`. Старые cPanel-записи DNS не трогаются без
+   отдельного согласования по каждой (ADR-029 §6).
+2. **Click tracking и open tracking выключены** для домена. Ссылка в письме
+   несёт токен: с click tracking Resend переписал бы её через свой
+   трекинг-домен, и токен прошёл бы через чужой сервер.
+3. **Ключ API вписан в серверный `.env` самим Тиграном** (права «Sending
+   access», ограничение на домен `dorent.am`), и там же
+   `EMAIL_PROVIDER=Resend`. Через чат, тикет или коммит ключ не передаётся.
+4. **Тигран присутствует весь деплой — или заранее разрешил команды
+   восстановления** (M-055, правило c). Список, который должен быть разрешён
+   агенту заранее, если Тиграна не будет:
+   ```bash
+   docker compose -f docker-compose.production.yml up -d --no-deps --force-recreate db
+   docker compose -f docker-compose.production.yml up -d
+   docker tag rental-api-api:pre-email-verification rental-api-api:latest
+   docker tag rental-api-ui:pre-email-verification  rental-api-ui:latest
+   ```
+   Путь восстановления, для которого нужно одобрение, которое некому дать, —
+   не путь восстановления.
+
+**Проверка предусловий агентом — значения секретов не печатаются никогда:**
+
+```bash
+cd /opt/dorent/rental-api
+stat -c '%a' .env                                    # ожидается: 600
+grep -E '^EMAIL_PROVIDER=' .env                      # не секрет; ожидается: EMAIL_PROVIDER=Resend
+grep -cE '^EMAIL_RESEND_API_KEY=.{20,}' .env         # только счётчик; ожидается: 1
+grep -E '^(EMAIL_FROM|APP_PUBLIC_BASE_URL)=' .env    # не секреты; пусто = значения по умолчанию
+# после git pull — как compose отрисует окружение api (ключ — только длиной):
+docker compose -f docker-compose.production.yml config \
+  | grep -E '^\s+(Email__Provider|Email__From|Email__SendBudget__\w+|App__PublicBaseUrl):'
+docker compose -f docker-compose.production.yml config \
+  | awk '/^ +Email__Resend__ApiKey:/ {print "ApiKey length:", length($2)}'
+# ожидается: Provider Resend, From DoRent <no-reply@dorent.am>, Limit 100, WindowHours 24,
+# PublicBaseUrl https://dorent.am, ApiKey length заметно больше 2 ("" = пусто = СТОП)
+```
+
+Любое расхождение — СТОП до деплоя. Деплой без ключа API не сломает сайт, но
+закроет регистрацию (503) до исправления.
+
+### Последовательность
+
+Штатная «Обновление стенда» (шаги 1–6) с уточнениями:
+
+```bash
+cd /opt/dorent/rental-api
+
+# 0) ДО build пометить текущие образы — быстрый откат без пересборки
+docker tag rental-api-api:latest rental-api-api:pre-email-verification
+docker tag rental-api-ui:latest  rental-api-ui:pre-email-verification
+
+# 1) git pull обоих репозиториев; затем убедиться, что compose меняет ТОЛЬКО окружение api
+git diff <sha_до>..<sha_после> -- docker-compose.production.yml
+# ожидается: только строки Email__* / App__PublicBaseUrl (и комментарии) в api.environment.
+# Изменения в networks/ipam/volumes/db — СТОП: это уже другой релиз (M-055, правило a)
+
+# 2) бэкап + --verify — ОБЯЗАТЕЛЬНО (миграция)
+./deploy/backup-production.sh
+./deploy/backup-production.sh --verify       # ожидается: VERIFY PASS ...
+
+# 3) сборка — по одному образу
+docker compose -f docker-compose.production.yml build api
+docker compose -f docker-compose.production.yml build ui
+```
+
+**4) Репетиция миграции на восстановленном бэкапе (ADR-023) — обязательна.**
+Процедура — подраздел «Репетиция миграций…» выше, шаги 1–7, с этим
+«отпечатком»:
+
+```bash
+# шаг 1 — ДО деплоя, на боевой базе (колонки EmailConfirmedAt ещё нет)
+qp "USE RentalPlatformDb; SELECT 'users='+CAST(COUNT(*) AS VARCHAR(10))+' unverified='+CAST(SUM(CASE WHEN IsEmailConfirmed=0 THEN 1 ELSE 0 END) AS VARCHAR(10)) FROM dbo.Users;"
+# ожидается: unverified = users или около того (до релиза флаг никто не ставил)
+qp "USE RentalPlatformDb; SELECT 'listings='+CAST((SELECT COUNT(*) FROM dbo.Listings) AS VARCHAR(10))+' bookings='+CAST((SELECT COUNT(*) FROM dbo.Bookings) AS VARCHAR(10));"
+```
+
+Для шага 4 репетиции — **вариант `docker run` с окружением живого
+контейнера `api`**. Оговорка из того подраздела («только если delta compose
+не трогает `environment`») здесь нарушена, но **в нужную сторону**: у живого
+(старого) контейнера нет ни одного `Email__*`, так что репетиционный API
+получает закрытый email-гейт и **физически не может отправить письмо** —
+ключа у него нет. Для миграции ключи почты не нужны. В
+`/tmp/rehearsal.log` поэтому будет одна ожидаемая строка `crit:` —
+`Email verification is NOT operational in Production: ...`; она не
+совпадает с `error|exception` и в счётчик шага 5 не попадает. Брать
+окружение из `compose config` (с ключом Resend) для репетиции **не нужно и
+не следует**.
+
+```bash
+# шаг 5 — ожидается ровно одна миграция:
+#   Applying migration '20261009104046_AddEmailVerification'.
+# шаг 6 — на репетиционной базе
+qp "USE $DB; SELECT 'users='+CAST(COUNT(*) AS VARCHAR(10))+' unverified='+CAST(SUM(CASE WHEN IsEmailConfirmed=0 THEN 1 ELSE 0 END) AS VARCHAR(10))+' confirmedAt='+CAST(COUNT(EmailConfirmedAt) AS VARCHAR(10)) FROM dbo.Users;"
+# ожидается: users = как в шаге 1, unverified=0, confirmedAt=0
+qp "USE $DB; SELECT 'tokens='+CAST(COUNT(*) AS VARCHAR(10)) FROM dbo.UserTokens;"
+# ожидается: tokens=0
+qp "USE $DB; SELECT 'listings='+CAST((SELECT COUNT(*) FROM dbo.Listings) AS VARCHAR(10))+' bookings='+CAST((SELECT COUNT(*) FROM dbo.Bookings) AS VARCHAR(10));"
+# ожидается: как в шаге 1
+```
+
+**4b) Там же, до шага 7 (уборки): старый образ на новой схеме.** Откат этого
+релиза — старые образы на базе, где миграция уже применена (см. «Откат»).
+Это утверждение проверяется здесь, а не в день отката: тем же `docker run`,
+что в шаге 4, но с образом `rental-api-api:pre-email-verification`:
+
+```bash
+timeout 300 docker run --rm --name dorent-rehearsal-api-old --network "$NET" \
+  --env-file /tmp/rehearsal.env rental-api-api:pre-email-verification > /tmp/rehearsal-old.log 2>&1 </dev/null
+# ожидается: код 124; в логе "Application started", НЕТ "Applying migration",
+# grep -icE "error|exception|unhandled" /tmp/rehearsal-old.log -> 0
+shred -u -n 3 /tmp/rehearsal-old.log
+```
+
+Не прошло — СТОП: тогда откат кода без восстановления бэкапа невозможен, и
+план отката пересматривается до деплоя, а не после.
+
+**4c) Там же: скрипт R10 на репетиционной базе** (он понадобится только
+после отката, но проверяется сейчас — в репозитории он ни разу не
+запускался). На свежемигрированной базе он обязан ничего не найти:
+
+```bash
+docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -I -d "$DB" \
+  < deploy/grandfather-unverified-data-owners.sql
+# ожидается: grandfather: unverified before=0, marked verified=0
+#            grandfather: still unverified (pending registrations without data)=0
+```
+
+Пустой прогон не доказывает, что `UPDATE` находит нужных. Поэтому на той же
+**репетиционной** базе (и только на ней — `USE [$DB]`, проверить глазами)
+сделать одного владельца объявлений неподтверждённым и прогнать ещё дважды:
+
+```bash
+ex "USE [$DB]; UPDATE dbo.Users SET IsEmailConfirmed = 0 WHERE Id IN (SELECT TOP (1) OwnerId FROM dbo.Listings);"
+# затем тот же вызов sqlcmd со скриптом, два раза подряд
+# ожидается: 1-й прогон before=1, marked verified=1; 2-й прогон before=0, marked verified=0
+```
+
+```bash
+# 5) production
+docker compose -f docker-compose.production.yml up -d
+# ожидается: Recreate api, Recreate ui; db и cloudflared — Running (не Recreate).
+# "Recreate db" или пересоздание сети в выводе — это не тот релиз: сразу шаг 6 и разбор
+
+# 6) алиас db — проверка, а не предположение (M-055)
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]. Без "db" (api не резолвит базу, крутится в рестартах):
+docker compose -f docker-compose.production.yml up -d --no-deps --force-recreate db
+docker compose -f docker-compose.production.yml up -d
+# и снова инспект алиаса
+
+# 7) миграция применилась и гейт открыт — лог первого старта
+docker compose -f docker-compose.production.yml logs --no-color api </dev/null \
+  | grep -E "Applying migration|NOT operational in Production|Application started"
+# ожидается: Applying migration '20261009104046_AddEmailVerification'. + Application started,
+# и НИ ОДНОЙ строки "NOT operational in Production"
+# затем те же запросы, что в шаге 6 репетиции, но на RentalPlatformDb — те же числа
+
+# 8) smoke — включает email-gate (раздел j)
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
+# ожидается: PASS email-gate ... ; overall: PASS
+```
+
+### Smoke: ручная часть
+
+Сверх `smoke.sh` — его зелёный прогон не доказывает, что письмо дошло.
+
+1. **Повторная отправка отвечает 202** (агент, с сервера по петле, мимо
+   Cloudflare Access). Адрес заведомо несуществующий: письмо не уходит,
+   бюджет отправок не тратится.
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8080/api/auth/resend-verification \
+     -H 'Content-Type: application/json' -d '{"email":"resend-probe@example.invalid"}'
+   # ожидается: 202. 503 = гейт закрыт (см. email-gate в smoke.sh)
+   ```
+2. **Реальная регистрация — Тигран, на двух почтовых провайдерах**: Gmail и
+   ещё один (Outlook/Hotmail, Yandex или Mail.ru — у них свои переписыватели
+   ссылок). На каждом:
+   - письмо пришло (папку «Спам» тоже проверить; в заголовках —
+     `dkim=pass` для `dorent.am`);
+   - ссылка в письме ведёт **прямо** на `https://dorent.am/auth/verify-email#token=…`,
+     а не на трекинг-домен (иначе click tracking включён — предусловие 2);
+   - открытая из почтового клиента ссылка показывает форму ввода пароля, а
+     не «ссылка недействительна» — то есть **фрагмент `#token=…` пережил
+     почтовый клиент**; после открытия фрагмента в адресной строке нет;
+   - **до** подтверждения вход этим адресом даёт «email не подтверждён»;
+   - на форме подтверждения **сначала неверный пароль** — ошибка, ссылка
+     остаётся рабочей; **затем верный** — вход выполнен;
+   - повторное открытие той же ссылки — «уже подтверждён», не ошибка сервера.
+3. **Существующие аккаунты входят без подтверждения** (наследование
+   миграцией): bootstrap-администратор и demo-владелец
+   (`BOOTSTRAP_DEMO_OWNER_EMAIL`) — Тигран, обычным входом.
+4. В дашборде Resend оба письма — *Delivered*.
+
+Тестовые регистрации тратят 2+ из 100 писем дневного бюджета — это норма.
+Тестовые аккаунты после проверки — по решению Тиграна (удалять или оставить).
+
+Затем — строка в `/opt/dorent/deployment-notes/deploys.log`.
+
+### Откат
+
+**Код.** Старые образы, **оба сразу** — новый UI со старым API так же
+несовместим, как наоборот:
+
+```bash
+cd /opt/dorent/rental-api
+docker tag rental-api-api:pre-email-verification rental-api-api:latest
+docker tag rental-api-ui:pre-email-verification  rental-api-ui:latest
+docker compose -f docker-compose.production.yml up -d    # БЕЗ down -v, никогда
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]; иначе — force-recreate db + up -d (как в шаге 6)
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
+```
+
+`docker-compose.production.yml` при этом **не откатывается**: старый код ключи
+`Email__*`/`App__*` просто не читает, а сеть этим файлом не меняется — значит,
+и откат сеть не пересоздаёт (M-055 не срабатывает; проверка алиаса всё равно
+выше). Пересборка с текущего дерева вернула бы новый код — до исправления
+через PR не пересобирать.
+
+**Схема.** Down-миграция **не выполняется**: схема остаётся новой, старый код
+на ней работает (проверено в шаге 4b репетиции). `Down` к тому же ни с кого
+не снимает подтверждение — наследованные пользователи остаются
+подтверждёнными. Восстановление предрелизного `.bak` — только если сама
+миграция испортила данные; это **потеря всего, что записано после бэкапа**,
+включая новые регистрации.
+
+**Перед повторным выкатом после отката — обязательно скрипт R10**
+(ADR-028 §13). Пока работает старый код, новые пользователи создаются с
+`IsEmailConfirmed = 0`, входят и обзаводятся данными. После повторного
+выката такой пользователь стал бы «ожидающей регистрацией»: вход — 403, а
+повторная регистрация кем угодно на его адрес заменила бы пароль и профиль
+и унаследовала бы его объявления, брони и чаты.
+`deploy/grandfather-unverified-data-owners.sql` помечает подтверждёнными
+ровно тех неподтверждённых, у кого есть строки в `Listings`, `Bookings`,
+`Favorites`, `Conversations`, `ConversationParticipants`, `ChatMessages`,
+`ToyReviews`, `OwnerReviews`, `RenterReviews` или `Reports`. Идемпотентен,
+печатает только счётчики, `EmailConfirmedAt` оставляет `NULL` (пометка
+«наследован»).
+
+```bash
+cd /opt/dorent/rental-api
+./deploy/backup-production.sh && ./deploy/backup-production.sh --verify   # сначала бэкап
+P="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+gf() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -I -d RentalPlatformDb \
+  < deploy/grandfather-unverified-data-owners.sql; }
+
+gf    # (а) непосредственно ПЕРЕД up -d повторного выката
+# ожидается: grandfather: unverified before=<N>, marked verified=<M>
+#            grandfather: still unverified (pending registrations without data)=<N-M>
+# ... up -d нового кода, проверка алиаса, smoke ...
+gf    # (б) сразу ПОСЛЕ up -d — ловит того, кто обзавёлся данными в промежутке;
+      #     после выката гейт не даёт неподтверждённым создавать данные, так что (б) последний
+unset P
+```
+
+Оставшиеся `still unverified` — обычные ожидающие регистрации без данных: они
+подтверждаются штатно, по ссылке или повторной отправке письма.

@@ -538,6 +538,42 @@ check_websocket_negotiate() {
     fi
 }
 
+# Production email gate (ADR-028 section 9). With a missing/invalid email configuration the
+# api does NOT crash and stays healthy — by design (M-016) — so every check above stays green
+# while sign-up is closed: register and resend-verification answer 503
+# auth.registration_unavailable. The only trace is ONE Critical line written by
+# EmailConfigurationStartupCheck when the process starts. So the check reads the logs of the
+# CURRENT api process (since its State.StartedAt — not `--tail N`, which a busy hour pushes
+# the one-off startup line out of) and fails if that line is there. Read-only: docker inspect
+# + docker logs, no exec, no request. Images older than the verification release never write
+# the line, so on them this passes vacuously; that is correct (they have no gate to close).
+# The pattern is the message's fixed prefix in
+# src/RentalPlatform.Infrastructure/Services/EmailConfigurationStartupCheck.cs — if that text
+# changes, change it here in the same commit.
+EMAIL_GATE_MARKER='Email verification is NOT operational in Production'
+check_email_gate() {
+    local cid started lines count sample
+    cid="$("${COMPOSE[@]}" ps -q api 2>/dev/null || true)"
+    if [[ -z "${cid}" ]]; then
+        report_fail "email-gate" "api container not found (see stack-state); cannot prove sign-up is open"
+        return
+    fi
+    started="$(docker inspect -f '{{.State.StartedAt}}' "${cid}" 2>/dev/null || true)"
+    if [[ -z "${started}" ]]; then
+        report_fail "email-gate" "cannot read api State.StartedAt; cannot prove sign-up is open"
+        return
+    fi
+    lines="$(docker logs --since "${started}" "${cid}" 2>&1 || true)"
+    count="$(printf '%s\n' "${lines}" | grep -cF "${EMAIL_GATE_MARKER}" || true)"
+    if [[ "${count}" == "0" ]]; then
+        report_pass "email-gate" "no email-gate Critical line since api start (${started})"
+    else
+        # The line names WHAT is missing (key names only, never values, by construction).
+        sample="$(printf '%s\n' "${lines}" | grep -F "${EMAIL_GATE_MARKER}" | tail -n 1 | sed 's/^[[:space:]]*//' | cut -c1-220)"
+        report_fail "email-gate" "sign-up is CLOSED (register/resend answer 503): ${sample} — fix EMAIL_* / APP_PUBLIC_BASE_URL in .env, then 'up -d api' (DEPLOY-PRODUCTION.md, email-verification release)"
+    fi
+}
+
 # --- WARNING checks ------------------------------------------------------------------
 
 # Recent critical errors in the api container's logs. Pattern targets ASP.NET
@@ -682,6 +718,7 @@ main() {
     check_access_gate
     check_uploads_routing
     check_websocket_negotiate
+    check_email_gate
 
     # WARNING tier (disk can escalate itself to FAIL at >=90%)
     check_api_logs

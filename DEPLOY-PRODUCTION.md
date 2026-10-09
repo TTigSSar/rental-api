@@ -1403,6 +1403,28 @@ qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD
 - **метки нет** (сеть создана старым Compose) — Compose **молча оставляет
   старую сеть как есть**, без ошибки и без предупреждения.
 
+> ⚠️ **Первый пункт в production сработал не так, как на репетиции**
+> (2026-10-09, Compose **5.3.1**, сайт лежал 1 ч 28 мин). Сеть пересоздалась
+> с нужной подсетью, `api` и `ui` (у них новые образы) были пересозданы, а
+> контейнер `db`, конфигурация которого не менялась, Compose **не
+> пересоздал, а только перезапустил и подключил к новой сети без
+> service-алиаса `db`** (`Aliases` содержал лишь `rental-api-db-1`). `api`
+> не мог разрешить имя `db` из строки подключения и ушёл в цикл падений
+> (329 перезапусков), `ui` не стал healthy, `cloudflared` не поднялся —
+> Cloudflare 530 на весь сайт. Тома при этом не пострадали.
+>
+> **Пробел репетиции.** Локальная проверка 2026-10-08 (Compose 5.3.0)
+> смотрела, что сеть пересоздаётся, контейнеры поднимаются и том цел, — но
+> в ней не было сервиса, который **сохраняет свой контейнер** при
+> пересоздании сети и которого другой сервис ищет по имени сервиса. Именно
+> этот случай и сломался. Вывод для будущих репетиций изменений сети:
+> проверять `Aliases` каждого контейнера после `up -d` и резолв имени
+> сервиса изнутри соседа, а не только «контейнеры Up».
+>
+> Поэтому любое `up -d`, которое пересоздаёт сеть, в этом проекте
+> **обязательно** продолжается принудительным пересозданием `db` (см.
+> «Последовательность», шаг 4) — и при деплое, и при откате.
+
 Во втором случае любая подсеть, кроме уже действующей, дала бы тихий провал:
 API доверял бы диапазону, которого нет, заголовок игнорировался бы, и всё
 осталось бы одним общим ведром — при зелёном `smoke.sh`. С `172.18.0.0/16`
@@ -1422,7 +1444,7 @@ docker network inspect rental-api_default --format 'hash=[{{index .Labels "com.d
 # hash=[]          -> сеть останется как есть: пересоздаются только api и ui
 ```
 
-**Последовательность** — штатная «Обновление стенда» (шаги 1–5) с тремя
+**Последовательность** — штатная «Обновление стенда» (шаги 1–5) с четырьмя
 уточнениями:
 
 1. **Перед `build` пометить текущие образы** — это быстрый откат без
@@ -1434,17 +1456,41 @@ docker network inspect rental-api_default --format 'hash=[{{index .Labels "com.d
 2. **Свежий бэкап + `--verify` — делать**, хотя миграций нет: при наличии
    метки (`hash=[<непусто>]`) `up -d` останавливает и поднимает SQL Server.
 3. Шаг 4 (репетиция миграций) пропускается — миграций нет.
+4. **Сразу после `up -d` — пересоздать `db` и ещё раз `up -d`.** Это та
+   процедура, которой 2026-10-09 был восстановлен production, и она
+   проверена живьём:
+   ```bash
+   docker compose -f docker-compose.production.yml up -d                                  # пересоздаёт сеть
+   docker compose -f docker-compose.production.yml up -d --no-deps --force-recreate db    # возвращает алиас db
+   docker compose -f docker-compose.production.yml up -d                                  # дотягивает api/ui/cloudflared
+   docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+     "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+   # ожидается: [rental-api-db-1 db]. Без "db" — api не стартует, сайт лежит
+   ```
+   `--force-recreate db` перезапускает SQL Server ещё раз (том
+   `mssql-data` не трогается — это пересоздание контейнера, не `down -v`).
+   Не ждать, пока `api` «сам поправится»: он не поправится — имя `db` не
+   резолвится, пока контейнер не пересоздан. Альтернатива —
+   `up -d --force-recreate` для всех сервисов сразу; она не проверена в
+   production, поэтому основная — пара команд выше.
 
-**Простой.** Путь «метка есть»: весь стек, ориентировочно 2–4 минуты
-(остановка SQL Server, его старт до healthy, холодный старт `api` на
-1 vCPU / 2 ГБ, переподключение туннеля); верхняя граница по healthcheck-ам —
-около 5–6 минут. Путь «метки нет»: пересоздаются `api` и `ui`, ориентировочно
-1–3 минуты (`ui` ждёт healthy от нового `api`). Сборка в простой не входит —
-она идёт до `up -d`.
+**Простой.** Путь «метка есть»: весь стек плюс второй старт SQL Server
+(шаг 4), ориентировочно 3–6 минут; верхняя граница по healthcheck-ам —
+около 8 минут. Если после шага 4 алиас `db` на месте, а `api` через
+5 минут не healthy — это уже не та проблема, смотреть `docker compose logs
+api` и `State.Health.Log`. Путь «метки нет»: сеть не пересоздаётся,
+пересоздаются `api` и `ui`, ориентировочно 1–3 минуты; шаг 4 вреда не
+несёт, но и не нужен — проверка алиаса всё равно обязательна. Сборка в
+простой не входит — она идёт до `up -d`.
 
 **Проверка после `up -d`** — сверх `smoke.sh`:
 
 ```bash
+# 0) у db есть алиас сервиса (см. шаг 4 последовательности)
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]
+
 # 1) сеть та, которой доверяет api
 docker network inspect rental-api_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
 # ожидается: 172.18.0.0/16
@@ -1474,12 +1520,27 @@ done
 # ожидается: 401, а НЕ 429 — у второго IP своё ведро
 ```
 
-4) **Подделка не помогает.** С первой сети, когда ведро освободится (через
-минуту), повторить пункт 3, добавив к каждому запросу поддельные заголовки
-`-H "X-Forwarded-For: 203.0.113.$i" -H "CF-Connecting-IP: 198.51.100.$i"`.
-Ожидается то же: пять `401`, затем `429`. Cloudflare перезаписывает
-`CF-Connecting-IP`, nginx перезаписывает `X-Forwarded-For` — клиент своё
-ведро выбрать не может.
+**Проверенный вариант (2026-10-09) — две сети с самого сервера.** У VPS
+есть и IPv4, и IPv6, а Cloudflare отдаёт `dorent.am` по обоим, поэтому
+`curl -4` и `curl -6` с сервера — это два разных клиента (IPv6 ключуется
+по /64, ADR-027). Одной командой, чтобы уложиться в одно окно лимита:
+
+```bash
+U=https://dorent.am/api/auth/login
+B='{"email":"adr027-probe@example.invalid","password":"wrong-password"}'
+for i in 1 2 3 4 5 6 7; do curl -4 -s -o /dev/null -w '%{http_code} ' -X POST "$U" -H 'Content-Type: application/json' -d "$B"; done; echo
+curl -6 -s -o /dev/null -w '%{http_code}\n' -X POST "$U" -H 'Content-Type: application/json' -d "$B"
+for i in 1 2 3; do curl -4 -s -o /dev/null -w '%{http_code} ' -X POST "$U" -H 'Content-Type: application/json' -H "X-Forwarded-For: 203.0.113.$i" -d "$B"; done; echo
+# получено: 401 401 401 401 401 429 429 / 401 / 429 429 429
+```
+
+4) **Подделка не помогает.** Поддельный `X-Forwarded-For` от клиента
+nginx перезаписывает — запрос остаётся в своём (исчерпанном) ведре: `429`.
+Поддельный `CF-Connecting-IP` до сервера **вообще не доходит**: Cloudflare
+отвечает на него сам — `403`, `server: cloudflare`, тело `error code: 1000`
+(проверено 2026-10-09; в логе nginx этих запросов нет). Поэтому в проверке
+подделки `CF-Connecting-IP` не добавлять — `403` там ожидаем и ничего не
+говорит о лимите; проверять только `X-Forwarded-For`, ожидается `429`.
 
 > ⚠️ **Пункт 3 нельзя прогонять ДО деплоя.** До него ведро одно на всех:
 > шесть неудачных логинов на минуту заблокируют вход и регистрацию **всем
@@ -1514,11 +1575,22 @@ git checkout <sha_до> -- docker-compose.production.yml
 docker tag rental-api-api:pre-adr027 rental-api-api:latest
 docker tag rental-api-ui:pre-adr027  rental-api-ui:latest
 docker compose -f docker-compose.production.yml up -d    # БЕЗ down -v, никогда
+# старый файл без ipam снова пересоздаёт сеть -> db снова теряет алиас:
+docker compose -f docker-compose.production.yml up -d --no-deps --force-recreate db
+docker compose -f docker-compose.production.yml up -d
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]
 sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
 # рабочее дерево теперь расходится с HEAD по одному файлу — это и есть откат;
 # вернуть: git checkout HEAD -- docker-compose.production.yml, когда исправление
 # пройдёт через PR. Пересборка до этого вернула бы новый nginx.conf в образ ui
 ```
+
+> ⚠️ Откат — это **ещё одно пересоздание сети**, то есть ровно тот
+> сценарий, который 2026-10-09 положил сайт: без `--force-recreate db`
+> `api` не найдёт `db`. Строки с `--force-recreate db` в откате не
+> пропускать.
 
 Закрепление подсети обратимо: старый файл без `ipam` снова меняет
 config-hash сети, и Compose (если метка есть) ещё раз пересоздаёт её — с

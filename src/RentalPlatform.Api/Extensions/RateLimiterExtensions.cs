@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -96,8 +98,38 @@ public static class RateLimiterExtensions
         return services;
     }
 
-    private static string ResolveClientKey(HttpContext context) =>
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    // Partition key for per-IP policies. IPv4 (plain or IPv4-mapped IPv6) keys on the address;
+    // any other IPv6 keys on its /64, because one subscriber holds a whole /64 and could otherwise
+    // rotate through 2^64 addresses to dodge the limit (ADR-027 amendment).
+    internal static string ResolveClientKey(HttpContext context) =>
+        ResolveClientKey(context.Connection.RemoteIpAddress);
+
+    internal static string ResolveClientKey(IPAddress? address)
+    {
+        if (address is null)
+        {
+            return "unknown";
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return address.ToString();
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        if (!address.TryWriteBytes(bytes, out _))
+        {
+            return address.ToString();
+        }
+
+        bytes[8..].Clear();
+        return new IPAddress(bytes).ToString() + "/64";
+    }
 
     // Per-account partition for authenticated endpoints. The IP fallback only applies to a request
     // with no usable user id — which the [Authorize] filter rejects anyway, so it exists purely so

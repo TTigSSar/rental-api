@@ -600,6 +600,40 @@ docker compose -f docker-compose.production.yml logs --no-color --since 15m api 
      правильно (M-038: правило, введённое позже, не превращает старые строки в
      сломанные).
 
+**Всё перечисленное выше подтверждено живой репетицией 2026-10-07** (ADR-023,
+на восстановленном `RentalPlatformDb_2026-10-07_1235.bak`, образ `api`
+собранный из `3552cdb`): ровно одна строка
+`Applying migration '20260927200321_AddUserHomePoint'.`, `Application started.`,
+ноль совпадений по `error|exception|unhandled`,
+`Demo content bootstrap completed. Showcase owners: 12, listings created: 0,
+images: 0, listings redistributed by district: 54, home points applied: 12.`,
+ровно 2 ожидаемых `WARNING` (`Outdoor Backyard Slide`,
+`Kids Double-Sided Art Easel` — оба в Кентроне и с бронями), и строка бэкфилла
+`Home points derived: 1; ... included: 2; of the 0 remaining ... filled: 0,
+districts assigned: 0.` — буквально как предсказано выше. Отпечаток на
+репетиционной копии: `users=6 -> 18`, `listings=58`, `bookings=6`, лента
+отката `58`, `distinctPins=13 distinctDistricts=12`, «координаты без
+производных» `0`, статусы `2=56 3=1 4=1` без изменений, `MAX(UpdatedAt)`
+не сдвинулся. Числа ниже — это те же проверки, но уже на боевой базе.
+
+**И подтверждено на самом проде 2026-10-07 19:13Z — число в число.** Окно
+`up -d` 19:12:49Z→19:13:07Z (18 с, пересозданы только `api` и `ui`), в логе
+первого старта ровно одна строка
+`Applying migration '20260927200321_AddUserHomePoint'.`,
+`Application started.`, ноль совпадений по `error|exception|unhandled` на 1565
+строк, `Showcase owners: 12, listings created: 0, images: 0, listings
+redistributed by district: 54, home points applied: 12.`, ровно 2 ожидаемых
+`WARNING` и строка бэкфилла `derived: 1 / ... included: 2 / of the 0
+remaining`. Отпечаток прод-до → прод-после: `users 6→18`, `listings 58`,
+`bookings 6`, лента отката `58`, `distinctPins 56→13`,
+`distinctDistricts 12→12`, «координаты без производных» `0`, статусы
+`2=56 3=1 4=1` и `MAX(UpdatedAt)` не сдвинулись, `public coords == exact
+coords` = 0. Разнообразие пинов проверено ещё и **на публичном краю**, а не
+только в базе: `GET https://dorent.am/api/listings/map-pins` отдаёт 56 пинов с
+**13 различными парами координат** (раскладка по районам
+16/6/4/4/4/4/3/3/3/3/3/3). Репетиция на восстановленном `.bak` предсказала
+боевой результат полностью — это и есть аргумент в пользу ADR-023.
+
 **Снимок-отпечаток, который надо сверить после `up -d`** (тот же, что снимался
 до деплоя по ADR-023; помощники `qp`/`ex` — в разделе «Репетиция миграций»):
 
@@ -820,8 +854,21 @@ Access» ниже), плюс предупреждающие проверки: о
 что-то не так.
 
 ```bash
-/opt/dorent/rental-api/deploy/smoke.sh
+# запускать ОТ ПОЛЬЗОВАТЕЛЯ dorent — см. предупреждение ниже
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
 ```
+
+> ⚠️ **Запускать от `dorent`, иначе `backup-cron` даст ложный `WARN`.**
+> Проверка `backup-cron` читает `crontab -l` **того пользователя, который
+> запустил скрипт** — так и задумано («cron entry installed for the deploy
+> user»), а запись о бэкапах стоит в crontab пользователя `dorent`. Запуск
+> от `root` поэтому честно сообщает `no crontab entry for backup-production.sh
+> found for user root` и даёт `pass=19 warn=1` вместо `pass=20 warn=0`, хотя
+> бэкапы при этом исправно идут в 03:30. Наблюдалось живьём при деплое
+> 2026-10-07 19:13Z. Это особенность вызова, а не регрессия: отличить одно от
+> другого можно по строкам `backup-freshness` и `backup-log` — если они
+> `PASS`, бэкапы работают, и `WARN` относится только к тому, в чьём crontab
+> смотрели.
 
 ### Как читать вывод
 
@@ -1229,6 +1276,35 @@ qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD
    # а не ошибка: контейнер не должен завершаться сам.
    ```
 
+   **Равнозначный вариант через `docker run` — и он изолирован строже.**
+   `compose run` берёт из сервиса `api` ещё и его `volumes`, то есть
+   **монтирует боевые тома `uploads`/`chat-uploads`**: репетиция, в которой
+   раннер решит записать картинку, пишет её в production-данные. Вариант ниже
+   не монтирует ничего и не публикует портов, а окружение берёт с живого
+   контейнера `api` — это ровно то, что получил бы новый контейнер, **при
+   условии что delta `docker-compose.production.yml` между развёрнутым и новым
+   sha не трогает секцию `environment`** (проверять `git diff` по файлу; если
+   трогает — брать окружение из `compose config`, а не из контейнера).
+   Применялся живьём 2026-10-07.
+
+   ```bash
+   CID_API="$(docker compose -f docker-compose.production.yml ps -q api </dev/null)"
+   umask 077
+   docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CID_API" \
+     | grep -vE '^\s*$' | grep -v '^ConnectionStrings__DefaultConnection=' > /tmp/rehearsal.env
+   printf 'ConnectionStrings__DefaultConnection=Server=db,1433;Database=%s;User Id=sa;Password=%s;TrustServerCertificate=True;\n' \
+     "$DB" "$P" >> /tmp/rehearsal.env
+   # проверить глазами ИМЕНА ключей (не значения) и что цель — репетиционная база:
+   cut -d= -f1 /tmp/rehearsal.env | sort
+   grep -o 'Database=[A-Za-z_]*' /tmp/rehearsal.env
+   NET="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$CID_API")"
+
+   timeout 300 docker run --rm --name dorent-rehearsal-api --network "$NET" \
+     --env-file /tmp/rehearsal.env rental-api-api:latest > /tmp/rehearsal.log 2>&1 </dev/null
+   # ожидается: код возврата 124 (как и выше)
+   # /tmp/rehearsal.env содержит все секреты api — mode 600, и shred в шаге 7
+   ```
+
 5. **Проверить, что именно применилось** — по одной строке на каждую миграцию
    из деплоя, и ни одной ошибки:
 
@@ -1282,3 +1358,172 @@ qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD
 >    Поэтому у каждого docker-вызова в таком скрипте стоит `</dev/null`.
 >    Замечено на живом прогоне 2026-09-27 дважды, прежде чем стало понятно,
 >    почему вывод обрывается на середине.
+> 4. **Обратная сторона той же ловушки: `</dev/null` ставится ТОЛЬКО на
+>    docker-вызов, а не на то, что стоит справа от конвейера.** На живом
+>    прогоне 2026-10-07 строка
+>    `docker images --format ... | grep -E "rental-api-(api|ui)" </dev/null`
+>    вернула пустой список: `</dev/null` переназначил stdin не docker-у, а
+>    `grep`-у, и тот прочитал пустоту вместо конвейера. Выглядит это как
+>    «образов нет» — то есть как осмысленный, но ложный ответ. Правильно:
+>    `docker ... </dev/null | grep ...`, либо, если docker в начале конвейера,
+>    он stdin и так не читает.
+
+### Однократно: закреплённая подсеть и реальный IP клиента (ADR-027)
+
+**Что меняется.** До этого изменения API видел адресом клиента контейнер
+`ui` (nginx) для **каждого** публичного запроса — все «поштучные по IP»
+лимиты (`auth` 5/мин, `password-change`, `booking-create`, `image-upload`,
+`district-lookup`) были одним общим ведром на всех пользователей.
+Изменение состоит из трёх частей, и деплоятся они вместе:
+
+- `Rental-Ui/nginx.conf`: на `/api/` и `/hubs/` nginx **перезаписывает**
+  `X-Forwarded-For` значением `CF-Connecting-IP` (новый образ `ui`);
+- `docker-compose.production.yml`, сервис `api`: три **литеральных** ключа
+  `ForwardedHeaders__Enabled`, `ForwardedHeaders__KnownNetworks__0`,
+  `ForwardedHeaders__ForwardLimit` — не из `.env` (M-016); `.env` не меняется;
+- `docker-compose.production.yml`, секция `networks.default`: подсеть сети
+  стека закреплена — `172.18.0.0/16`. Это **ровно та подсеть, которую Docker
+  уже выдал** `rental-api_default` в production (проверено 2026-10-08). Она
+  записана в файле один раз — YAML-якорем `&stack_subnet` в окружении `api`,
+  на который ссылается `networks.default` (`*stack_subnet`), так что
+  доверенная сеть и реальная сеть разойтись не могут.
+
+Миграций нет, тома не трогаются, `.env` не трогается.
+
+**Почему именно `172.18.0.0/16`, а не новая узкая /24.** Поведение Compose
+при закреплении подсети у уже существующей сети проверено живьём на
+выброшенном локальном проекте (Compose 5.3.0, 2026-10-08), и оно бывает двух
+видов:
+
+- **у сети есть метка `com.docker.compose.config-hash`** — `up -d` сам
+  пересоздаёт сеть: останавливает **все четыре** контейнера (включая `db`),
+  удаляет сеть, создаёт заново и поднимает контейнеры в порядке
+  healthcheck-ов (`db` healthy → `api` healthy → `ui` → `cloudflared`).
+  Тома целы (проверено: файл на named volume пережил пересоздание сети);
+- **метки нет** (сеть создана старым Compose) — Compose **молча оставляет
+  старую сеть как есть**, без ошибки и без предупреждения.
+
+Во втором случае любая подсеть, кроме уже действующей, дала бы тихий провал:
+API доверял бы диапазону, которого нет, заголовок игнорировался бы, и всё
+осталось бы одним общим ведром — при зелёном `smoke.sh`. С `172.18.0.0/16`
+правильны оба исхода. Узкая /24 по безопасности ничего не даёт: на
+bridge-сети адреса из её диапазона бывают только у контейнеров этой же сети.
+
+**Перед деплоем (только чтение):**
+
+```bash
+cd /opt/dorent/rental-api
+docker compose version
+docker network inspect rental-api_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+# ожидается: 172.18.0.0/16. ЛЮБОЕ другое значение — СТОП, не деплоить:
+# якорь &stack_subnet обязан совпадать с живой подсетью, план пересматривается
+docker network inspect rental-api_default --format 'hash=[{{index .Labels "com.docker.compose.config-hash"}}]'
+# hash=[<непусто>] -> up -d пересоздаст сеть: перезапуск ВСЕГО стека, включая db
+# hash=[]          -> сеть останется как есть: пересоздаются только api и ui
+```
+
+**Последовательность** — штатная «Обновление стенда» (шаги 1–5) с тремя
+уточнениями:
+
+1. **Перед `build` пометить текущие образы** — это быстрый откат без
+   пересборки:
+   ```bash
+   docker tag rental-api-api:latest rental-api-api:pre-adr027
+   docker tag rental-api-ui:latest  rental-api-ui:pre-adr027
+   ```
+2. **Свежий бэкап + `--verify` — делать**, хотя миграций нет: при наличии
+   метки (`hash=[<непусто>]`) `up -d` останавливает и поднимает SQL Server.
+3. Шаг 4 (репетиция миграций) пропускается — миграций нет.
+
+**Простой.** Путь «метка есть»: весь стек, ориентировочно 2–4 минуты
+(остановка SQL Server, его старт до healthy, холодный старт `api` на
+1 vCPU / 2 ГБ, переподключение туннеля); верхняя граница по healthcheck-ам —
+около 5–6 минут. Путь «метки нет»: пересоздаются `api` и `ui`, ориентировочно
+1–3 минуты (`ui` ждёт healthy от нового `api`). Сборка в простой не входит —
+она идёт до `up -d`.
+
+**Проверка после `up -d`** — сверх `smoke.sh`:
+
+```bash
+# 1) сеть та, которой доверяет api
+docker network inspect rental-api_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+# ожидается: 172.18.0.0/16
+docker compose -f docker-compose.production.yml exec -T api printenv \
+  ForwardedHeaders__Enabled ForwardedHeaders__KnownNetworks__0 ForwardedHeaders__ForwardLimit </dev/null
+# ожидается: true / 172.18.0.0/16 / 1   (это не секреты)
+
+# 2) адрес ui внутри доверенной сети
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q ui </dev/null)"
+# ожидается: 172.18.x.y
+```
+
+3) **Функциональное доказательство — две разные сети клиентов.** Логин с
+заведомо несуществующим адресом, чтобы не трогать живые учётные записи:
+
+```bash
+# с ПЕРВОЙ сети (ноутбук): 8 быстрых неудачных логинов
+for i in 1 2 3 4 5 6 7 8; do
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://dorent.am/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"adr027-probe@example.invalid","password":"wrong-password"}'
+done
+# ожидается: 401 пять раз, дальше 429 (лимит auth = 5/мин)
+# сразу же, в ту же минуту, со ВТОРОЙ сети (телефон на мобильном интернете,
+# не через тот же Wi-Fi) — один такой же запрос
+# ожидается: 401, а НЕ 429 — у второго IP своё ведро
+```
+
+4) **Подделка не помогает.** С первой сети, когда ведро освободится (через
+минуту), повторить пункт 3, добавив к каждому запросу поддельные заголовки
+`-H "X-Forwarded-For: 203.0.113.$i" -H "CF-Connecting-IP: 198.51.100.$i"`.
+Ожидается то же: пять `401`, затем `429`. Cloudflare перезаписывает
+`CF-Connecting-IP`, nginx перезаписывает `X-Forwarded-For` — клиент своё
+ведро выбрать не может.
+
+> ⚠️ **Пункт 3 нельзя прогонять ДО деплоя.** До него ведро одно на всех:
+> шесть неудачных логинов на минуту заблокируют вход и регистрацию **всем
+> пользователям**. Базовую линию «до» не снимать.
+
+**Если `CF-Connecting-IP` не доходит.** Пункт 3 это и показывает: без
+заголовка nginx не отправляет `X-Forwarded-For` вовсе, API видит адрес nginx,
+и запрос со второй сети тоже получает `429`. Поведение то же, что до деплоя
+(регрессии нет), но цель не достигнута. Увидеть сам заголовок можно без
+изменения конфигурации — захватом трафика к `api` на сервере (нужен
+`tcpdump`), считая только строки-заголовки, без адресов и тела запроса:
+
+```bash
+sudo timeout 30 tcpdump -i any -l -A -s 0 'tcp dst port 8080' 2>/dev/null \
+  | grep -ciE '^x-forwarded-for: *[0-9a-f.:]+'
+# в эти 30 секунд открыть https://dorent.am в браузере
+# ожидается: > 0. 0 при живом трафике — заголовок до api не доходит
+```
+
+В этом случае **не оставлять как есть и не переключать молча на другой
+заголовок**: сообщить Тиграну и вносить поправку в ADR-027 (вариант (a) из его
+«Rejected» — `X-Forwarded-For` от Cloudflare при `ForwardLimit = 1` — это
+решение, а не правка конфига). Откатывать не обязательно: поведение равно
+прежнему.
+
+**Откат.** Схема не менялась — откатываются только compose-файл и образы,
+восстановление бэкапа не нужно:
+
+```bash
+cd /opt/dorent/rental-api
+git checkout <sha_до> -- docker-compose.production.yml
+docker tag rental-api-api:pre-adr027 rental-api-api:latest
+docker tag rental-api-ui:pre-adr027  rental-api-ui:latest
+docker compose -f docker-compose.production.yml up -d    # БЕЗ down -v, никогда
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
+# рабочее дерево теперь расходится с HEAD по одному файлу — это и есть откат;
+# вернуть: git checkout HEAD -- docker-compose.production.yml, когда исправление
+# пройдёт через PR. Пересборка до этого вернула бы новый nginx.conf в образ ui
+```
+
+Закрепление подсети обратимо: старый файл без `ipam` снова меняет
+config-hash сети, и Compose (если метка есть) ещё раз пересоздаёт её — с
+адресом, который выдаст Docker (скорее всего снова `172.18.0.0/16`, но не
+гарантированно; для старой конфигурации это неважно — она никому не
+доверяет). Тома не трогаются ни в одну сторону. Откат только доверия, без
+смены сети, — это `ForwardedHeaders__Enabled: "false"` в compose-файле, то
+есть отдельный коммит через PR, а не правка на сервере.

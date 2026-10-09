@@ -19,4 +19,9 @@
     </PackageReference>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the test project unit-test internal helpers (RateLimiterExtensions.ResolveClientKey). -->
+    <InternalsVisibleTo Include="RentalPlatform.Tests" />
+  </ItemGroup>
 </Project>

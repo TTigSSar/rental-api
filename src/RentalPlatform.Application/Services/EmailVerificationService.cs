@@ -106,15 +106,25 @@ public sealed class EmailVerificationService : IEmailVerificationService
                 return CooldownFailure(Cooldown - (now - latestCreatedAt));
             }
 
+            // Resend and re-registration share ONE per-recipient budget (ADR-028 amendment): above it
+            // nothing is overwritten. Checked here to skip the work, and again inside the store
+            // transaction, where it is race-free.
+            if (await _store.CountTokensCreatedSinceAsync(userId, TokenPurpose.EmailVerification, now - SendCapWindow, cancellationToken) >= MaxTokensPerWindow)
+            {
+                return CooldownFailure(Cooldown);
+            }
+
             var (raw, token) = NewToken(userId, now);
             rawToken = raw;
 
-            switch (await _store.TryReplacePendingAsync(userId, candidate, token, now, cancellationToken))
+            switch (await _store.TryReplacePendingAsync(userId, candidate, token, now, Limits(now), cancellationToken))
             {
                 case ReplacePendingOutcome.Replaced:
                     break;
                 case ReplacePendingOutcome.TokenConflict:
-                    // A concurrent writer just issued a token: the cooldown, observed a moment late.
+                case ReplacePendingOutcome.OverCap:
+                    // A concurrent writer just issued a token (the cooldown, observed a moment late),
+                    // or the recipient hit the 24 h cap. Either way nothing was changed.
                     return CooldownFailure(Cooldown);
                 default:
                     return Duplicate();
@@ -127,6 +137,11 @@ public sealed class EmailVerificationService : IEmailVerificationService
         if (homeLatitude is { } latitude && homeLongitude is { } longitude)
         {
             await _homePointService.SetHomePointAsync(userId, latitude, longitude, cancellationToken);
+
+            // This write happens after the commit, so an external sign-in may have reset (and
+            // verified) the account in between. If the password hash is no longer ours the point
+            // belongs to somebody else: take it back. Single-writer role of HomePointService intact.
+            await _store.DiscardHomePointIfAccountChangedAsync(userId, candidate.PasswordHash, cancellationToken);
         }
 
         await SendAsync(candidate.Email, candidate.PreferredLanguage, rawToken);
@@ -158,7 +173,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
         }
 
         var (rawToken, token) = NewToken(state.Id, now);
-        var outcome = await _store.TryRotateTokenAsync(token, now - Cooldown, now, cancellationToken);
+        var outcome = await _store.TryRotateTokenAsync(token, now, Limits(now), cancellationToken);
         if (outcome != RotateTokenOutcome.Rotated)
         {
             // Inside the cooldown, or a concurrent resend got there first: nothing new to send.
@@ -246,6 +261,8 @@ public sealed class EmailVerificationService : IEmailVerificationService
         // must not also cost the user their email. The sender bounds itself with its own timeout.
         await _emailService.SendEmailVerificationAsync(email, preferredLanguage, link, CancellationToken.None);
     }
+
+    private static TokenLimits Limits(DateTime now) => new(now - Cooldown, now - SendCapWindow, MaxTokensPerWindow);
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 

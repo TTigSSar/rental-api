@@ -17,11 +17,21 @@ public sealed record VerificationTokenView(
     bool UserIsBlocked,
     string PasswordHash);
 
+/// <summary>
+/// The per-user limits a token writer enforces inside its transaction: tokens created before
+/// <see cref="CooldownCutoff"/> may be revoked (younger ones may not), and at most
+/// <see cref="MaxTokens"/> tokens may exist since <see cref="CapWindowStart"/> (resend and
+/// re-registration share this one budget).
+/// </summary>
+public sealed record TokenLimits(DateTime CooldownCutoff, DateTime CapWindowStart, int MaxTokens);
+
 public enum ReplacePendingOutcome
 {
     Replaced,
     /// <summary>0 rows matched: the account was verified or blocked in the meantime.</summary>
     NotReplaceable,
+    /// <summary>The recipient already has the maximum tokens for the window; nothing was changed.</summary>
+    OverCap,
     /// <summary>A concurrent writer holds a fresh active token (cooldown semantics).</summary>
     TokenConflict
 }
@@ -55,17 +65,20 @@ public interface IEmailVerificationStore
     /// <summary>
     /// Replaces a pending registration in one transaction: conditional UPDATE of the user
     /// (<c>IsEmailConfirmed=0 AND IsBlocked=0</c>) with the candidate's password, profile and a reset
-    /// CreatedAt and Home*, then revokes the active tokens, then inserts <paramref name="token"/>.
+    /// CreatedAt and Home*, then checks the per-user cap, then revokes the active tokens OLDER than the
+    /// cooldown, then inserts <paramref name="token"/> (a fresh concurrent token makes the unique index
+    /// reject it and everything rolls back: <see cref="ReplacePendingOutcome.TokenConflict"/>).
     /// </summary>
     Task<ReplacePendingOutcome> TryReplacePendingAsync(
-        Guid userId, User candidate, UserToken token, DateTime now, CancellationToken cancellationToken = default);
+        Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Resend: revokes active tokens created before <paramref name="cooldownCutoff"/>, then inserts
     /// <paramref name="token"/>. A unique violation (a younger active token) is <see cref="RotateTokenOutcome.Conflict"/>.
     /// </summary>
     Task<RotateTokenOutcome> TryRotateTokenAsync(
-        UserToken token, DateTime cooldownCutoff, DateTime now, CancellationToken cancellationToken = default);
+        UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default);
 
     Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default);
 
@@ -87,4 +100,13 @@ public interface IEmailVerificationStore
     Task<bool> TryResetPendingForExternalAsync(
         Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Compensation for the registration path home-point write, which happens after the replacement
+    /// commits: clears Home* if the account password hash is no longer the registrant hash (an
+    /// external sign-in reset it, or another registration replaced it in between), so a point never
+    /// lands on somebody else account. A no-op while the hash still matches.
+    /// </summary>
+    Task<int> DiscardHomePointIfAccountChangedAsync(
+        Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default);
 }

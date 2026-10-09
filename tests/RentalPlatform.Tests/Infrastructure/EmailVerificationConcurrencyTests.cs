@@ -76,6 +76,10 @@ public sealed class EmailVerificationConcurrencyTests
         Assert.NotNull((await verify.UserTokens.AsNoTracking().SingleAsync()).ConsumedAt);
     }
 
+    // NOTE on what this proves: the verify rolls back here because the replacement also REVOKES the
+    // old token, so the token UPDATE affects no row. It would pass even without the
+    // PasswordHash=@seenHash predicate. That predicate is proven on its own by the store-level test
+    // EmailVerificationFlowTests.Verify_Commit_Rolls_Back_When_The_Password_Changed_After_It_Was_Checked.
     [SqlServerFact]
     public async Task A_Replacement_Landing_Between_The_Password_Check_And_The_Commit_Rolls_The_Verify_Back()
     {
@@ -182,6 +186,119 @@ public sealed class EmailVerificationConcurrencyTests
                 Assert.Equal($"hashed:{Password}", user.PasswordHash);
             }
         }
+    }
+
+    [SqlServerFact]
+    public async Task Two_Concurrent_Re_registrations_Give_One_Created_One_429_One_Email_And_The_Winners_Password()
+    {
+        using var db = new SqlServerTestDatabase();
+        var clock = new FakeTimeProvider(new DateTimeOffset(DateTime.UtcNow, TimeSpan.Zero));
+
+        for (var round = 0; round < 5; round++)
+        {
+            var userId = Guid.NewGuid();
+            var email = $"replace{round}@test.local";
+            var sender = new CaptureEmailSender();
+            await db.SeedAsync(
+                TestData.User(userId, email, passwordHash: $"hashed:{Password}", isEmailConfirmed: false),
+                TokenFor(userId, $"old-{round}", clock.GetUtcNow().UtcDateTime.AddMinutes(-5)));
+
+            var results = await RaceAsync(2, async i =>
+            {
+                await using var context = db.CreateContext();
+                var harness = new AuthHarness(context, clock: clock, sender: sender);
+                return await harness.Auth.RegisterAsync(AuthHarness.Register(email, $"Contender{i}Password"));
+            });
+
+            Assert.Equal(1, results.Count(result => result.IsSuccess));
+            var loser = Assert.Single(results, result => !result.IsSuccess);
+            Assert.Equal("auth.verification_cooldown", loser.Error!.Code);
+            Assert.Single(sender.Messages);
+
+            // Exactly one password survives: the winner's. The loser's replacement rolled back whole.
+            var winnerIndex = Array.FindIndex(results, result => result.IsSuccess);
+            await using var verify = db.CreateContext();
+            var user = await verify.Users.AsNoTracking().SingleAsync(candidate => candidate.Id == userId);
+            Assert.Equal($"hashed:Contender{winnerIndex}Password", user.PasswordHash);
+            Assert.Equal(1, await verify.UserTokens.CountAsync(token => token.UserId == userId && token.ConsumedAt == null));
+        }
+    }
+
+    [SqlServerFact]
+    public async Task A_Re_registration_Racing_A_Resend_Sends_Exactly_One_Email()
+    {
+        using var db = new SqlServerTestDatabase();
+        var clock = new FakeTimeProvider(new DateTimeOffset(DateTime.UtcNow, TimeSpan.Zero));
+
+        for (var round = 0; round < 5; round++)
+        {
+            var userId = Guid.NewGuid();
+            var email = $"mixed{round}@test.local";
+            var sender = new CaptureEmailSender();
+            await db.SeedAsync(
+                TestData.User(userId, email, passwordHash: $"hashed:{Password}", isEmailConfirmed: false),
+                TokenFor(userId, $"old-{round}", clock.GetUtcNow().UtcDateTime.AddMinutes(-5)));
+
+            var results = await RaceAsync(2, async i =>
+            {
+                await using var context = db.CreateContext();
+                var harness = new AuthHarness(context, clock: clock, sender: sender);
+                return i == 0
+                    ? (await harness.Auth.RegisterAsync(AuthHarness.Register(email, "ReplacerPassword1"))).IsSuccess
+                    : (await harness.Auth.ResendVerificationAsync(new ResendVerificationRequest { Email = email })).IsSuccess;
+            });
+
+            Assert.True(results[1]); // resend is always 202
+            Assert.Single(sender.Messages);
+
+            await using var verify = db.CreateContext();
+            var user = await verify.Users.AsNoTracking().SingleAsync(candidate => candidate.Id == userId);
+            // The password changed if and only if the re-registration was the one that sent.
+            Assert.Equal(results[0] ? "hashed:ReplacerPassword1" : $"hashed:{Password}", user.PasswordHash);
+            Assert.Equal(1, await verify.UserTokens.CountAsync(token => token.UserId == userId && token.ConsumedAt == null));
+        }
+    }
+
+    // Revoke and count statements filter on (UserId, Purpose[, CreatedAt]); if one of them scanned
+    // instead of seeking it would lock OTHER users' rows and could deadlock across accounts. Several
+    // different users, each hit by verify + resend + re-registration at once, for repeated rounds.
+    [SqlServerFact]
+    public async Task Verify_Resend_And_Replacement_Across_Many_Different_Users_Never_Deadlock()
+    {
+        using var db = new SqlServerTestDatabase();
+        var clock = new FakeTimeProvider(new DateTimeOffset(DateTime.UtcNow, TimeSpan.Zero));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        for (var round = 0; round < 10; round++)
+        {
+            const int users = 6;
+            var ids = Enumerable.Range(0, users).Select(_ => Guid.NewGuid()).ToArray();
+            for (var u = 0; u < users; u++)
+            {
+                await db.SeedAsync(
+                    TestData.User(ids[u], $"cross{round}-{u}@test.local", passwordHash: $"hashed:{Password}", isEmailConfirmed: false),
+                    TokenFor(ids[u], $"cross-{round}-{u}", clock.GetUtcNow().UtcDateTime.AddMinutes(-5)));
+            }
+
+            await RaceAsync(users * 3, async i =>
+            {
+                var u = i / 3;
+                var email = $"cross{round}-{u}@test.local";
+                await using var context = db.CreateContext();
+                var harness = new AuthHarness(context, clock: clock);
+                switch (i % 3)
+                {
+                    case 0:
+                        return (await harness.Auth.VerifyEmailAsync(new VerifyEmailRequest { Token = $"cross-{round}-{u}", Password = Password })).IsSuccess;
+                    case 1:
+                        return (await harness.Auth.ResendVerificationAsync(new ResendVerificationRequest { Email = email })).IsSuccess;
+                    default:
+                        return (await harness.Auth.RegisterAsync(AuthHarness.Register(email, "AttackerPassword1"))).IsSuccess;
+                }
+            });
+        }
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(90), $"took {stopwatch.Elapsed}");
     }
 
     [SqlServerFact]

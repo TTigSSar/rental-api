@@ -149,10 +149,10 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
     public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
         Task.FromResult(Tokens.Count(token => token.UserId == userId && token.CreatedAt >= since));
 
-    public Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, CancellationToken cancellationToken = default) =>
+    public Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Use the real EmailVerificationStore over SQLite.");
 
-    public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime cooldownCutoff, DateTime now, CancellationToken cancellationToken = default) =>
+    public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Use the real EmailVerificationStore over SQLite.");
 
     public Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default) =>
@@ -160,6 +160,9 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
 
     public Task<bool> TryCommitVerificationAsync(Guid tokenId, Guid userId, TokenPurpose purpose, string seenPasswordHash, DateTime now, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Use the real EmailVerificationStore over SQLite.");
+
+    public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) =>
+        Task.FromResult(0);
 
     public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Use the real EmailVerificationStore over SQLite.");

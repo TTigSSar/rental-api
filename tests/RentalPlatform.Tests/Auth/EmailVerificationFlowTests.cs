@@ -40,6 +40,8 @@ public sealed class EmailVerificationFlowTests
         return await context.Users.AsNoTracking().SingleAsync(user => user.Email == email);
     }
 
+    private static TokenLimits Limits(DateTime now) => new(now.AddSeconds(-60), now.AddHours(-24), 5);
+
     private static UserToken ActiveTokenFor(Guid userId, string raw, DateTime createdAt) => new()
     {
         Id = Guid.NewGuid(),
@@ -326,7 +328,8 @@ public sealed class EmailVerificationFlowTests
             PendingId,
             TestData.User(Guid.NewGuid(), Email, passwordHash: "hashed:Attacker1", isEmailConfirmed: false),
             ActiveTokenFor(PendingId, "tok", now),
-            now);
+            now,
+            Limits(now));
 
         Assert.Equal(ReplacePendingOutcome.NotReplaceable, outcome);
         Assert.Equal("hashed:RealPassword1", (await UserAsync(db, Email)).PasswordHash);
@@ -754,12 +757,196 @@ public sealed class EmailVerificationFlowTests
         await using var context = db.CreateContext();
         var store = new EmailVerificationStore(context);
 
-        var outcome = await store.TryRotateTokenAsync(ActiveTokenFor(PendingId, "second", now), now.AddSeconds(-60), now);
+        var outcome = await store.TryRotateTokenAsync(ActiveTokenFor(PendingId, "second", now), now, Limits(now));
 
         Assert.Equal(RotateTokenOutcome.Conflict, outcome);
         var token = Assert.Single(await TokensAsync(db, PendingId));
         Assert.Null(token.ConsumedAt);
         Assert.Empty(context.ChangeTracker.Entries());
+    }
+
+    // ---- The per-recipient cap covers re-registration too (ADR-028 amendment 2026-10-09) ----
+
+    [Fact]
+    public async Task The_Sixth_Re_registration_In_24_Hours_Is_Refused_And_Changes_Nothing()
+    {
+        using var db = new SqliteTestDatabase();
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+
+        await h.Auth.RegisterAsync(AuthHarness.Register(password: "Password00000")); // token 1
+        for (var i = 1; i < 5; i++) // tokens 2..5, all by re-registration
+        {
+            h.Clock.Advance(TimeSpan.FromSeconds(61));
+            Assert.True((await h.Auth.RegisterAsync(AuthHarness.Register(password: $"Password{i}0000", firstName: $"Name{i}"))).IsSuccess);
+        }
+
+        var before = await UserAsync(db, "new.user@test.local");
+        var emailsBefore = h.Sender.Messages.Count;
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+
+        var sixth = await h.Auth.RegisterAsync(AuthHarness.Register(password: "Overwritten9999", firstName: "Overwritten"));
+
+        Assert.False(sixth.IsSuccess);
+        Assert.Equal("auth.verification_cooldown", sixth.Error!.Code);
+        var after = await UserAsync(db, "new.user@test.local");
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.Equal(before.FirstName, after.FirstName);
+        Assert.Equal(before.CreatedAt, after.CreatedAt);
+        Assert.Equal(5, await db.CreateContext().UserTokens.CountAsync());
+        Assert.Equal(emailsBefore, h.Sender.Messages.Count);
+
+        // The window rolls: 24 h after the first token, registration works again.
+        h.Clock.Advance(TimeSpan.FromHours(24));
+        Assert.True((await h.Auth.RegisterAsync(AuthHarness.Register(password: "Password60000"))).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Resend_And_Re_registration_Count_Against_The_Same_Cap()
+    {
+        using var db = new SqliteTestDatabase();
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+
+        await h.Auth.RegisterAsync(AuthHarness.Register()); // 1
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+        await h.Auth.ResendVerificationAsync(new ResendVerificationRequest { Email = "new.user@test.local" }); // 2
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+        await h.Auth.RegisterAsync(AuthHarness.Register()); // 3
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+        await h.Auth.ResendVerificationAsync(new ResendVerificationRequest { Email = "new.user@test.local" }); // 4
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+        await h.Auth.RegisterAsync(AuthHarness.Register()); // 5
+        Assert.Equal(5, h.Sender.Messages.Count);
+
+        h.Clock.Advance(TimeSpan.FromSeconds(61));
+        var overCap = await h.Auth.RegisterAsync(AuthHarness.Register(password: "Overwritten9999"));
+        await h.Auth.ResendVerificationAsync(new ResendVerificationRequest { Email = "new.user@test.local" });
+
+        Assert.Equal("auth.verification_cooldown", overCap.Error!.Code);
+        Assert.Equal(5, h.Sender.Messages.Count);
+    }
+
+    [Fact]
+    public async Task The_Store_Enforces_The_Cap_Itself_Inside_The_Transaction()
+    {
+        // The service pre-checks the cap; this proves the transaction does too, which is what makes
+        // it race-free against concurrent writers for the same user.
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Pending());
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < 5; i++)
+        {
+            var consumed = ActiveTokenFor(PendingId, $"old-{i}", now.AddHours(-2).AddMinutes(i));
+            consumed.ConsumedAt = now.AddHours(-1);
+            await db.SeedAsync(consumed);
+        }
+
+        await using var context = db.CreateContext();
+        var store = new EmailVerificationStore(context);
+
+        var replace = await store.TryReplacePendingAsync(
+            PendingId,
+            TestData.User(Guid.NewGuid(), Email, passwordHash: "hashed:Attacker1", isEmailConfirmed: false),
+            ActiveTokenFor(PendingId, "new", now), now, Limits(now));
+        var rotate = await store.TryRotateTokenAsync(ActiveTokenFor(PendingId, "new2", now), now, Limits(now));
+
+        Assert.Equal(ReplacePendingOutcome.OverCap, replace);
+        Assert.Equal(RotateTokenOutcome.Conflict, rotate);
+        Assert.Equal($"hashed:{Password}", (await UserAsync(db, Email)).PasswordHash);
+        Assert.Equal(5, (await TokensAsync(db, PendingId)).Count);
+    }
+
+    [Fact]
+    public async Task Replacement_Keeps_A_Fresh_Concurrent_Token_So_The_Insert_Is_Rejected_And_Everything_Rolls_Back()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Pending());
+        var now = DateTime.UtcNow;
+        await db.SeedAsync(ActiveTokenFor(PendingId, "fresh", now.AddSeconds(-5)));
+        await using var context = db.CreateContext();
+
+        var outcome = await new EmailVerificationStore(context).TryReplacePendingAsync(
+            PendingId,
+            TestData.User(Guid.NewGuid(), Email, passwordHash: "hashed:Attacker1", isEmailConfirmed: false),
+            ActiveTokenFor(PendingId, "new", now), now, Limits(now));
+
+        Assert.Equal(ReplacePendingOutcome.TokenConflict, outcome);
+        Assert.Equal($"hashed:{Password}", (await UserAsync(db, Email)).PasswordHash); // the Users update rolled back too
+        var token = Assert.Single(await TokensAsync(db, PendingId));
+        Assert.Null(token.ConsumedAt);
+    }
+
+    // ---- The home point never lands on an account somebody else now owns ----
+
+    private sealed class ResetAfterReplaceStore : IEmailVerificationStore
+    {
+        private readonly IEmailVerificationStore _inner;
+        private readonly Func<Task> _afterReplace;
+
+        public ResetAfterReplaceStore(IEmailVerificationStore inner, Func<Task> afterReplace)
+        {
+            _inner = inner;
+            _afterReplace = afterReplace;
+        }
+
+        public async Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default)
+        {
+            var outcome = await _inner.TryReplacePendingAsync(userId, candidate, token, now, limits, cancellationToken);
+            await _afterReplace();
+            return outcome;
+        }
+
+        public Task<AccountState?> FindAccountStateAsync(string email, CancellationToken cancellationToken = default) => _inner.FindAccountStateAsync(email, cancellationToken);
+        public Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default) => _inner.GetLatestTokenCreatedAtAsync(userId, purpose, cancellationToken);
+        public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) => _inner.CountTokensCreatedSinceAsync(userId, purpose, since, cancellationToken);
+        public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default) => _inner.TryAddUserAsync(user, token, cancellationToken);
+        public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) => _inner.TryRotateTokenAsync(token, now, limits, cancellationToken);
+        public Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default) => _inner.FindTokenAsync(tokenHash, purpose, cancellationToken);
+        public Task<bool> TryCommitVerificationAsync(Guid tokenId, Guid userId, TokenPurpose purpose, string seenPasswordHash, DateTime now, CancellationToken cancellationToken = default) => _inner.TryCommitVerificationAsync(tokenId, userId, purpose, seenPasswordHash, now, cancellationToken);
+        public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) => _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, now, cancellationToken);
+        public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) => _inner.DiscardHomePointIfAccountChangedAsync(userId, registrantPasswordHash, cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_Home_Point_Is_Not_Left_On_An_Account_An_External_Sign_In_Took_Over_Mid_Registration()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Pending("hijack@example.org"));
+        await using var context = db.CreateContext();
+        var (latitude, longitude) = TestData.KentronPoint;
+
+        // The external sign-in resets and verifies the account right after the replacement commits,
+        // before the registrant home point is written.
+        await using var externalContext = db.CreateContext();
+        var external = new AuthHarness(externalContext);
+        external.External.Result = Google("hijack@example.org");
+        var h = new AuthHarness(
+            context,
+            decorateStore: inner => new ResetAfterReplaceStore(inner, async () =>
+                Assert.True((await external.Auth.ExternalAsync(AnyExternalRequest)).IsSuccess)));
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+
+        await h.Auth.RegisterAsync(AuthHarness.Register("hijack@example.org", latitude: latitude, longitude: longitude));
+
+        var user = await UserAsync(db, "hijack@example.org");
+        Assert.True(user.IsEmailConfirmed);
+        Assert.Equal("google", user.ExternalAuthProvider);
+        Assert.Null(user.HomeLatitude);
+        Assert.Null(user.HomeDistrictId);
+    }
+
+    [Fact]
+    public async Task The_Registrants_Own_Home_Point_Survives_The_Compensation()
+    {
+        using var db = new SqliteTestDatabase();
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        var (latitude, longitude) = TestData.KentronPoint;
+
+        await h.Auth.RegisterAsync(AuthHarness.Register(latitude: latitude, longitude: longitude));
+
+        Assert.Equal(latitude, (await UserAsync(db, "new.user@test.local")).HomeLatitude);
     }
 
     // ---- External sign-in ---------------------------------------------------------------------------------

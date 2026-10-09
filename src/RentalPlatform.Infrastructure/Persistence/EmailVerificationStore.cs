@@ -67,7 +67,8 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
     }
 
     public async Task<ReplacePendingOutcome> TryReplacePendingAsync(
-        Guid userId, User candidate, UserToken token, DateTime now, CancellationToken cancellationToken = default)
+        Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits,
+        CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -98,7 +99,19 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
                 return ReplacePendingOutcome.NotReplaceable;
             }
 
-            await RevokeActiveTokensAsync(userId, token.Purpose, now, cancellationToken);
+            // The Users row is now X-locked by this transaction, so another writer for the same user
+            // queues behind it: the cap below is counted race-free (ADR-028 amendment 2026-10-09).
+            if (await OverCapAsync(userId, token.Purpose, limits, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return ReplacePendingOutcome.OverCap;
+            }
+
+            // Only tokens older than the cooldown are revoked (same rule as resend). A fresh token
+            // written by a concurrent registration or resend survives, so the filtered unique index
+            // rejects the insert below, this transaction rolls back (the Users replacement with it)
+            // and the caller answers 429 instead of sending a second email.
+            await RevokeActiveTokensAsync(userId, token.Purpose, now, limits.CooldownCutoff, cancellationToken);
 
             _dbContext.UserTokens.Add(token);
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -115,7 +128,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
     }
 
     public async Task<RotateTokenOutcome> TryRotateTokenAsync(
-        UserToken token, DateTime cooldownCutoff, DateTime now, CancellationToken cancellationToken = default)
+        UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -134,15 +147,16 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
                 return RotateTokenOutcome.Conflict;
             }
 
+            if (await OverCapAsync(token.UserId, token.Purpose, limits, cancellationToken))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return RotateTokenOutcome.Conflict;
+            }
+
             // Only tokens older than the cooldown are revoked. If a younger active token exists the
             // filtered unique index (UserId, Purpose) rejects the insert below: that is the cooldown,
             // enforced by the database, and it is also what makes two concurrent resends safe.
-            await _dbContext.UserTokens
-                .Where(existing => existing.UserId == token.UserId
-                                   && existing.Purpose == token.Purpose
-                                   && existing.ConsumedAt == null
-                                   && existing.CreatedAt < cooldownCutoff)
-                .ExecuteUpdateAsync(set => set.SetProperty(existing => existing.ConsumedAt, now), cancellationToken);
+            await RevokeActiveTokensAsync(token.UserId, token.Purpose, now, limits.CooldownCutoff, cancellationToken);
 
             _dbContext.UserTokens.Add(token);
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -277,7 +291,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
                 return false;
             }
 
-            await RevokeActiveTokensAsync(userId, TokenPurpose.EmailVerification, now, cancellationToken);
+            await RevokeActiveTokensAsync(userId, TokenPurpose.EmailVerification, now, null, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return true;
         }
@@ -294,11 +308,35 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
         }
     }
 
+    // olderThan = null revokes every active token (external reset); otherwise only those created before it.
     private Task<int> RevokeActiveTokensAsync(
-        Guid userId, TokenPurpose purpose, DateTime now, CancellationToken cancellationToken) =>
+        Guid userId, TokenPurpose purpose, DateTime now, DateTime? olderThan, CancellationToken cancellationToken) =>
         _dbContext.UserTokens
-            .Where(token => token.UserId == userId && token.Purpose == purpose && token.ConsumedAt == null)
+            .Where(token => token.UserId == userId
+                            && token.Purpose == purpose
+                            && token.ConsumedAt == null
+                            && (olderThan == null || token.CreatedAt < olderThan))
             .ExecuteUpdateAsync(set => set.SetProperty(token => token.ConsumedAt, (DateTime?)now), cancellationToken);
+
+    private async Task<bool> OverCapAsync(
+        Guid userId, TokenPurpose purpose, TokenLimits limits, CancellationToken cancellationToken) =>
+        await _dbContext.UserTokens.CountAsync(
+            token => token.UserId == userId && token.Purpose == purpose && token.CreatedAt >= limits.CapWindowStart,
+            cancellationToken) >= limits.MaxTokens;
+
+    public Task<int> DiscardHomePointIfAccountChangedAsync(
+        Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) =>
+        _dbContext.Users
+            .Where(user => user.Id == userId && user.PasswordHash != registrantPasswordHash)
+            .ExecuteUpdateAsync(
+                set => set
+                    .SetProperty(user => user.HomeLatitude, (decimal?)null)
+                    .SetProperty(user => user.HomeLongitude, (decimal?)null)
+                    .SetProperty(user => user.HomePublicLatitude, (decimal?)null)
+                    .SetProperty(user => user.HomePublicLongitude, (decimal?)null)
+                    .SetProperty(user => user.HomeDistrictId, (Guid?)null)
+                    .SetProperty(user => user.HomePointUpdatedAt, (DateTime?)null),
+                cancellationToken);
 
     private void Detach(object? entity)
     {

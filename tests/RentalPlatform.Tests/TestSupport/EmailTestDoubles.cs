@@ -133,17 +133,20 @@ public sealed class BarrierEmailVerificationStore : IEmailVerificationStore
     public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default) =>
         _inner.TryAddUserAsync(user, token, cancellationToken);
 
-    public Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, CancellationToken cancellationToken = default) =>
-        _inner.TryReplacePendingAsync(userId, candidate, token, now, cancellationToken);
+    public Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) =>
+        _inner.TryReplacePendingAsync(userId, candidate, token, now, limits, cancellationToken);
 
-    public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime cooldownCutoff, DateTime now, CancellationToken cancellationToken = default) =>
-        _inner.TryRotateTokenAsync(token, cooldownCutoff, now, cancellationToken);
+    public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) =>
+        _inner.TryRotateTokenAsync(token, now, limits, cancellationToken);
 
     public Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default) =>
         _inner.FindTokenAsync(tokenHash, purpose, cancellationToken);
 
     public Task<bool> TryCommitVerificationAsync(Guid tokenId, Guid userId, TokenPurpose purpose, string seenPasswordHash, DateTime now, CancellationToken cancellationToken = default) =>
         _inner.TryCommitVerificationAsync(tokenId, userId, purpose, seenPasswordHash, now, cancellationToken);
+
+    public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) =>
+        _inner.DiscardHomePointIfAccountChangedAsync(userId, registrantPasswordHash, cancellationToken);
 
     public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) =>
         _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, now, cancellationToken);

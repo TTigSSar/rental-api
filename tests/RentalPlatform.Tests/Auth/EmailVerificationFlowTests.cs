@@ -789,6 +789,9 @@ public sealed class EmailVerificationFlowTests
 
         Assert.False(sixth.IsSuccess);
         Assert.Equal("auth.verification_cooldown", sixth.Error!.Code);
+        // The daily cap reports the REAL wait: the first token (created 4 x 61 s + 61 s ago) leaves
+        // the 24 h window at firstCreatedAt + 24 h, i.e. 24 h minus 5 x 61 s from now. Never 60.
+        Assert.Equal((int)(TimeSpan.FromHours(24) - TimeSpan.FromSeconds(5 * 61)).TotalSeconds, sixth.Error.RetryAfterSeconds);
         var after = await UserAsync(db, "new.user@test.local");
         Assert.Equal(before.PasswordHash, after.PasswordHash);
         Assert.Equal(before.FirstName, after.FirstName);
@@ -799,6 +802,21 @@ public sealed class EmailVerificationFlowTests
         // The window rolls: 24 h after the first token, registration works again.
         h.Clock.Advance(TimeSpan.FromHours(24));
         Assert.True((await h.Auth.RegisterAsync(AuthHarness.Register(password: "Password60000"))).IsSuccess);
+    }
+
+    [Fact]
+    public async Task The_Plain_Cooldown_Still_Reports_The_Remaining_Cooldown_Not_The_Daily_Window()
+    {
+        using var db = new SqliteTestDatabase();
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        await h.Auth.RegisterAsync(AuthHarness.Register());
+        h.Clock.Advance(TimeSpan.FromSeconds(25));
+
+        var again = await h.Auth.RegisterAsync(AuthHarness.Register());
+
+        Assert.Equal("auth.verification_cooldown", again.Error!.Code);
+        Assert.Equal(35, again.Error.RetryAfterSeconds);
     }
 
     [Fact]
@@ -899,6 +917,7 @@ public sealed class EmailVerificationFlowTests
 
         public Task<AccountState?> FindAccountStateAsync(string email, CancellationToken cancellationToken = default) => _inner.FindAccountStateAsync(email, cancellationToken);
         public Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default) => _inner.GetLatestTokenCreatedAtAsync(userId, purpose, cancellationToken);
+        public Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) => _inner.GetOldestTokenCreatedAtSinceAsync(userId, purpose, since, cancellationToken);
         public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) => _inner.CountTokensCreatedSinceAsync(userId, purpose, since, cancellationToken);
         public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default) => _inner.TryAddUserAsync(user, token, cancellationToken);
         public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) => _inner.TryRotateTokenAsync(token, now, limits, cancellationToken);

@@ -111,7 +111,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
             // transaction, where it is race-free.
             if (await _store.CountTokensCreatedSinceAsync(userId, TokenPurpose.EmailVerification, now - SendCapWindow, cancellationToken) >= MaxTokensPerWindow)
             {
-                return CooldownFailure(Cooldown);
+                return await CapFailureAsync(userId, now, cancellationToken);
             }
 
             var (raw, token) = NewToken(userId, now);
@@ -122,10 +122,11 @@ public sealed class EmailVerificationService : IEmailVerificationService
                 case ReplacePendingOutcome.Replaced:
                     break;
                 case ReplacePendingOutcome.TokenConflict:
-                case ReplacePendingOutcome.OverCap:
-                    // A concurrent writer just issued a token (the cooldown, observed a moment late),
-                    // or the recipient hit the 24 h cap. Either way nothing was changed.
+                    // A concurrent writer just issued a token: the cooldown, observed a moment late.
                     return CooldownFailure(Cooldown);
+                case ReplacePendingOutcome.OverCap:
+                    // The recipient hit the 24 h cap (a concurrent writer used the last slot).
+                    return await CapFailureAsync(userId, now, cancellationToken);
                 default:
                     return Duplicate();
             }
@@ -260,6 +261,18 @@ public sealed class EmailVerificationService : IEmailVerificationService
         // CancellationToken.None: the row is already committed, so a client that disconnected
         // must not also cost the user their email. The sender bounds itself with its own timeout.
         await _emailService.SendEmailVerificationAsync(email, preferredLanguage, link, CancellationToken.None);
+    }
+
+    // Retry-After for the daily cap is the REAL wait: until the oldest counted token leaves the
+    // window. The client shows a countdown for small values and neutral copy for large ones, so
+    // promising 60 s here would be wrong.
+    private async Task<ServiceResult<bool>> CapFailureAsync(Guid userId, DateTime now, CancellationToken cancellationToken)
+    {
+        var oldest = await _store.GetOldestTokenCreatedAtSinceAsync(
+            userId, TokenPurpose.EmailVerification, now - SendCapWindow, cancellationToken);
+
+        var remaining = oldest is { } created ? created + SendCapWindow - now : SendCapWindow;
+        return CooldownFailure(remaining);
     }
 
     private static TokenLimits Limits(DateTime now) => new(now - Cooldown, now - SendCapWindow, MaxTokensPerWindow);

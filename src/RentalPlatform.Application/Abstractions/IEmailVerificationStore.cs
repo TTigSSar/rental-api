@@ -54,6 +54,9 @@ public interface IEmailVerificationStore
 
     Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default);
 
+    /// <summary>CreatedAt of the oldest token created at or after <paramref name="since"/>; null when none.</summary>
+    Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default);
+
     Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default);
 
     /// <summary>

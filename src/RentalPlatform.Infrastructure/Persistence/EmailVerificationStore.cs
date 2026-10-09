@@ -39,6 +39,15 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
             .Select(token => (DateTime?)token.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
+    public Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(
+        Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
+        _dbContext.UserTokens
+            .AsNoTracking()
+            .Where(token => token.UserId == userId && token.Purpose == purpose && token.CreatedAt >= since)
+            .OrderBy(token => token.CreatedAt)
+            .Select(token => (DateTime?)token.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
     public Task<int> CountTokensCreatedSinceAsync(
         Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
         _dbContext.UserTokens

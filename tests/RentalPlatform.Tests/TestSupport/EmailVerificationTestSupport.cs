@@ -146,6 +146,9 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
     public Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default) =>
         Task.FromResult(Tokens.Where(token => token.UserId == userId).Select(token => (DateTime?)token.CreatedAt).Max());
 
+    public Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Tokens.Where(token => token.UserId == userId && token.CreatedAt >= since).Select(token => (DateTime?)token.CreatedAt).Min());
+
     public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
         Task.FromResult(Tokens.Count(token => token.UserId == userId && token.CreatedAt >= since));
 

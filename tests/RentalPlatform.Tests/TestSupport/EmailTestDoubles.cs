@@ -127,6 +127,9 @@ public sealed class BarrierEmailVerificationStore : IEmailVerificationStore
     public Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default) =>
         _inner.GetLatestTokenCreatedAtAsync(userId, purpose, cancellationToken);
 
+    public Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
+        _inner.GetOldestTokenCreatedAtSinceAsync(userId, purpose, since, cancellationToken);
+
     public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) =>
         _inner.CountTokensCreatedSinceAsync(userId, purpose, since, cancellationToken);
 

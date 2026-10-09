@@ -16,4 +16,10 @@ namespace RentalPlatform.Application.Common;
 public static class PasswordPolicy
 {
     public const int MaxPasswordBytes = 72;
+
+    // External-auth accounts are stored with PasswordHash = "" (and an email-verification
+    // replacement can clear it too). BCrypt.Verify THROWS on an empty hash instead of returning
+    // false (M-013), so every site that verifies a stored hash — login, change-password,
+    // verify-email — asks this first and treats "no usable password" like a wrong password.
+    public static bool HasUsablePassword(string? passwordHash) => !string.IsNullOrEmpty(passwordHash);
 }

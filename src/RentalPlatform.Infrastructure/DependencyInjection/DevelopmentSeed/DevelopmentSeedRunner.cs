@@ -382,6 +382,13 @@ internal sealed class DevelopmentSeedRunner
                     updated++;
                 }
 
+                // Back-fill rows seeded before email verification existed (ADR-028 §11).
+                if (!existing.IsEmailConfirmed)
+                {
+                    existing.IsEmailConfirmed = true;
+                    updated++;
+                }
+
                 // Keep the role in sync with the seed definition.
                 if (existing.Role != seed.Role)
                 {
@@ -413,6 +420,8 @@ internal sealed class DevelopmentSeedRunner
                 AvatarUrl = null,
                 CreatedAt = now,
                 IsBlocked = seed.IsBlocked,
+                // Seeded accounts never sign up through the public path (ADR-028 §11).
+                IsEmailConfirmed = true,
                 Role = seed.Role
             };
 

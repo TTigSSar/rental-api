@@ -80,7 +80,8 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
                 Email = verifiedEmail,
                 FirstName = payload.GivenName,
                 LastName = payload.FamilyName,
-                AvatarUrl = payload.Picture
+                AvatarUrl = payload.Picture,
+                HostedDomain = payload.HostedDomain
             });
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -121,11 +122,16 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
                 return Failure("auth.external_invalid_token", "Apple identity token is invalid.");
             }
 
+            // Same rule as Google above: an email is used for account creation, linking or
+            // replacing a pending registration only when the provider vouches for it (ADR-028 section 10).
+            var appleEmail = principal.FindFirstValue(ClaimTypes.Email) ?? principal.FindFirstValue(JwtRegisteredClaimNames.Email);
+            var appleEmailVerified = IsAppleEmailVerified(principal.FindFirstValue("email_verified"));
+
             return ServiceResult<ExternalUserInfo>.Success(new ExternalUserInfo
             {
                 Provider = "apple",
                 ProviderUserId = providerUserId,
-                Email = principal.FindFirstValue(ClaimTypes.Email) ?? principal.FindFirstValue(JwtRegisteredClaimNames.Email),
+                Email = appleEmailVerified ? appleEmail : null,
                 FirstName = principal.FindFirstValue("given_name"),
                 LastName = principal.FindFirstValue("family_name"),
                 AvatarUrl = null
@@ -136,6 +142,11 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
             return Failure("auth.external_invalid_token", "Apple identity token is invalid.");
         }
     }
+
+    // Apple sends email_verified as a JSON bool or, historically, as the string "true". Anything
+    // else (missing, "false", garbage) means the email is not vouched for.
+    internal static bool IsAppleEmailVerified(string? claimValue) =>
+        bool.TryParse(claimValue?.Trim(), out var verified) && verified;
 
     private async Task<IReadOnlyCollection<SecurityKey>> GetAppleSigningKeysAsync(CancellationToken cancellationToken)
     {

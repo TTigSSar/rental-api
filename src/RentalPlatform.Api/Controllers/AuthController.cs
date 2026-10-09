@@ -22,17 +22,20 @@ public sealed class AuthController : ControllerBase
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimiterExtensions.AuthPolicy)]
-    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
-    public async Task<ActionResult<AuthResponse>> Register(
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<RegisterResponse>> Register(
         [FromBody] RegisterRequest request,
         CancellationToken cancellationToken)
     {
         var result = await _authService.RegisterAsync(request, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
-            return Ok(result.Value);
+            // No token: the account is a pending registration until the email is verified (ADR-028).
+            return StatusCode(StatusCodes.Status201Created, result.Value);
         }
 
         return FromError(result.Error);
@@ -53,6 +56,50 @@ public sealed class AuthController : ControllerBase
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    [HttpPost("verify-email")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.EmailVerificationPolicy)]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<AuthResponse>> VerifyEmail(
+        [FromBody] VerifyEmailRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.VerifyEmailAsync(request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    // Always 202 with no body, whether or not the address is registered (no enumeration through
+    // this endpoint). The only other answer is 503 while the production email gate is closed.
+    [HttpPost("resend-verification")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.EmailVerificationPolicy)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> ResendVerification(
+        [FromBody] ResendVerificationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.ResendVerificationAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return Accepted();
         }
 
         return FromError(result.Error);
@@ -182,6 +229,16 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    private ObjectResult CooldownResponse(ServiceError error)
+    {
+        if (error.RetryAfterSeconds is { } seconds)
+        {
+            Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests));
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)
@@ -194,6 +251,12 @@ public sealed class AuthController : ControllerBase
             "auth.duplicate_email" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "auth.invalid_credentials" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
             "auth.unauthenticated" => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            "auth.email_not_verified" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "auth.verification_token_invalid" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.verification_token_expired" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.email_already_verified" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.registration_unavailable" => StatusCode(StatusCodes.Status503ServiceUnavailable, error.ToProblemDetails(StatusCodes.Status503ServiceUnavailable)),
+            "auth.verification_cooldown" => CooldownResponse(error),
             "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "auth.external_link_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "auth.invalid_current_password" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),

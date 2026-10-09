@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Infrastructure.Persistence;
@@ -52,7 +53,24 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IListingsQueryService, ListingsQueryService>();
         services.AddScoped<IPublicUserProfileService, PublicUserProfileQueryService>();
         services.AddScoped<IHomeSectionsService, HomeSectionsQueryService>();
-        services.AddScoped<IEmailService, DevelopmentEmailService>();
+        services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+        services.AddScoped<IEmailVerificationStore, EmailVerificationStore>();
+
+        // Email transport (ADR-029). Options are plain strings and parsed tolerantly (M-016); the
+        // sender is chosen per scope from Email:Provider (default: Log).
+        services.AddOptions<EmailOptions>().Bind(configuration.GetSection(EmailOptions.SectionName));
+        services.AddOptions<AppOptions>().Bind(configuration.GetSection(AppOptions.SectionName));
+        services.AddSingleton<EmailVerificationSettings>();
+        services.AddSingleton<IEmailVerificationSettings>(sp => sp.GetRequiredService<EmailVerificationSettings>());
+        services.AddSingleton<IEmailSendBudget, EmailSendBudget>();
+        services.AddHostedService<EmailConfigurationStartupCheck>();
+        services.AddScoped<LoggingEmailSender>();
+        services.AddHttpClient<ResendEmailSender>();
+        services.AddScoped<IEmailSender>(sp =>
+            sp.GetRequiredService<IOptions<EmailOptions>>().Value.IsResend
+                ? sp.GetRequiredService<ResendEmailSender>()
+                : sp.GetRequiredService<LoggingEmailSender>());
         services.AddScoped<IListingsOwnerService, ListingsOwnerService>();
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();

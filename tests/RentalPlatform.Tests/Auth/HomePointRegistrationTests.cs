@@ -95,7 +95,6 @@ public sealed class HomePointRegistrationTests
         var result = await service.RegisterAsync(ValidRegister());
 
         Assert.True(result.IsSuccess);
-        Assert.Null(result.Value!.User.HomePoint);
         Assert.Null(Assert.Single(store.Users).HomeLatitude);
     }
 
@@ -118,17 +117,13 @@ public sealed class HomePointRegistrationTests
 
         Assert.True(result.IsSuccess);
 
-        var homePoint = result.Value!.User.HomePoint;
-        Assert.NotNull(homePoint);
-        Assert.Equal(latitude, homePoint!.Latitude);
-        Assert.Equal(longitude, homePoint.Longitude);
-        Assert.NotNull(homePoint.PublicLatitude);
-        // Published ≠ exact: the snapped pair is what anyone else would ever see (ADR-008).
-        Assert.NotEqual(latitude, homePoint.PublicLatitude);
-        Assert.NotNull(homePoint.UpdatedAt);
-
         var stored = Assert.Single(store.Users);
         Assert.Equal(latitude, stored.HomeLatitude);
+        Assert.Equal(longitude, stored.HomeLongitude);
+        Assert.NotNull(stored.HomePublicLatitude);
+        // Published ≠ exact: the snapped pair is what anyone else would ever see (ADR-008).
+        Assert.NotEqual(latitude, stored.HomePublicLatitude);
+        Assert.NotNull(stored.HomePointUpdatedAt);
         Assert.Equal(TestData.KentronDistrictId, stored.HomeDistrictId);
 
         // Routed through the one writer, not written inline by AuthService.
@@ -169,11 +164,5 @@ public sealed class HomePointRegistrationTests
     }
 
     private static AuthService CreateService(FakeUserAuthStore store, FakeHomePointService? homePointService = null) =>
-        new(
-            store,
-            new FakePasswordHasher(),
-            new FakeJwtTokenService(),
-            new FakeCurrentUserContext(UserId),
-            new FakeExternalIdentityTokenValidator(),
-            homePointService ?? new FakeHomePointService(store));
+        AuthServiceFactory.ForFakes(store, UserId, homePointService: homePointService);
 }

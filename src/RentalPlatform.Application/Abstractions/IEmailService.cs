@@ -20,4 +20,14 @@ public interface IEmailService
         string listingTitle,
         string rejectionReason,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends the email-verification link (ADR-028/029). Localised by <paramref name="preferredLanguage"/>
+    /// (en/hy/ru, English fallback). The body carries no user-controlled data, only the link.
+    /// </summary>
+    Task SendEmailVerificationAsync(
+        string email,
+        string? preferredLanguage,
+        string link,
+        CancellationToken cancellationToken = default);
 }

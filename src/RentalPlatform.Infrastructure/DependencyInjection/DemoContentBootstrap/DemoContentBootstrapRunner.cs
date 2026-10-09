@@ -274,6 +274,8 @@ internal sealed class DemoContentBootstrapRunner
             AvatarUrl = null,
             CreatedAt = now,
             IsBlocked = false,
+            // Seeded showcase owners never sign up through the public path (ADR-028 §11).
+            IsEmailConfirmed = true,
             Role = UserRole.User
         };
 

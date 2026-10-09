@@ -30,7 +30,10 @@ public static class TestData
         decimal? homePublicLatitude = null,
         decimal? homePublicLongitude = null,
         Guid? homeDistrictId = null,
-        string? preferredLanguage = "en") => new()
+        string? preferredLanguage = "en",
+        // Verified by default: the hard email gate (ADR-028) would otherwise make every test that
+        // logs in or acts as this user fail for a reason it is not about.
+        bool isEmailConfirmed = true) => new()
     {
         Id = id,
         Email = email,
@@ -42,6 +45,7 @@ public static class TestData
         IsBlocked = isBlocked,
         Role = role,
         IsIdConfirmed = isIdConfirmed,
+        IsEmailConfirmed = isEmailConfirmed,
         HomeLatitude = homeLatitude,
         HomeLongitude = homeLongitude,
         HomePublicLatitude = homePublicLatitude,

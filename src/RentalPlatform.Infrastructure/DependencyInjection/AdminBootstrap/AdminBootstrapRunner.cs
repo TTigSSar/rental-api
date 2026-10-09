@@ -67,6 +67,9 @@ internal sealed class AdminBootstrapRunner
             AvatarUrl = null,
             CreatedAt = DateTime.UtcNow,
             IsBlocked = false,
+            // Bootstrap accounts are created by an operator, never through the public sign-up
+            // path, so there is no mailbox to prove (ADR-028 §11).
+            IsEmailConfirmed = true,
             Role = UserRole.Admin
         };
 

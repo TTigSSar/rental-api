@@ -18,6 +18,11 @@ public sealed class User
     public bool IsBlocked { get; set; }
     public UserRole Role { get; set; }
     public bool IsEmailConfirmed { get; set; }
+
+    // When the mailbox was proven (ADR-028). NULL together with IsEmailConfirmed = true means the
+    // account was grandfathered by the AddEmailVerification migration. Written only by the
+    // conditional verification UPDATE, so it is never overwritten.
+    public DateTime? EmailConfirmedAt { get; set; }
     public bool IsPhoneConfirmed { get; set; }
     public bool IsIdConfirmed { get; set; }
 

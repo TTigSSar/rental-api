@@ -1,0 +1,5 @@
+# Shell scripts and SQL run on the Linux server (bash / sqlcmd inside the db container).
+# Force LF in every checkout, whatever core.autocrlf says: a CRLF bash script fails
+# with "$'\r': command not found" (and `bash -n` fails on Windows checkouts).
+*.sh  text eol=lf
+*.sql text eol=lf

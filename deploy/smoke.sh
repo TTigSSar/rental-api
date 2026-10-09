@@ -550,6 +550,8 @@ check_websocket_negotiate() {
 # The pattern is the message's fixed prefix in
 # src/RentalPlatform.Infrastructure/Services/EmailConfigurationStartupCheck.cs — if that text
 # changes, change it here in the same commit.
+# Reliable right after a deploy or restart only: on a long-running process the one-off startup
+# line can rotate out of the json-file logs (10m x 3), so a PASS then is not a long-term guarantee.
 EMAIL_GATE_MARKER='Email verification is NOT operational in Production'
 check_email_gate() {
     local cid started lines count sample

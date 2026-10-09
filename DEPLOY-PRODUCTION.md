@@ -1215,6 +1215,8 @@ CID="$(docker compose -f docker-compose.production.yml ps -q db)"
 P="$(grep -E "^MSSQL_SA_PASSWORD=" .env | tail -n1 | cut -d= -f2-)"
 
 # хелперы: пароль уходит через SQLCMDPASSWORD, у каждого docker-вызова </dev/null
+# TODO (чистка): -e SQLCMDPASSWORD="$P" кладёт пароль в argv docker compose на хосте;
+# лучше export SQLCMDPASSWORD + -e SQLCMDPASSWORD (только имя) — см. «Релиз email-верификации»
 ex() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
   /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "$1" </dev/null; }
 qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
@@ -1725,7 +1727,28 @@ docker compose -f docker-compose.production.yml build ui
 
 **4) Репетиция миграции на восстановленном бэкапе (ADR-023) — обязательна.**
 Процедура — подраздел «Репетиция миграций…» выше, шаги 1–7, с этим
-«отпечатком»:
+«отпечатком».
+
+**Пароль SA в этом разделе — только через окружение, не через argv.** Хелперы
+`ex`/`qp` из подраздела «Репетиция миграций…» передают `-e SQLCMDPASSWORD="$P"`,
+то есть значение попадает в argv процесса `docker compose` на хосте (видно в
+`ps`). Для этого релиза хелперы переопределяются: значение экспортируется в
+окружение оболочки, а docker получает **только имя** — `-e SQLCMDPASSWORD`
+без `=`, и Compose наследует значение (проверено 2026-10-09 на Compose 5.3:
+экспортированное значение доходит до контейнера; без `export` переменной в
+контейнере нет вовсе — поэтому именно `export`, а не просто присваивание):
+
+```bash
+cd /opt/dorent/rental-api
+export SQLCMDPASSWORD="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+ex() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "$1" </dev/null; }
+qp() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -h -1 -W -s "|" -Q "SET NOCOUNT ON; $1" </dev/null; }
+# $P всё ещё нужен шагу 4 репетиции (строка подключения в /tmp/rehearsal.env):
+P="$SQLCMDPASSWORD"
+# в конце раздела (после шага 7 репетиции): unset SQLCMDPASSWORD P
+```
 
 ```bash
 # шаг 1 — ДО деплоя, на боевой базе (колонки EmailConfirmedAt ещё нет)
@@ -1779,19 +1802,26 @@ shred -u -n 3 /tmp/rehearsal-old.log
 запускался). На свежемигрированной базе он обязан ничего не найти:
 
 ```bash
-docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
   /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -I -d "$DB" \
   < deploy/grandfather-unverified-data-owners.sql
 # ожидается: grandfather: unverified before=0, marked verified=0
 #            grandfather: still unverified (pending registrations without data)=0
 ```
 
-Пустой прогон не доказывает, что `UPDATE` находит нужных. Поэтому на той же
-**репетиционной** базе (и только на ней — `USE [$DB]`, проверить глазами)
-сделать одного владельца объявлений неподтверждённым и прогнать ещё дважды:
+Пустой прогон не доказывает, что `UPDATE` находит нужных. Поэтому на
+**репетиционной** базе сделать одного владельца объявлений неподтверждённым и
+прогнать скрипт ещё дважды. SQL Server тот же, что у production, поэтому
+изменяющий запрос несёт **жёсткий предохранитель в том же батче**: на
+`RentalPlatformDb` (и на любой базе, чьё имя не кончается на `_rehearsal`)
+он падает с `THROW` до `UPDATE`, а `-b` превращает это в ненулевой код
+выхода. Пустой `$DB` тоже не проходит (`USE []` — ошибка). Предохранитель
+проверен 2026-10-09 на выброшенном SQL Server 2022: `RentalPlatformDb` —
+отказ, значение не изменилось; `RentalPlatformDb_rehearsal` — 1 строка.
 
 ```bash
-ex "USE [$DB]; UPDATE dbo.Users SET IsEmailConfirmed = 0 WHERE Id IN (SELECT TOP (1) OwnerId FROM dbo.Listings);"
+ex "USE [$DB]; IF DB_NAME() = N'RentalPlatformDb' OR DB_NAME() NOT LIKE N'%[_]rehearsal' THROW 50000, N'rehearsal only: refusing to modify this database', 1; UPDATE dbo.Users SET IsEmailConfirmed = 0 WHERE Id IN (SELECT TOP (1) OwnerId FROM dbo.Listings);"
+# ожидается: (1 rows affected). "Msg 50000 ... rehearsal only" — $DB указывает не туда, СТОП
 # затем тот же вызов sqlcmd со скриптом, два раза подряд
 # ожидается: 1-й прогон before=1, marked verified=1; 2-й прогон before=0, marked verified=0
 ```
@@ -1903,8 +1933,8 @@ sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
 ```bash
 cd /opt/dorent/rental-api
 ./deploy/backup-production.sh && ./deploy/backup-production.sh --verify   # сначала бэкап
-P="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
-gf() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+export SQLCMDPASSWORD="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+gf() { docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
   /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -I -d RentalPlatformDb \
   < deploy/grandfather-unverified-data-owners.sql; }
 
@@ -1914,7 +1944,7 @@ gf    # (а) непосредственно ПЕРЕД up -d повторног�
 # ... up -d нового кода, проверка алиаса, smoke ...
 gf    # (б) сразу ПОСЛЕ up -d — ловит того, кто обзавёлся данными в промежутке;
       #     после выката гейт не даёт неподтверждённым создавать данные, так что (б) последний
-unset P
+unset SQLCMDPASSWORD
 ```
 
 Оставшиеся `still unverified` — обычные ожидающие регистрации без данных: они

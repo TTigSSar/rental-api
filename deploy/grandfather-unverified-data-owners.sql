@@ -30,14 +30,15 @@
 -- roll-forward the gate stops unverified users from gaining new data, so the second run is
 -- final).
 --
--- HOW (on the server, from /opt/dorent/rental-api; the password travels only through
--- SQLCMDPASSWORD, never -P; -b makes any SQL error fail sqlcmd; -I sets QUOTED_IDENTIFIER):
+-- HOW (on the server, from /opt/dorent/rental-api; the password travels only through the
+-- SQLCMDPASSWORD environment variable — exported, and passed to docker BY NAME ONLY, so the
+-- value is in no argv; never -P; -b makes any SQL error fail sqlcmd; -I sets QUOTED_IDENTIFIER):
 --
---   P="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
---   docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD="$P" db \
+--   export SQLCMDPASSWORD="$(grep -E '^MSSQL_SA_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+--   docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
 --     /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -I -d RentalPlatformDb \
 --     < deploy/grandfather-unverified-data-owners.sql
---   unset P
+--   unset SQLCMDPASSWORD
 --
 -- Expected output: two lines, "grandfather: unverified before=<N>, marked verified=<M>"
 -- and "grandfather: still unverified (pending registrations without data)=<N-M>".

@@ -125,6 +125,48 @@ public sealed class ReviewsHttpTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    // Regression: a blocked user holding a still-valid JWT could submit reviews. The mapping
+    // review.user_blocked -> 403 lives in ReviewsController.FromError; without its arm the code would
+    // fall to the default 400. The errorCode assertion also distinguishes it from review.forbidden.
+    [Theory]
+    [InlineData("toy")]
+    [InlineData("owner")]
+    [InlineData("renter")]
+    public async Task Submit_Returns_403_UserBlocked_For_Blocked_Caller_With_Valid_Jwt(string kind)
+    {
+        var (_, _, _, bookingId) = await SeedCompletedBookingAsync();
+        var blockedId = Guid.NewGuid();
+        var email = $"{blockedId:N}@blocked.local";
+        await _factory.SeedAsync(TestData.User(blockedId, email, isBlocked: true));
+        var client = ClientFor(blockedId, email);
+
+        object body = kind switch
+        {
+            "toy"   => ToyBody(bookingId),
+            "owner" => OwnerBody(bookingId),
+            _       => RenterBody(bookingId)
+        };
+        var response = await client.PostAsJsonAsync($"/api/reviews/{kind}", body);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("review.user_blocked", doc.RootElement.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    public async Task SubmitToy_Returns_401_Unauthenticated_When_User_Row_Missing()
+    {
+        var (_, _, _, bookingId) = await SeedCompletedBookingAsync();
+        var ghostId = Guid.NewGuid(); // valid JWT, no User row
+        var client = ClientFor(ghostId, $"{ghostId:N}@ghost.local");
+
+        var response = await client.PostAsJsonAsync("/api/reviews/toy", ToyBody(bookingId));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("review.unauthenticated", doc.RootElement.GetProperty("errorCode").GetString());
+    }
+
     [Fact]
     public async Task SubmitToy_Returns_409_For_Duplicate()
     {

@@ -15,6 +15,7 @@ public sealed class ReviewsService : IReviewsService
     private static class ErrorCodes
     {
         public const string Unauthenticated  = "review.unauthenticated";
+        public const string UserBlocked      = "review.user_blocked";
         public const string BookingNotFound  = "review.booking_not_found";
         public const string NotCompleted     = "review.booking_not_completed";
         public const string Forbidden        = "review.forbidden";
@@ -248,6 +249,23 @@ public sealed class ReviewsService : IReviewsService
             return ServiceResult<ReviewContext>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated, Message = "Authentication is required to submit a review."
+            });
+        }
+
+        var user = await _conversationsStore.FindUserByIdAsync(callerId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<ReviewContext>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated, Message = "Authentication is required to submit a review."
+            });
+        }
+
+        if (user.IsBlocked)
+        {
+            return ServiceResult<ReviewContext>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked, Message = "Blocked users cannot submit reviews."
             });
         }
 

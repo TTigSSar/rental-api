@@ -179,6 +179,64 @@ public sealed class ReviewsServiceTests
         Assert.Equal("Nice", summary.Comments.First().Comment);
     }
 
+    // --- blocked users ---
+
+    private static async Task BlockAsync(SqliteTestDatabase db, Guid userId)
+    {
+        await using var ctx = db.CreateContext();
+        var user = await ctx.Users.SingleAsync(u => u.Id == userId);
+        user.IsBlocked = true;
+        await ctx.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task SubmitToy_Fails_For_Blocked_User_And_Persists_Nothing()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        await BlockAsync(db, RenterId);
+
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitToyReviewAsync(ToyRequest(bookingId));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.user_blocked", result.Error!.Code);
+        await using var read = db.CreateContext();
+        Assert.Equal(0, await read.ToyReviews.CountAsync());
+    }
+
+    [Fact]
+    public async Task SubmitOwner_Fails_For_Blocked_User_And_Persists_Nothing()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        await BlockAsync(db, RenterId);
+
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, RenterId).SubmitOwnerReviewAsync(OwnerRequest(bookingId));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.user_blocked", result.Error!.Code);
+        await using var read = db.CreateContext();
+        Assert.Equal(0, await read.OwnerReviews.CountAsync());
+    }
+
+    [Fact]
+    public async Task SubmitRenter_Fails_For_Blocked_User_And_Persists_Nothing()
+    {
+        using var db = new SqliteTestDatabase();
+        var bookingId = await SeedBaselineAsync(db);
+        await BlockAsync(db, OwnerId);
+
+        await using var ctx = db.CreateContext();
+        var result = await CreateService(ctx, OwnerId).SubmitRenterReviewAsync(RenterRequest(bookingId));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("review.user_blocked", result.Error!.Code);
+        await using var read = db.CreateContext();
+        Assert.Equal(0, await read.RenterReviews.CountAsync());
+    }
+
     // --- owner & renter review submission ---
 
     [Fact]

@@ -133,6 +133,17 @@ public sealed class ChatService : IChatService
             return Failure<ChatConversationDetailsResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
         }
 
+        var caller = await _store.FindUserByIdAsync(userId, cancellationToken);
+        if (caller is null)
+        {
+            return Failure<ChatConversationDetailsResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
+        }
+
+        if (caller.IsBlocked)
+        {
+            return Failure<ChatConversationDetailsResponse>(ErrorCodes.UserBlocked, "Blocked users cannot start conversations.");
+        }
+
         // Resolve the booking first so we can return distinct booking-not-found vs not-participant
         // outcomes (the store's get-or-create collapses both to a null result).
         var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);

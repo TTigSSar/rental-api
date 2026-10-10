@@ -261,6 +261,15 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
+        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "Blocked users cannot modify listings."
+            });
+        }
+
         var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
         if (listing is null)
         {
@@ -297,6 +306,15 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
+            });
+        }
+
+        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "Blocked users cannot modify listings."
             });
         }
 
@@ -337,6 +355,15 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
+            });
+        }
+
+        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
+        {
+            return ServiceResult<Guid>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "Blocked users cannot modify listings."
             });
         }
 
@@ -435,6 +462,15 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
+            });
+        }
+
+        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "Blocked users cannot modify listings."
             });
         }
 

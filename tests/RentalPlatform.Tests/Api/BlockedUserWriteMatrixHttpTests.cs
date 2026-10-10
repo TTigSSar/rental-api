@@ -393,6 +393,22 @@ public sealed class BlockedUserWriteMatrixHttpTests
     }
 
     [Fact]
+    public async Task Name_Put_Returns_403_Auth_User_Blocked()
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).PutAsJsonAsync("/api/auth/me/name", new { firstName = "Anna", lastName = "Petrosyan" });
+        await AssertForbiddenAsync(response, "auth.user_blocked");
+    }
+
+    [Fact]
+    public async Task Phone_Put_Returns_403_Auth_User_Blocked()
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).PutAsJsonAsync("/api/auth/me/phone", new { phoneNumber = "+374 99 123456" });
+        await AssertForbiddenAsync(response, "auth.user_blocked");
+    }
+
+    [Fact]
     public async Task Password_Put_Returns_403_Auth_User_Blocked()
     {
         var f = await SeedAsync();

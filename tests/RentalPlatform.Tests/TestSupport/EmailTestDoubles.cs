@@ -151,8 +151,8 @@ public sealed class BarrierEmailVerificationStore : IEmailVerificationStore
     public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) =>
         _inner.DiscardHomePointIfAccountChangedAsync(userId, registrantPasswordHash, cancellationToken);
 
-    public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) =>
-        _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, now, cancellationToken);
+    public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage, DateTime now, CancellationToken cancellationToken = default) =>
+        _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, preferredLanguage, now, cancellationToken);
 }
 
 public sealed class AsyncBarrier
@@ -214,4 +214,7 @@ public sealed class RacingUserAuthStore : IUserAuthStore
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _inner.SaveChangesAsync(cancellationToken);
+
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default) =>
+        _inner.TrySaveChangesAsync(cancellationToken);
 }

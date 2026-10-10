@@ -192,6 +192,7 @@ public sealed class BookingsController : ControllerBase
             "booking.listing_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "booking.not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "booking.overlap" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "booking.phone_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "booking.not_pending" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "booking.not_cancellable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "booking.not_activatable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),

@@ -97,12 +97,14 @@ public interface IEmailVerificationStore
 
     /// <summary>
     /// A Google/Apple sign-in on a pending email: conditional reset (PasswordHash="", provider
-    /// profile and ids, verified) and revoke of the active tokens, in one transaction. False when
-    /// the account is no longer pending and unblocked.
+    /// profile and ids, <paramref name="preferredLanguage"/> already allow-listed, verified) and
+    /// revoke of the active tokens, in one transaction. The predicate is
+    /// <c>IsEmailConfirmed=0 AND IsBlocked=0 AND ExternalAuthProvider IS NULL</c>. False when the
+    /// account no longer matches it, or the (provider, id) pair got linked elsewhere.
     /// </summary>
     Task<bool> TryResetPendingForExternalAsync(
-        Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now,
-        CancellationToken cancellationToken = default);
+        Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage,
+        DateTime now, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Compensation for the registration path home-point write, which happens after the replacement

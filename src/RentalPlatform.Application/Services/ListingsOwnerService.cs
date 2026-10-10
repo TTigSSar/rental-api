@@ -18,6 +18,7 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         public const string CategoryNotFound = "listing.category_not_found";
         public const string InvalidAgeRange = "listing.invalid_age_range";
         public const string HomePointRequired = "listing.home_point_required";
+        public const string PhoneRequired = "listing.phone_required";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -71,6 +72,17 @@ public sealed class ListingsOwnerService : IListingsOwnerService
 
         var user = ownerResult.Value!;
         var ownerId = user.Id;
+
+        // ADR-030 section 8: auth -> blocked -> phone -> everything else. Answered BEFORE any write
+        // (the insert below is the first one), so a client that retries after adding a phone is safe.
+        if (string.IsNullOrWhiteSpace(user.PhoneNumber))
+        {
+            return ServiceResult<CreateListingResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.PhoneRequired,
+                Message = "Add a phone number before listing a toy."
+            });
+        }
 
         var categoryExists = await _listingsOwnerStore.CategoryExistsAsync(request.CategoryId, cancellationToken);
         if (!categoryExists)

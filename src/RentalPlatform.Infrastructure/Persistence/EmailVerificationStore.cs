@@ -259,8 +259,8 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
     }
 
     public async Task<bool> TryResetPendingForExternalAsync(
-        Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now,
-        CancellationToken cancellationToken = default)
+        Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage,
+        DateTime now, CancellationToken cancellationToken = default)
     {
         var provider = external.Provider.ToLowerInvariant();
         var avatarUrl = string.IsNullOrWhiteSpace(external.AvatarUrl) ? null : external.AvatarUrl.Trim();
@@ -272,14 +272,17 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
             // no password, no phone, no home point and no profile survives from whoever squatted the
             // address (ADR-028 section 2).
             var reset = await _dbContext.Users
-                .Where(user => user.Id == userId && !user.IsEmailConfirmed && !user.IsBlocked)
+                .Where(user => user.Id == userId
+                               && !user.IsEmailConfirmed
+                               && !user.IsBlocked
+                               && user.ExternalAuthProvider == null)
                 .ExecuteUpdateAsync(
                     set => set
                         .SetProperty(user => user.PasswordHash, string.Empty)
                         .SetProperty(user => user.FirstName, firstName)
                         .SetProperty(user => user.LastName, lastName)
                         .SetProperty(user => user.PhoneNumber, (string?)null)
-                        .SetProperty(user => user.PreferredLanguage, (string?)null)
+                        .SetProperty(user => user.PreferredLanguage, preferredLanguage)
                         .SetProperty(user => user.ExternalAuthProvider, (string?)provider)
                         .SetProperty(user => user.ExternalProviderId, (string?)external.ProviderUserId)
                         .SetProperty(user => user.AvatarUrl, avatarUrl)

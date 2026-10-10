@@ -28,6 +28,17 @@ public static class RateLimiterExtensions
     // NAT address does not share a budget.
     public const string HomePointPolicy = "home-point";
 
+    // Google sign-in (ADR-030 section 7). Two policies, because one attempt costs about three
+    // requests (a nonce on open, the sign-in, a nonce after the answer) and a shared 10/min bucket
+    // would allow roughly three attempts a minute for a whole carrier-grade-NAT address. Both are
+    // per IP, with IPv6 keyed by /48 (see ResolveClientKey48).
+    public const string ExternalAuthNoncePolicy = "external-auth-nonce";
+    public const string ExternalAuthPolicy = "external-auth";
+
+    // Name and phone edits, per ACCOUNT (same reasoning as HomePointPolicy), 10 per hour each.
+    public const string NameUpdatePolicy = "name-update";
+    public const string PhoneUpdatePolicy = "phone-update";
+
     // The district-under-the-pin lookup. Anonymous by design (sign-up needs it before an account
     // exists), so per IP is the only partition available. Generous enough for a map being dragged
     // (the client debounces), tight enough that it is not a free point-in-polygon service.
@@ -99,6 +110,46 @@ public static class RateLimiterExtensions
                     AutoReplenishment = true
                 }));
 
+            options.AddPolicy(ExternalAuthNoncePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveClientKey48(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(ExternalAuthPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveClientKey48(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(NameUpdatePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveUserKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromHours(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(PhoneUpdatePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveUserKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromHours(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
             options.AddPolicy(DistrictLookupPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: ResolveClientKey(context),
                 factory: _ => new FixedWindowRateLimiterOptions
@@ -119,7 +170,17 @@ public static class RateLimiterExtensions
     internal static string ResolveClientKey(HttpContext context) =>
         ResolveClientKey(context.Connection.RemoteIpAddress);
 
-    internal static string ResolveClientKey(IPAddress? address)
+    internal static string ResolveClientKey(IPAddress? address) => ResolveClientKey(address, ipv6PrefixBytes: 8);
+
+    // Same as ResolveClientKey but IPv6 keys on the /48, for the two Google sign-in policies only
+    // (ADR-030 section 7): one /48 holds 65 536 /64s, enough to fill the nonce store within minutes
+    // if each /64 had its own budget. IPv4 and IPv4-mapped addresses are unchanged.
+    internal static string ResolveClientKey48(HttpContext context) =>
+        ResolveClientKey48(context.Connection.RemoteIpAddress);
+
+    internal static string ResolveClientKey48(IPAddress? address) => ResolveClientKey(address, ipv6PrefixBytes: 6);
+
+    private static string ResolveClientKey(IPAddress? address, int ipv6PrefixBytes)
     {
         if (address is null)
         {
@@ -142,8 +203,8 @@ public static class RateLimiterExtensions
             return address.ToString();
         }
 
-        bytes[8..].Clear();
-        return new IPAddress(bytes).ToString() + "/64";
+        bytes[ipv6PrefixBytes..].Clear();
+        return new IPAddress(bytes).ToString() + "/" + (ipv6PrefixBytes * 8);
     }
 
     // Per-account partition for authenticated endpoints. The IP fallback only applies to a request

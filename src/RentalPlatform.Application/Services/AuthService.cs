@@ -19,6 +19,9 @@ public sealed class AuthService : IAuthService
         public const string InvalidExternalToken = "auth.external_invalid_token";
         public const string ExternalEmailMissing = "auth.external_email_missing";
         public const string ExternalLinkConflict = "auth.external_link_conflict";
+        public const string ExternalPendingRegistration = "auth.external_pending_registration";
+        public const string InvalidName = "auth.invalid_name";
+        public const string InvalidPhone = "auth.invalid_phone";
         public const string InvalidLanguage = "auth.invalid_language";
         public const string InvalidCurrentPassword = "auth.invalid_current_password";
         public const string PasswordNotSet = "auth.password_not_set";
@@ -38,6 +41,9 @@ public sealed class AuthService : IAuthService
         new(StringComparer.OrdinalIgnoreCase) { "privaterelay.appleid.com", "icloud.com", "me.com", "mac.com" };
 
     private const int MaxExternalResolveAttempts = 3;
+
+    // Users.FirstName / LastName are nvarchar(100).
+    private const int MaxNameLength = 100;
 
     private static readonly HashSet<string> AllowedPreferredLanguages =
         new(StringComparer.OrdinalIgnoreCase) { "en", "hy", "ru" };
@@ -259,7 +265,11 @@ public sealed class AuthService : IAuthService
             }
 
             var resolved = await ResolveExternalUserByEmailAsync(
-                externalUser, provider, NormalizeEmail(externalUser.Email), cancellationToken);
+                externalUser,
+                provider,
+                NormalizeEmail(externalUser.Email),
+                ResolveExternalLanguage(request.PreferredLanguage),
+                cancellationToken);
             if (!resolved.IsSuccess)
             {
                 return ServiceResult<AuthResponse>.Failure(resolved.Error!);
@@ -270,11 +280,7 @@ public sealed class AuthService : IAuthService
 
         if (user.IsBlocked)
         {
-            return ServiceResult<AuthResponse>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "User account is blocked."
-            });
+            return ServiceResult<AuthResponse>.Failure(BlockedError());
         }
 
         var token = _jwtTokenService.GenerateAccessToken(user);
@@ -364,6 +370,81 @@ public sealed class AuthService : IAuthService
 
         return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
     }
+
+    public async Task<ServiceResult<bool>> UpdateNameAsync(string firstName, string? lastName, CancellationToken cancellationToken = default)
+    {
+        var loaded = await LoadActiveCurrentUserAsync(cancellationToken);
+        if (loaded.Error is not null)
+        {
+            return ServiceResult<bool>.Failure(loaded.Error);
+        }
+
+        var trimmedFirst = (firstName ?? string.Empty).Trim();
+        var trimmedLast = (lastName ?? string.Empty).Trim();
+        if (trimmedFirst.Length is < 1 or > MaxNameLength || trimmedLast.Length > MaxNameLength)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidName,
+                Message = "First name is required (up to 100 characters); last name can be up to 100 characters."
+            });
+        }
+
+        loaded.User!.FirstName = trimmedFirst;
+        loaded.User.LastName = trimmedLast;
+        await _userAuthStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<bool>.Success(true);
+    }
+
+    public async Task<ServiceResult<bool>> UpdatePhoneAsync(string phoneNumber, CancellationToken cancellationToken = default)
+    {
+        var loaded = await LoadActiveCurrentUserAsync(cancellationToken);
+        if (loaded.Error is not null)
+        {
+            return ServiceResult<bool>.Failure(loaded.Error);
+        }
+
+        // Format and the 32-character cap are enforced at the boundary (UpdatePhoneRequest); this is
+        // the backstop for a caller that bypasses model validation. Replacing a phone is allowed.
+        var trimmed = (phoneNumber ?? string.Empty).Trim();
+        if (trimmed.Length is < 1 or > 32)
+        {
+            return ServiceResult<bool>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidPhone,
+                Message = "Enter a valid phone number."
+            });
+        }
+
+        loaded.User!.PhoneNumber = trimmed;
+        await _userAuthStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<bool>.Success(true);
+    }
+
+    // user id -> load -> blocked check, the preamble every self-service write shares.
+    private async Task<(User? User, ServiceError? Error)> LoadActiveCurrentUserAsync(CancellationToken cancellationToken)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return (null, UnauthenticatedError());
+        }
+
+        var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return (null, UnauthenticatedError());
+        }
+
+        return user.IsBlocked ? (null, BlockedError()) : (user, null);
+    }
+
+    private static ServiceError UnauthenticatedError() => new()
+    {
+        Code = ErrorCodes.Unauthenticated,
+        Message = "Current user is not authenticated."
+    };
 
     public async Task<ServiceResult<bool>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default)
     {
@@ -487,32 +568,52 @@ public sealed class AuthService : IAuthService
     }
 
     // No account is linked to this provider identity yet: find or create one by the (provider
-    // verified) email. Retries because two outcomes are races that resolve on the next lookup: a
-    // concurrent insert of the same email, and a pending account that was verified or blocked
-    // between our read and our conditional reset.
+    // verified) email. Retries because three outcomes are races that resolve on the next lookup: a
+    // concurrent insert of the same email, a concurrent first sign-in of this very identity, and a
+    // pending account that was verified, blocked or converted between our read and our conditional
+    // reset (ADR-030 section 4). Every blocked outcome is decided before anything is written.
     private async Task<ServiceResult<User>> ResolveExternalUserByEmailAsync(
         ExternalUserInfo externalUser,
         string provider,
         string normalizedEmail,
+        string? preferredLanguage,
         CancellationToken cancellationToken)
     {
+        var authoritative = IsTrustedForAutoLink(provider, normalizedEmail, externalUser.HostedDomain);
+        var firstName = ResolveFirstName(externalUser);
+        var lastName = ResolveLastName(externalUser);
+
         for (var attempt = 0; attempt < MaxExternalResolveAttempts; attempt++)
         {
+            if (attempt > 0)
+            {
+                // The caller already looked this identity up on the first pass; on a retry another
+                // request may have created or linked it in the meantime - then simply sign in to it.
+                var linked = await _userAuthStore.FindByExternalProviderAsync(
+                    provider, externalUser.ProviderUserId, cancellationToken);
+                if (linked is not null)
+                {
+                    return ServiceResult<User>.Success(linked);
+                }
+            }
+
             var now = Now();
             var existing = await _userAuthStore.FindByEmailAsync(normalizedEmail, cancellationToken);
 
             if (existing is null)
             {
                 // The provider has verified this mailbox, so the new account is verified at once.
+                // Creating is allowed for any verified email; only taking over an existing account
+                // needs an authoritative one.
                 var created = new User
                 {
                     Id = Guid.NewGuid(),
                     Email = normalizedEmail,
                     PasswordHash = string.Empty,
-                    FirstName = ResolveName(externalUser.FirstName, normalizedEmail, "User"),
-                    LastName = ResolveName(externalUser.LastName, normalizedEmail, string.Empty),
+                    FirstName = firstName,
+                    LastName = lastName,
                     PhoneNumber = null,
-                    PreferredLanguage = null,
+                    PreferredLanguage = preferredLanguage,
                     ExternalAuthProvider = provider,
                     ExternalProviderId = externalUser.ProviderUserId,
                     AvatarUrl = NormalizeOptional(externalUser.AvatarUrl),
@@ -528,13 +629,18 @@ public sealed class AuthService : IAuthService
                     return ServiceResult<User>.Success(created);
                 }
 
-                continue; // lost the race on Users.Email: look it up again.
+                continue; // lost a race on Users.Email or on the identity: look it up again.
+            }
+
+            if (existing.IsBlocked)
+            {
+                // Confirmed or pending, a blocked account is never linked, reset or replaced.
+                return ServiceResult<User>.Failure(BlockedError());
             }
 
             if (existing.IsEmailConfirmed)
             {
-                if (!CanLinkExternalIdentity(existing, provider, externalUser.ProviderUserId) ||
-                    !IsTrustedForAutoLink(provider, normalizedEmail, externalUser.HostedDomain))
+                if (!authoritative || !CanLinkExternalIdentity(existing, provider, externalUser.ProviderUserId))
                 {
                     return ServiceResult<User>.Failure(new ServiceError
                     {
@@ -550,23 +656,38 @@ public sealed class AuthService : IAuthService
                     existing.AvatarUrl = externalUser.AvatarUrl;
                 }
 
-                await _userAuthStore.SaveChangesAsync(cancellationToken);
+                // A unique-index violation means this identity got linked to another account in
+                // the meantime: 409, never a 500. Other database failures propagate.
+                if (!await _userAuthStore.TrySaveChangesAsync(cancellationToken))
+                {
+                    return ServiceResult<User>.Failure(new ServiceError
+                    {
+                        Code = ErrorCodes.ExternalLinkConflict,
+                        Message = "This sign-in method is already linked to another account."
+                    });
+                }
+
                 return ServiceResult<User>.Success(existing);
             }
 
-            if (existing.IsBlocked)
+            // Pending registration (ADR-030 section 4): only an authoritative email replaces it.
+            if (!authoritative)
             {
-                // A blocked pending account is never reset; the caller answers auth.user_blocked.
-                return ServiceResult<User>.Success(existing);
+                return ServiceResult<User>.Failure(new ServiceError
+                {
+                    Code = ErrorCodes.ExternalPendingRegistration,
+                    Message = "A registration for this email is waiting for its confirmation link."
+                });
             }
 
-            // Pending registration: the provider's proof of the mailbox replaces it completely
+            // The provider's proof of the mailbox replaces the registration completely
             // (ADR-028 section 2). A tracked SaveChanges here would write back stale pending values.
             var reset = await _emailVerificationStore.TryResetPendingForExternalAsync(
                 existing.Id,
                 externalUser,
-                ResolveName(externalUser.FirstName, normalizedEmail, "User"),
-                ResolveName(externalUser.LastName, normalizedEmail, string.Empty),
+                firstName,
+                lastName,
+                preferredLanguage,
                 now,
                 cancellationToken);
 
@@ -634,21 +755,43 @@ public sealed class AuthService : IAuthService
                string.Equals(user.ExternalProviderId, providerUserId, StringComparison.Ordinal);
     }
 
-    private static string ResolveName(string? name, string normalizedEmail, string fallback)
+    // First name: given_name, else the provider's full name, else empty - never a piece of the
+    // email address, because names are shown to other users (ADR-030 section 5). An empty first
+    // name is what makes the SPA ask for one. Last name: family_name or empty.
+    private static string ResolveFirstName(ExternalUserInfo externalUser) =>
+        TruncateName(FirstNonBlank(externalUser.FirstName, externalUser.FullName));
+
+    private static string ResolveLastName(ExternalUserInfo externalUser) =>
+        TruncateName(FirstNonBlank(externalUser.LastName));
+
+    private static string FirstNonBlank(params string?[] candidates) =>
+        candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate))?.Trim() ?? string.Empty;
+
+    private static string TruncateName(string value)
     {
-        if (!string.IsNullOrWhiteSpace(name))
+        if (value.Length <= MaxNameLength)
         {
-            return name.Trim();
+            return value;
         }
 
-        var localPart = normalizedEmail.Split('@', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(localPart))
-        {
-            return localPart;
-        }
-
-        return fallback;
+        // Never cut a surrogate pair in half.
+        var length = char.IsHighSurrogate(value[MaxNameLength - 1]) ? MaxNameLength - 1 : MaxNameLength;
+        return value[..length].TrimEnd();
     }
+
+    private static string? ResolveExternalLanguage(string? requested)
+    {
+        var normalized = NormalizeOptional(requested);
+        return normalized is not null && AllowedPreferredLanguages.Contains(normalized)
+            ? normalized.ToLowerInvariant()
+            : null;
+    }
+
+    private static ServiceError BlockedError() => new()
+    {
+        Code = ErrorCodes.UserBlocked,
+        Message = "User account is blocked."
+    };
 
     private static CurrentUserResponse MapUser(User user) => new()
     {

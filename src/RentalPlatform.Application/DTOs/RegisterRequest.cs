@@ -5,6 +5,9 @@ namespace RentalPlatform.Application.DTOs;
 
 public sealed class RegisterRequest : IValidatableObject
 {
+    // Shared with UpdatePhoneRequest so sign-up and "add your phone" accept exactly the same input.
+    public const string PhoneNumberPattern = @"^\+?(?=(?:[^\d]*\d){7,20}[^\d]*$)[\d\s\-().]+$";
+
     [Required]
     [EmailAddress]
     [MaxLength(320)]
@@ -24,7 +27,7 @@ public sealed class RegisterRequest : IValidatableObject
     public string LastName { get; set; } = string.Empty;
 
     [Required]
-    [RegularExpression(@"^\+?(?=(?:[^\d]*\d){7,20}[^\d]*$)[\d\s\-().]+$", ErrorMessage = "Enter a valid phone number.")]
+    [RegularExpression(PhoneNumberPattern, ErrorMessage = "Enter a valid phone number.")]
     [MaxLength(32)]
     public string PhoneNumber { get; set; } = string.Empty;
 

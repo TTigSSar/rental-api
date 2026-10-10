@@ -167,7 +167,7 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
     public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) =>
         Task.FromResult(0);
 
-    public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) =>
+    public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage, DateTime now, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Use the real EmailVerificationStore over SQLite.");
 }
 

@@ -7,6 +7,10 @@ public sealed class ExternalUserInfo
     public string? Email { get; init; }
     public string? FirstName { get; init; }
     public string? LastName { get; init; }
+
+    // The provider's full display name (Google `name`). Used only when there is no given name;
+    // the email local part is never a substitute (ADR-030 section 5).
+    public string? FullName { get; init; }
     public string? AvatarUrl { get; init; }
 
     // Google's `hd` claim (the Workspace domain the account belongs to); null for consumer

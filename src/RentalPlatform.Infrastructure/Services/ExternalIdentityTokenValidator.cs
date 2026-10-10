@@ -17,6 +17,8 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
     private readonly ExternalAuthOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeProvider _timeProvider;
+    private readonly IGoogleIdTokenVerifier _googleVerifier;
+    private readonly ExternalAuthNonceStore _nonceStore;
 
     private DateTimeOffset _appleJwksExpiresAt = DateTimeOffset.MinValue;
     private IReadOnlyCollection<SecurityKey> _appleJwksKeys = Array.Empty<SecurityKey>();
@@ -25,11 +27,15 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
     public ExternalIdentityTokenValidator(
         IOptions<ExternalAuthOptions> options,
         IHttpClientFactory httpClientFactory,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IGoogleIdTokenVerifier googleVerifier,
+        ExternalAuthNonceStore nonceStore)
     {
         _options = options.Value;
         _httpClientFactory = httpClientFactory;
         _timeProvider = timeProvider;
+        _googleVerifier = googleVerifier;
+        _nonceStore = nonceStore;
     }
 
     public async Task<ServiceResult<ExternalUserInfo>> ValidateAsync(
@@ -51,43 +57,52 @@ public sealed class ExternalIdentityTokenValidator : IExternalIdentityTokenValid
         {
             "google" => await ValidateGoogleAsync(idToken, cancellationToken),
             "apple" => await ValidateAppleAsync(idToken, cancellationToken),
-            _ => Failure("auth.external_provider_unsupported", $"Unsupported external provider '{provider}'.")
+            _ => Failure("auth.external_provider_unsupported", "Unsupported external provider.")
         };
     }
 
+    // Order is load-bearing (ADR-030 section 2): signature/iss/aud/exp first, so unsigned garbage
+    // never touches the nonce store; then the nonce read FROM THE TOKEN is consumed atomically;
+    // only then is anything inside the token (email, names) looked at. The nonce stays consumed even
+    // when a later step answers 403 or 409.
     private async Task<ServiceResult<ExternalUserInfo>> ValidateGoogleAsync(string idToken, CancellationToken cancellationToken)
     {
-        if (_options.Google.ValidAudiences.Length == 0)
+        var audiences = _options.Google.ConfiguredAudiences;
+        if (audiences.Length == 0)
         {
-            return Failure("auth.external_invalid_token", "Google external auth configuration is missing valid audiences.");
+            return Failure("auth.external_provider_unavailable", "Google sign-in is not available.");
         }
 
+        GoogleJsonWebSignature.Payload payload;
         try
         {
-            var payload = await GoogleJsonWebSignature.ValidateAsync(idToken, new GoogleJsonWebSignature.ValidationSettings
-            {
-                Audience = _options.Google.ValidAudiences
-            });
-
-            // Only trust the email for account creation/linking if Google says it is verified.
-            // An unverified email must not be used to claim or link an existing account.
-            var verifiedEmail = payload.EmailVerified == true ? payload.Email : null;
-
-            return ServiceResult<ExternalUserInfo>.Success(new ExternalUserInfo
-            {
-                Provider = "google",
-                ProviderUserId = payload.Subject,
-                Email = verifiedEmail,
-                FirstName = payload.GivenName,
-                LastName = payload.FamilyName,
-                AvatarUrl = payload.Picture,
-                HostedDomain = payload.HostedDomain
-            });
+            payload = await _googleVerifier.VerifyAsync(idToken, audiences, cancellationToken);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             return Failure("auth.external_invalid_token", "Google identity token is invalid.");
         }
+
+        if (!_nonceStore.TryConsume(payload.Nonce, _timeProvider.GetUtcNow()))
+        {
+            return Failure("auth.external_invalid_token", "Google identity token is invalid.");
+        }
+
+        // Only trust the email for account creation/linking if Google says it is verified.
+        // An unverified email must not be used to claim or link an existing account.
+        var verifiedEmail = payload.EmailVerified == true ? payload.Email : null;
+
+        return ServiceResult<ExternalUserInfo>.Success(new ExternalUserInfo
+        {
+            Provider = "google",
+            ProviderUserId = payload.Subject,
+            Email = verifiedEmail,
+            FirstName = payload.GivenName,
+            LastName = payload.FamilyName,
+            FullName = payload.Name,
+            AvatarUrl = payload.Picture,
+            HostedDomain = payload.HostedDomain
+        });
     }
 
     private async Task<ServiceResult<ExternalUserInfo>> ValidateAppleAsync(string idToken, CancellationToken cancellationToken)

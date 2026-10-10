@@ -26,6 +26,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<ModerationLogEntry> ModerationLogEntries => Set<ModerationLogEntry>();
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<CategoryKeyword> CategoryKeywords => Set<CategoryKeyword>();
+    public DbSet<UserToken> UserTokens => Set<UserToken>();
 
     // Pre-migration listing locations, captured once by AddUserHomePoint. The undo tape for that
     // migration, and the source the demo bootstrap uses to redistribute the showcase by district.

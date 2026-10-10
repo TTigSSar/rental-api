@@ -150,17 +150,29 @@ public sealed class HomePointCoordinatePrivacyTests
         await SeedAsync(db);
 
         await using var context = db.CreateContext();
+        var homePoints = new RentalPlatform.Application.Services.HomePointService(
+            new HomePointStore(context),
+            new GeohashSnapper(),
+            new DistrictBoundaryProvider(),
+            new FakeNotificationEmitter());
         var service = new RentalPlatform.Application.Services.AuthService(
             new UserAuthStore(context),
             new BcryptPasswordHasher(),
             new FakeJwtTokenService(),
             new FakeCurrentUserContext(OwnerId),
             new FakeExternalIdentityTokenValidator(),
-            new RentalPlatform.Application.Services.HomePointService(
-                new HomePointStore(context),
-                new GeohashSnapper(),
-                new DistrictBoundaryProvider(),
-                new FakeNotificationEmitter()));
+            homePoints,
+            new RentalPlatform.Application.Services.EmailVerificationService(
+                new EmailVerificationStore(context),
+                new BcryptPasswordHasher(),
+                homePoints,
+                new FakeEmailService(),
+                new FakeEmailVerificationSettings(),
+                new FakeEmailSendBudget(),
+                new FakeEmailVerificationMonitor(),
+                TimeProvider.System),
+            new EmailVerificationStore(context),
+            TimeProvider.System);
 
         var result = await service.GetCurrentUserAsync();
 

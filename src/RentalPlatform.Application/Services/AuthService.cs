@@ -24,7 +24,20 @@ public sealed class AuthService : IAuthService
         public const string PasswordNotSet = "auth.password_not_set";
         public const string PasswordUnchanged = "auth.password_unchanged";
         public const string PasswordTooLong = "auth.password_too_long";
+        public const string EmailNotVerified = "auth.email_not_verified";
+        public const string VerificationTokenInvalid = "auth.verification_token_invalid";
     }
+
+    // ADR-028 §10. Google is trusted to vouch for an email only when it is the mailbox provider
+    // itself (gmail) or the Workspace domain it administers (hd == the email's domain). Apple only
+    // for the domains it issues itself: relay addresses and its own mail service.
+    private static readonly HashSet<string> GoogleAutoLinkDomains =
+        new(StringComparer.OrdinalIgnoreCase) { "gmail.com", "googlemail.com" };
+
+    private static readonly HashSet<string> AppleAutoLinkDomains =
+        new(StringComparer.OrdinalIgnoreCase) { "privaterelay.appleid.com", "icloud.com", "me.com", "mac.com" };
+
+    private const int MaxExternalResolveAttempts = 3;
 
     private static readonly HashSet<string> AllowedPreferredLanguages =
         new(StringComparer.OrdinalIgnoreCase) { "en", "hy", "ru" };
@@ -35,6 +48,9 @@ public sealed class AuthService : IAuthService
     private readonly ICurrentUserContext _currentUserContext;
     private readonly IExternalIdentityTokenValidator _externalIdentityTokenValidator;
     private readonly IHomePointService _homePointService;
+    private readonly IEmailVerificationService _emailVerification;
+    private readonly IEmailVerificationStore _emailVerificationStore;
+    private readonly TimeProvider _timeProvider;
 
     public AuthService(
         IUserAuthStore userAuthStore,
@@ -42,8 +58,14 @@ public sealed class AuthService : IAuthService
         IJwtTokenService jwtTokenService,
         ICurrentUserContext currentUserContext,
         IExternalIdentityTokenValidator externalIdentityTokenValidator,
-        IHomePointService homePointService)
+        IHomePointService homePointService,
+        IEmailVerificationService emailVerification,
+        IEmailVerificationStore emailVerificationStore,
+        TimeProvider timeProvider)
     {
+        _emailVerification = emailVerification;
+        _emailVerificationStore = emailVerificationStore;
+        _timeProvider = timeProvider;
         _userAuthStore = userAuthStore;
         _passwordHasher = passwordHasher;
         _jwtTokenService = jwtTokenService;
@@ -52,26 +74,27 @@ public sealed class AuthService : IAuthService
         _homePointService = homePointService;
     }
 
-    public async Task<ServiceResult<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
+    public async Task<ServiceResult<RegisterResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
-        var normalizedEmail = NormalizeEmail(request.Email);
-        var emailExists = await _userAuthStore.EmailExistsAsync(normalizedEmail, cancellationToken);
-        if (emailExists)
+        // Production email gate (ADR-028 section 9): before anything is created or checked.
+        if (!_emailVerification.IsAvailable)
         {
-            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            return ServiceResult<RegisterResponse>.Failure(new ServiceError
             {
-                Code = ErrorCodes.DuplicateEmail,
-                Message = "A user with this email already exists."
+                Code = EmailVerificationService.ErrorCodes.RegistrationUnavailable,
+                Message = "Registration is temporarily unavailable. Please try again later."
             });
         }
 
+        var normalizedEmail = NormalizeEmail(request.Email);
+
         // Enforced here (not a DataAnnotation) so the response carries an errorCode the Angular
-        // client can map to a translated message — see PasswordPolicy. Byte length, not char
+        // client can map to a translated message - see PasswordPolicy. Byte length, not char
         // length: BCrypt truncates at 72 UTF-8 bytes, and a char-based cap under-counts
         // multi-byte scripts (Armenian/Russian are 2 bytes/char in UTF-8).
         if (Encoding.UTF8.GetByteCount(request.Password) > PasswordPolicy.MaxPasswordBytes)
         {
-            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            return ServiceResult<RegisterResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.PasswordTooLong,
                 Message = $"Password must be at most {PasswordPolicy.MaxPasswordBytes} bytes (UTF-8)."
@@ -79,7 +102,7 @@ public sealed class AuthService : IAuthService
         }
 
         // Checked BEFORE the account exists. The home-point step is optional but, when supplied, it
-        // must be inside Yerevan — and rejecting it after the insert would leave a registered user
+        // must be inside Yerevan - and rejecting it after the insert would leave a registered user
         // behind, so the obvious retry would then fail on a duplicate email instead of on the pin.
         if (request.HomeLatitude is not null || request.HomeLongitude is not null)
         {
@@ -91,11 +114,11 @@ public sealed class AuthService : IAuthService
 
             if (!areaCheck.IsSuccess)
             {
-                return ServiceResult<AuthResponse>.Failure(areaCheck.Error!);
+                return ServiceResult<RegisterResponse>.Failure(areaCheck.Error!);
             }
         }
 
-        var user = new User
+        var candidate = new User
         {
             Id = Guid.NewGuid(),
             Email = normalizedEmail,
@@ -107,35 +130,26 @@ public sealed class AuthService : IAuthService
             ExternalAuthProvider = null,
             ExternalProviderId = null,
             AvatarUrl = null,
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = Now(),
             IsBlocked = false,
+            IsEmailConfirmed = false,
             Role = UserRole.User
         };
 
-        await _userAuthStore.AddAsync(user, cancellationToken);
-        await _userAuthStore.SaveChangesAsync(cancellationToken);
-
-        // Optional home-point step (the sign-up wizard lets it be skipped). Routed through the same
-        // single writer every other caller uses (home-point model) so the public pair and the
-        // district are derived in exactly one place. Both-or-neither is already enforced by
-        // RegisterRequest.Validate; re-checked here because a service must not depend on its
-        // caller's validation. A brand-new user owns no listings, so this can never fan out.
-        if (request.HomeLatitude is { } homeLatitude && request.HomeLongitude is { } homeLongitude)
+        // New pending registration or replacement of an unverified one, home point, then the email
+        // (after the commit). Nothing is signed in: the account becomes usable only once the
+        // mailbox is proven (ADR-028 section 1).
+        var result = await _emailVerification.RegisterPendingAsync(
+            candidate, request.HomeLatitude, request.HomeLongitude, cancellationToken);
+        if (!result.IsSuccess)
         {
-            await _homePointService.SetHomePointAsync(user.Id, homeLatitude, homeLongitude, cancellationToken);
-
-            // Re-read so HomeDistrict is loaded (FindByIdAsync Includes it) — without this the
-            // registration response would carry a home point whose `district` is null even when the
-            // point did resolve to one, and the client would have to call GET /me to find out.
-            user = await _userAuthStore.FindByIdAsync(user.Id, cancellationToken) ?? user;
+            return ServiceResult<RegisterResponse>.Failure(result.Error!);
         }
 
-        var token = _jwtTokenService.GenerateAccessToken(user);
-
-        return ServiceResult<AuthResponse>.Success(new AuthResponse
+        return ServiceResult<RegisterResponse>.Success(new RegisterResponse
         {
-            AccessToken = token,
-            User = MapUser(user)
+            Email = normalizedEmail,
+            VerificationRequired = true
         });
     }
 
@@ -148,7 +162,7 @@ public sealed class AuthService : IAuthService
         // throws SaltParseException on an empty hash instead of returning false, which would
         // otherwise unwind to a 500 and still burn a rate-limit permit. Treated identically to
         // a wrong password so we never reveal whether the account exists or is external-auth.
-        if (user is null || string.IsNullOrEmpty(user.PasswordHash) || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        if (user is null || !PasswordPolicy.HasUsablePassword(user.PasswordHash) || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
         {
             return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
@@ -166,6 +180,17 @@ public sealed class AuthService : IAuthService
             });
         }
 
+        // Only reachable with the correct password and an unblocked account, so this answer cannot
+        // be used to probe which emails are registered (ADR-028 section 1).
+        if (!user.IsEmailConfirmed)
+        {
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.EmailNotVerified,
+                Message = "Please verify your email address before signing in."
+            });
+        }
+
         var token = _jwtTokenService.GenerateAccessToken(user);
 
         return ServiceResult<AuthResponse>.Success(new AuthResponse
@@ -174,6 +199,36 @@ public sealed class AuthService : IAuthService
             User = MapUser(user)
         });
     }
+
+    public async Task<ServiceResult<AuthResponse>> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken = default)
+    {
+        var verified = await _emailVerification.VerifyAsync(request.Token, request.Password, cancellationToken);
+        if (!verified.IsSuccess)
+        {
+            return ServiceResult<AuthResponse>.Failure(verified.Error!);
+        }
+
+        // The store cleared the change tracker after the commit, so this is a fresh read of the
+        // verified row; the JWT and the response are built from it, never from the pre-commit snapshot.
+        var user = await _userAuthStore.FindByIdAsync(verified.Value, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.VerificationTokenInvalid,
+                Message = "The verification link is invalid."
+            });
+        }
+
+        return ServiceResult<AuthResponse>.Success(new AuthResponse
+        {
+            AccessToken = _jwtTokenService.GenerateAccessToken(user),
+            User = MapUser(user)
+        });
+    }
+
+    public Task<ServiceResult<bool>> ResendVerificationAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default) =>
+        _emailVerification.ResendAsync(request.Email, cancellationToken);
 
     public async Task<ServiceResult<AuthResponse>> ExternalAsync(ExternalAuthRequest request, CancellationToken cancellationToken = default)
     {
@@ -203,50 +258,14 @@ public sealed class AuthService : IAuthService
                 });
             }
 
-            var normalizedEmail = NormalizeEmail(externalUser.Email);
-            user = await _userAuthStore.FindByEmailAsync(normalizedEmail, cancellationToken);
-
-            if (user is null)
+            var resolved = await ResolveExternalUserByEmailAsync(
+                externalUser, provider, NormalizeEmail(externalUser.Email), cancellationToken);
+            if (!resolved.IsSuccess)
             {
-                user = new User
-                {
-                    Id = Guid.NewGuid(),
-                    Email = normalizedEmail,
-                    PasswordHash = string.Empty,
-                    FirstName = ResolveName(externalUser.FirstName, normalizedEmail, "User"),
-                    LastName = ResolveName(externalUser.LastName, normalizedEmail, string.Empty),
-                    PhoneNumber = null,
-                    PreferredLanguage = null,
-                    ExternalAuthProvider = provider,
-                    ExternalProviderId = externalUser.ProviderUserId,
-                    AvatarUrl = NormalizeOptional(externalUser.AvatarUrl),
-                    CreatedAt = DateTime.UtcNow,
-                    IsBlocked = false,
-                    Role = UserRole.User
-                };
-
-                await _userAuthStore.AddAsync(user, cancellationToken);
-            }
-            else
-            {
-                if (!CanLinkExternalIdentity(user, provider, externalUser.ProviderUserId))
-                {
-                    return ServiceResult<AuthResponse>.Failure(new ServiceError
-                    {
-                        Code = ErrorCodes.ExternalLinkConflict,
-                        Message = "Existing account is already linked to another external identity."
-                    });
-                }
-
-                user.ExternalAuthProvider = provider;
-                user.ExternalProviderId = externalUser.ProviderUserId;
-                if (!string.IsNullOrWhiteSpace(externalUser.AvatarUrl))
-                {
-                    user.AvatarUrl = externalUser.AvatarUrl;
-                }
+                return ServiceResult<AuthResponse>.Failure(resolved.Error!);
             }
 
-            await _userAuthStore.SaveChangesAsync(cancellationToken);
+            user = resolved.Value!;
         }
 
         if (user.IsBlocked)
@@ -376,7 +395,7 @@ public sealed class AuthService : IAuthService
             });
         }
 
-        if (string.IsNullOrEmpty(user.PasswordHash))
+        if (!PasswordPolicy.HasUsablePassword(user.PasswordHash))
         {
             return ServiceResult<bool>.Failure(new ServiceError
             {
@@ -466,6 +485,123 @@ public sealed class AuthService : IAuthService
 
         return await ReadCurrentUserAsync(userId, cancellationToken);
     }
+
+    // No account is linked to this provider identity yet: find or create one by the (provider
+    // verified) email. Retries because two outcomes are races that resolve on the next lookup: a
+    // concurrent insert of the same email, and a pending account that was verified or blocked
+    // between our read and our conditional reset.
+    private async Task<ServiceResult<User>> ResolveExternalUserByEmailAsync(
+        ExternalUserInfo externalUser,
+        string provider,
+        string normalizedEmail,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < MaxExternalResolveAttempts; attempt++)
+        {
+            var now = Now();
+            var existing = await _userAuthStore.FindByEmailAsync(normalizedEmail, cancellationToken);
+
+            if (existing is null)
+            {
+                // The provider has verified this mailbox, so the new account is verified at once.
+                var created = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Email = normalizedEmail,
+                    PasswordHash = string.Empty,
+                    FirstName = ResolveName(externalUser.FirstName, normalizedEmail, "User"),
+                    LastName = ResolveName(externalUser.LastName, normalizedEmail, string.Empty),
+                    PhoneNumber = null,
+                    PreferredLanguage = null,
+                    ExternalAuthProvider = provider,
+                    ExternalProviderId = externalUser.ProviderUserId,
+                    AvatarUrl = NormalizeOptional(externalUser.AvatarUrl),
+                    CreatedAt = now,
+                    IsBlocked = false,
+                    IsEmailConfirmed = true,
+                    EmailConfirmedAt = now,
+                    Role = UserRole.User
+                };
+
+                if (await _emailVerificationStore.TryAddUserAsync(created, null, cancellationToken))
+                {
+                    return ServiceResult<User>.Success(created);
+                }
+
+                continue; // lost the race on Users.Email: look it up again.
+            }
+
+            if (existing.IsEmailConfirmed)
+            {
+                if (!CanLinkExternalIdentity(existing, provider, externalUser.ProviderUserId) ||
+                    !IsTrustedForAutoLink(provider, normalizedEmail, externalUser.HostedDomain))
+                {
+                    return ServiceResult<User>.Failure(new ServiceError
+                    {
+                        Code = ErrorCodes.ExternalLinkConflict,
+                        Message = "This email belongs to an existing account that cannot be linked to this sign-in method."
+                    });
+                }
+
+                existing.ExternalAuthProvider = provider;
+                existing.ExternalProviderId = externalUser.ProviderUserId;
+                if (!string.IsNullOrWhiteSpace(externalUser.AvatarUrl))
+                {
+                    existing.AvatarUrl = externalUser.AvatarUrl;
+                }
+
+                await _userAuthStore.SaveChangesAsync(cancellationToken);
+                return ServiceResult<User>.Success(existing);
+            }
+
+            if (existing.IsBlocked)
+            {
+                // A blocked pending account is never reset; the caller answers auth.user_blocked.
+                return ServiceResult<User>.Success(existing);
+            }
+
+            // Pending registration: the provider's proof of the mailbox replaces it completely
+            // (ADR-028 section 2). A tracked SaveChanges here would write back stale pending values.
+            var reset = await _emailVerificationStore.TryResetPendingForExternalAsync(
+                existing.Id,
+                externalUser,
+                ResolveName(externalUser.FirstName, normalizedEmail, "User"),
+                ResolveName(externalUser.LastName, normalizedEmail, string.Empty),
+                now,
+                cancellationToken);
+
+            if (reset)
+            {
+                var refreshed = await _userAuthStore.FindByIdAsync(existing.Id, cancellationToken);
+                if (refreshed is not null)
+                {
+                    return ServiceResult<User>.Success(refreshed);
+                }
+            }
+        }
+
+        return ServiceResult<User>.Failure(new ServiceError
+        {
+            Code = ErrorCodes.ExternalLinkConflict,
+            Message = "Could not complete sign-in for this account. Please try again."
+        });
+    }
+
+    private static bool IsTrustedForAutoLink(string provider, string normalizedEmail, string? hostedDomain)
+    {
+        var domain = normalizedEmail[(normalizedEmail.LastIndexOf('@') + 1)..];
+
+        return provider switch
+        {
+            "google" => GoogleAutoLinkDomains.Contains(domain) ||
+                        (!string.IsNullOrWhiteSpace(hostedDomain) &&
+                         string.Equals(hostedDomain.Trim(), domain, StringComparison.OrdinalIgnoreCase)),
+            "apple" => AppleAutoLinkDomains.Contains(domain),
+            _ => false
+        };
+    }
+
+    private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
     private async Task<ServiceResult<CurrentUserResponse>> ReadCurrentUserAsync(Guid userId, CancellationToken cancellationToken)
     {

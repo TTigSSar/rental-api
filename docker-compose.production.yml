@@ -93,6 +93,30 @@ services:
       ForwardedHeaders__Enabled: "true"
       ForwardedHeaders__KnownNetworks__0: &stack_subnet "172.18.0.0/16"
       ForwardedHeaders__ForwardLimit: "1"
+      # Transactional email: verification links only (ADR-028, ADR-029). Every key has a
+      # `:-default`, so an unset OR empty .env value never reaches the parser as "" (M-016);
+      # the app parses all of them tolerantly anyway and never throws on a bad value.
+      #
+      # Production gate (ADR-028 section 9): unless Provider=Resend AND the API key is set AND
+      # PublicBaseUrl is https, the api still starts and stays healthy, but logs ONE Critical
+      # line at startup ("Email verification is NOT operational in Production: ...") and
+      # POST /api/auth/register + /api/auth/resend-verification answer 503
+      # auth.registration_unavailable. The `Log` default below therefore fails CLOSED:
+      # forgetting EMAIL_PROVIDER=Resend disables sign-up, it never creates unverifiable users.
+      # smoke.sh (check email-gate) fails when that line is in the current api process's log.
+      Email__Provider: ${EMAIL_PROVIDER:-Log}
+      # Quoted: the default contains spaces and angle brackets. Must be an address on the
+      # Resend-verified domain (dorent.am), otherwise Resend rejects every send.
+      Email__From: "${EMAIL_FROM:-DoRent <no-reply@dorent.am>}"
+      # SECRET. Lives only in the server's .env (mode 600), put there by Tigran.
+      Email__Resend__ApiKey: ${EMAIL_RESEND_API_KEY:-}
+      # Global cap on emails actually SENT (not requests), sized to the Resend free tier.
+      # When exhausted: register still 201, resend still 202, nothing is sent, Critical log.
+      Email__SendBudget__Limit: ${EMAIL_SEND_BUDGET_LIMIT:-100}
+      Email__SendBudget__WindowHours: ${EMAIL_SEND_BUDGET_WINDOW_HOURS:-24}
+      # Base of the verification link ({base}/auth/verify-email#token=...). Taken only from
+      # config, never from the request Host. Must be https in Production (gate above).
+      App__PublicBaseUrl: ${APP_PUBLIC_BASE_URL:-https://dorent.am}
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat

@@ -14,25 +14,13 @@ public sealed class AuthServiceTests
     private static readonly Guid UserId = new("b0000000-0000-0000-0000-000000000001");
 
     private static AuthService CreateService(FakeUserAuthStore store, Guid? currentUserId) =>
-        new(
-            store,
-            new FakePasswordHasher(),
-            new FakeJwtTokenService(),
-            new FakeCurrentUserContext(currentUserId),
-            new FakeExternalIdentityTokenValidator(),
-            new FakeHomePointService(store));
+        AuthServiceFactory.ForFakes(store, currentUserId);
 
     // Real BCrypt hasher for the tests that need genuine hash behavior (empty-hash guard,
     // end-to-end hash change) — FakePasswordHasher returns false instead of throwing on an
     // empty stored hash, which would hide the bug this covers (see M-013).
     private static AuthService CreateServiceWithRealHasher(FakeUserAuthStore store, Guid? currentUserId) =>
-        new(
-            store,
-            new BcryptPasswordHasher(),
-            new FakeJwtTokenService(),
-            new FakeCurrentUserContext(currentUserId),
-            new FakeExternalIdentityTokenValidator(),
-            new FakeHomePointService(store));
+        AuthServiceFactory.ForFakes(store, currentUserId, new BcryptPasswordHasher());
 
     [Fact]
     public async Task UpdatePreferredLanguage_Valid_Code_Is_Normalized_And_Persisted()
@@ -335,7 +323,10 @@ public sealed class AuthServiceTests
             PhoneNumber = "+37411111111"
         });
         Assert.True(registerResult.IsSuccess);
-        var userId = registerResult.Value!.User.Id;
+        var registered = Assert.Single(store.Users);
+        // Registration no longer signs anyone in (ADR-028); this test is about the password, not the gate.
+        registered.IsEmailConfirmed = true;
+        var userId = registered.Id;
 
         // An attacker who only knows the real password's first bytes pads a guess past 72 bytes
         // hoping BCrypt's truncation makes it verify anyway.

@@ -22,4 +22,8 @@ public sealed class ServiceError
 {
     public string Code { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
+
+    // Set only by errors that map to 429 (auth.verification_cooldown); the controller turns it into
+    // a Retry-After header.
+    public int? RetryAfterSeconds { get; init; }
 }

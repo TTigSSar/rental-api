@@ -17,6 +17,11 @@ public static class RateLimiterExtensions
     public const string ImageUploadPolicy = "image-upload";
     public const string PasswordChangePolicy = "password-change";
 
+    // verify-email and resend-verification (ADR-028 section 8). Per IP, one shared bucket for both
+    // endpoints. Not a global limit: a global one would let a single attacker block everybody's
+    // verification.
+    public const string EmailVerificationPolicy = "email-verification";
+
     // Moving a home point rewrites every listing the owner has and can fan out notifications to
     // every renter with a booking in flight, so it is partitioned per ACCOUNT rather than per IP —
     // an attacker on many IPs still gets one budget per victim account, and a household behind one
@@ -69,6 +74,16 @@ public static class RateLimiterExtensions
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(EmailVerificationPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveClientKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true

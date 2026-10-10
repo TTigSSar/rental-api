@@ -35,6 +35,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
 
     public FakeFileStorageService FakeStorage { get; } = new();
 
+    // Replaces the logging transport so a test can read the verification link the API "emailed".
+    public CaptureEmailSender EmailSender { get; } = new();
+
     public RentalPlatformWebAppFactory()
     {
         _connection.Open();
@@ -49,6 +52,10 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
 
         // Satisfies AddInfrastructure's non-empty check; actual DbContext replaced below.
         Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", "DataSource=:memory:");
+
+        // The send budget (default 100 per 24 h) is process-wide and this host serves the whole test
+        // run; lift it so a registration-heavy suite can never trip the production safeguard.
+        Environment.SetEnvironmentVariable("Email__SendBudget__Limit", "1000000");
 
         // FileStorage options ValidateOnStart check.
         Environment.SetEnvironmentVariable("FileStorage__ListingsImagesPath", "uploads/listings");
@@ -67,6 +74,10 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
             // Replace disk-backed file storage with an in-memory double.
             services.RemoveAll<IFileStorageService>();
             services.AddSingleton<IFileStorageService>(FakeStorage);
+
+            // Capture-fake transport (ADR-029 seam): the real LoggingEmailSender would only log.
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(EmailSender);
 
             // Test-only: lets a test pin its simulated client IP (X-Test-Remote-Ip header) so
             // rate-limit partitioning can be isolated per test class. See

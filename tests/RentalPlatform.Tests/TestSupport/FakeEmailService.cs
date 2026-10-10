@@ -7,6 +7,7 @@ public sealed class FakeEmailService : IEmailService
 {
     public List<(string Email, string Name, string Title)> ApprovedSent { get; } = new();
     public List<(string Email, string Name, string Title, string Reason)> RejectedSent { get; } = new();
+    public List<(string Email, string? Language, string Link)> VerificationSent { get; } = new();
 
     public Task SendListingApprovedAsync(
         string ownerEmail, string ownerName, string listingTitle, CancellationToken cancellationToken = default)
@@ -19,6 +20,13 @@ public sealed class FakeEmailService : IEmailService
         string ownerEmail, string ownerName, string listingTitle, string rejectionReason, CancellationToken cancellationToken = default)
     {
         RejectedSent.Add((ownerEmail, ownerName, listingTitle, rejectionReason));
+        return Task.CompletedTask;
+    }
+
+    public Task SendEmailVerificationAsync(
+        string email, string? preferredLanguage, string link, CancellationToken cancellationToken = default)
+    {
+        VerificationSent.Add((email, preferredLanguage, link));
         return Task.CompletedTask;
     }
 }

@@ -31,23 +31,16 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         _listingsOwnerStore = listingsOwnerStore;
     }
 
-    public async Task<ServiceResult<CreateListingResponse>> CreateAsync(
-        CreateListingRequest request,
-        CancellationToken cancellationToken = default)
+    // Single owner-resolution path for every owner-scoped write/read: no authenticated id or no user
+    // row -> 401 (Unauthenticated); blocked -> 403 (UserBlocked, with the caller's message).
+    private async Task<ServiceResult<User>> ResolveActiveOwnerAsync(
+        string blockedMessage,
+        CancellationToken cancellationToken)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        if (_currentUserContext.UserId is not { } ownerId ||
+            await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { } user)
         {
-            return ServiceResult<CreateListingResponse>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
-        }
-
-        var user = await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken);
-        if (user is null)
-        {
-            return ServiceResult<CreateListingResponse>.Failure(new ServiceError
+            return ServiceResult<User>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
@@ -56,12 +49,28 @@ public sealed class ListingsOwnerService : IListingsOwnerService
 
         if (user.IsBlocked)
         {
-            return ServiceResult<CreateListingResponse>.Failure(new ServiceError
+            return ServiceResult<User>.Failure(new ServiceError
             {
                 Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot create listings."
+                Message = blockedMessage
             });
         }
+
+        return ServiceResult<User>.Success(user);
+    }
+
+    public async Task<ServiceResult<CreateListingResponse>> CreateAsync(
+        CreateListingRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot create listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
+        {
+            return ServiceResult<CreateListingResponse>.Failure(ownerError);
+        }
+
+        var user = ownerResult.Value!;
+        var ownerId = user.Id;
 
         var categoryExists = await _listingsOwnerStore.CategoryExistsAsync(request.CategoryId, cancellationToken);
         if (!categoryExists)
@@ -169,33 +178,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
     public async Task<ServiceResult<IReadOnlyCollection<MyListingResponse>>> GetMineAsync(
         CancellationToken cancellationToken = default)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot access owner listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
         {
-            return ServiceResult<IReadOnlyCollection<MyListingResponse>>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
+            return ServiceResult<IReadOnlyCollection<MyListingResponse>>.Failure(ownerError);
         }
 
-        var user = await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken);
-        if (user is null)
-        {
-            return ServiceResult<IReadOnlyCollection<MyListingResponse>>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
-        }
-
-        if (user.IsBlocked)
-        {
-            return ServiceResult<IReadOnlyCollection<MyListingResponse>>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot access owner listings."
-            });
-        }
+        var ownerId = ownerResult.Value!.Id;
 
         var listings = await _listingsOwnerStore.GetListingsByOwnerIdAsync(ownerId, cancellationToken);
 
@@ -252,23 +241,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         Guid listingId,
         CancellationToken cancellationToken = default)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot modify listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
+            return ServiceResult<bool>.Failure(ownerError);
         }
 
-        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
-        {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot modify listings."
-            });
-        }
+        var ownerId = ownerResult.Value!.Id;
 
         var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
         if (listing is null)
@@ -300,23 +279,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         Guid listingId,
         CancellationToken cancellationToken = default)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot modify listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
+            return ServiceResult<bool>.Failure(ownerError);
         }
 
-        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
-        {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot modify listings."
-            });
-        }
+        var ownerId = ownerResult.Value!.Id;
 
         var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
         if (listing is null)
@@ -349,23 +318,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         UpdateListingRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot modify listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
         {
-            return ServiceResult<Guid>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
+            return ServiceResult<Guid>.Failure(ownerError);
         }
 
-        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
-        {
-            return ServiceResult<Guid>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot modify listings."
-            });
-        }
+        var ownerId = ownerResult.Value!.Id;
 
         var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
         if (listing is null)
@@ -456,23 +415,13 @@ public sealed class ListingsOwnerService : IListingsOwnerService
         Guid listingId,
         CancellationToken cancellationToken = default)
     {
-        if (_currentUserContext.UserId is not { } ownerId)
+        var ownerResult = await ResolveActiveOwnerAsync("Blocked users cannot modify listings.", cancellationToken);
+        if (ownerResult.Error is { } ownerError)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.Unauthenticated,
-                Message = "Current user is not authenticated."
-            });
+            return ServiceResult<bool>.Failure(ownerError);
         }
 
-        if (await _listingsOwnerStore.FindUserByIdAsync(ownerId, cancellationToken) is not { IsBlocked: false })
-        {
-            return ServiceResult<bool>.Failure(new ServiceError
-            {
-                Code = ErrorCodes.UserBlocked,
-                Message = "Blocked users cannot modify listings."
-            });
-        }
+        var ownerId = ownerResult.Value!.Id;
 
         var listing = await _listingsOwnerStore.FindListingByIdAndOwnerAsync(listingId, ownerId, cancellationToken);
         if (listing is null)

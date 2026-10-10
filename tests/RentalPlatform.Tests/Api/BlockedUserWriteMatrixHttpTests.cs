@@ -72,9 +72,16 @@ public sealed class BlockedUserWriteMatrixHttpTests
             othersListingId, pendingBookingId, completedBookingId, conversationId);
     }
 
-    private HttpClient BlockedClient(Fixture f)
+    private HttpClient BlockedClient(Fixture f, string? simulatedIp = null)
     {
         var client = _factory.CreateClient();
+        // Upload endpoints sit behind a per-IP rate-limit bucket shared with other test classes
+        // (ImageHttpTests); a distinct simulated IP keeps this class out of it.
+        if (simulatedIp is not null)
+        {
+            client.DefaultRequestHeaders.Add(TestRemoteIpStartupFilter.HeaderName, simulatedIp);
+        }
+
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", TestJwtTokenHelper.GenerateToken(f.BlockedId, f.BlockedEmail));
         return client;
@@ -143,7 +150,7 @@ public sealed class BlockedUserWriteMatrixHttpTests
         file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         form.Add(file, "files", "toy.png");
 
-        var response = await BlockedClient(f).PostAsync($"/api/listings/{f.OwnListingId}/images", form);
+        var response = await BlockedClient(f, "10.99.88.4").PostAsync($"/api/listings/{f.OwnListingId}/images", form);
         await AssertForbiddenAsync(response, "listing.user_blocked");
     }
 
@@ -153,6 +160,35 @@ public sealed class BlockedUserWriteMatrixHttpTests
         var f = await SeedAsync();
         var response = await BlockedClient(f).DeleteAsync($"/api/listings/{f.OwnListingId}/images/{f.OwnImageId}");
         await AssertForbiddenAsync(response, "listing.user_blocked");
+    }
+
+    [Fact]
+    public async Task Listing_Image_Reorder_Returns_403_Listing_User_Blocked()
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).PutAsJsonAsync(
+            $"/api/listings/{f.OwnListingId}/images/order",
+            new { imageIds = new[] { f.OwnImageId } });
+        await AssertForbiddenAsync(response, "listing.user_blocked");
+    }
+
+    // A valid JWT whose user row no longer exists is "not authenticated" (401), not "blocked" (403):
+    // pins ResolveActiveOwnerAsync's missing-user branch, same answer as CreateAsync/GetMineAsync.
+    [Fact]
+    public async Task Listing_Update_With_Valid_Jwt_But_No_User_Row_Returns_401()
+    {
+        var f = await SeedAsync();
+        var ghostId = Guid.NewGuid();
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", TestJwtTokenHelper.GenerateToken(ghostId, $"{ghostId:N}@ghost.local"));
+
+        var response = await client.PatchAsJsonAsync($"/api/listings/{f.OwnListingId}", new { pricePerDay = 3100 });
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Unauthorized, $"Expected 401, got {(int)response.StatusCode}: {body}");
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal("listing.unauthenticated", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     // ---- Bookings -------------------------------------------------------------------------------
@@ -176,6 +212,18 @@ public sealed class BlockedUserWriteMatrixHttpTests
     {
         var f = await SeedAsync();
         var response = await BlockedClient(f).PostAsync($"/api/bookings/{f.PendingBookingId}/cancel", content: null);
+        await AssertForbiddenAsync(response, "booking.user_blocked");
+    }
+
+    // Owner-side decisions share one guard; approve is the representative. The blocked caller here is
+    // the renter, so the 403 also shows the block check runs before any ownership check.
+    [Theory]
+    [InlineData("approve")]
+    [InlineData("reject")]
+    public async Task Booking_Owner_Decision_Returns_403_Booking_User_Blocked(string action)
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).PostAsync($"/api/bookings/{f.PendingBookingId}/{action}", content: null);
         await AssertForbiddenAsync(response, "booking.user_blocked");
     }
 
@@ -226,6 +274,45 @@ public sealed class BlockedUserWriteMatrixHttpTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    private static MultipartFormDataContent PngForm()
+    {
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(TestData.PngBytes());
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        form.Add(file, "image", "photo.png");
+        return form;
+    }
+
+    [Fact]
+    public async Task Chat_Send_Image_In_Booking_Conversation_Returns_403_Chat_User_Blocked()
+    {
+        var f = await SeedAsync();
+        using var form = PngForm();
+        var response = await BlockedClient(f, "10.99.88.2").PostAsync($"/api/chat/conversations/{f.BookingConversationId}/messages/image", form);
+        await AssertForbiddenAsync(response, "chat.user_blocked");
+    }
+
+    // Same appeal carve-out as the text path (ChatService.SendImageMessageAsync).
+    [Fact]
+    public async Task Chat_Send_Image_In_Own_Moderation_Thread_Is_Not_403_Appeal_Carve_Out()
+    {
+        var f = await SeedAsync();
+        var adminId = Guid.NewGuid();
+        await _factory.SeedAsync(TestData.User(adminId, $"{adminId:N}@matrix-admin.local", role: UserRole.Admin));
+
+        Guid moderationConversationId;
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IConversationsStore>();
+            moderationConversationId = (await store.GetOrCreateForModerationAsync(adminId, f.BlockedId)).Id;
+        }
+
+        using var form = PngForm();
+        var response = await BlockedClient(f, "10.99.88.3").PostAsync($"/api/chat/conversations/{moderationConversationId}/messages/image", form);
+
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     // ---- Favorites, reports, reviews ------------------------------------------------------------
 
     [Fact]
@@ -233,6 +320,14 @@ public sealed class BlockedUserWriteMatrixHttpTests
     {
         var f = await SeedAsync();
         var response = await BlockedClient(f).PostAsync($"/api/favorites/{f.OthersListingId}", content: null);
+        await AssertForbiddenAsync(response, "favorite.user_blocked");
+    }
+
+    [Fact]
+    public async Task Favorite_Remove_Returns_403_Favorite_User_Blocked()
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).DeleteAsync($"/api/favorites/{f.OthersListingId}");
         await AssertForbiddenAsync(response, "favorite.user_blocked");
     }
 
@@ -278,6 +373,14 @@ public sealed class BlockedUserWriteMatrixHttpTests
             latitude = TestData.KentronPoint.Latitude,
             longitude = TestData.KentronPoint.Longitude
         });
+        await AssertForbiddenAsync(response, "auth.user_blocked");
+    }
+
+    [Fact]
+    public async Task HomePoint_Delete_Returns_403_Auth_User_Blocked()
+    {
+        var f = await SeedAsync();
+        var response = await BlockedClient(f).DeleteAsync("/api/auth/me/home-point");
         await AssertForbiddenAsync(response, "auth.user_blocked");
     }
 

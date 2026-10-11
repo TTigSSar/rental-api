@@ -74,6 +74,37 @@ public sealed class ExternalSignInConcurrencyTests
         public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default) => _inner.TrySaveChangesAsync(cancellationToken);
     }
 
+    // Holds the verify-email racer after it has read the token (and the password hash it saw).
+    private sealed class TokenReadBarrierVerificationStore : IEmailVerificationStore
+    {
+        private readonly IEmailVerificationStore _inner;
+        private readonly AsyncBarrier _barrier;
+
+        public TokenReadBarrierVerificationStore(IEmailVerificationStore inner, AsyncBarrier barrier)
+        {
+            _inner = inner;
+            _barrier = barrier;
+        }
+
+        public async Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default)
+        {
+            var view = await _inner.FindTokenAsync(tokenHash, purpose, cancellationToken);
+            await _barrier.SignalAndWaitAsync();
+            return view;
+        }
+
+        public Task<AccountState?> FindAccountStateAsync(string email, CancellationToken cancellationToken = default) => _inner.FindAccountStateAsync(email, cancellationToken);
+        public Task<DateTime?> GetLatestTokenCreatedAtAsync(Guid userId, TokenPurpose purpose, CancellationToken cancellationToken = default) => _inner.GetLatestTokenCreatedAtAsync(userId, purpose, cancellationToken);
+        public Task<DateTime?> GetOldestTokenCreatedAtSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) => _inner.GetOldestTokenCreatedAtSinceAsync(userId, purpose, since, cancellationToken);
+        public Task<int> CountTokensCreatedSinceAsync(Guid userId, TokenPurpose purpose, DateTime since, CancellationToken cancellationToken = default) => _inner.CountTokensCreatedSinceAsync(userId, purpose, since, cancellationToken);
+        public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default) => _inner.TryAddUserAsync(user, token, cancellationToken);
+        public Task<ReplacePendingOutcome> TryReplacePendingAsync(Guid userId, User candidate, UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) => _inner.TryReplacePendingAsync(userId, candidate, token, now, limits, cancellationToken);
+        public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) => _inner.TryRotateTokenAsync(token, now, limits, cancellationToken);
+        public Task<bool> TryCommitVerificationAsync(Guid tokenId, Guid userId, TokenPurpose purpose, string seenPasswordHash, DateTime now, CancellationToken cancellationToken = default) => _inner.TryCommitVerificationAsync(tokenId, userId, purpose, seenPasswordHash, now, cancellationToken);
+        public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) => _inner.DiscardHomePointIfAccountChangedAsync(userId, registrantPasswordHash, cancellationToken);
+        public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage, DateTime now, CancellationToken cancellationToken = default) => _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, preferredLanguage, now, cancellationToken);
+    }
+
     private static async Task SeedPendingAsync(SqlServerTestDatabase db, Guid id, string email, string? rawToken = null)
     {
         await db.SeedAsync(TestData.User(id, email, passwordHash: $"hashed:{Password}", isEmailConfirmed: false));
@@ -130,10 +161,15 @@ public sealed class ExternalSignInConcurrencyTests
             var email = $"round{round}@gmail.com";
             await SeedPendingAsync(db, id, email, rawToken: $"token-{round}");
 
+            // Both racers are held after their read (verify: token + seen password hash; external: the
+            // pending user by email) and released together, so the two commits always overlap.
+            var barrier = new AsyncBarrier(2);
             var outcomes = await RaceAsync(2, async i =>
             {
                 await using var context = db.CreateContext();
-                var harness = new AuthHarness(context, clock: clock);
+                var harness = i == 0
+                    ? new AuthHarness(context, clock: clock, decorateStore: inner => new TokenReadBarrierVerificationStore(inner, barrier))
+                    : new AuthHarness(context, clock: clock, decorateUserStore: inner => new BarrierUserAuthStore(inner, barrier));
                 if (i == 0)
                 {
                     var verified = await harness.Auth.VerifyEmailAsync(new VerifyEmailRequest { Token = $"token-{round}", Password = Password });

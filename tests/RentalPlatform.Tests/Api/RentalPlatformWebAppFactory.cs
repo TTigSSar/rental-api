@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Infrastructure.Persistence;
+using RentalPlatform.Infrastructure.Services;
 using RentalPlatform.Tests.TestSupport;
 using Xunit;
 
@@ -38,6 +39,13 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
     // Replaces the logging transport so a test can read the verification link the API "emailed".
     public CaptureEmailSender EmailSender { get; } = new();
 
+    // Stands in for Google's signature check (a Google-signed token cannot be produced offline), so
+    // POST /api/auth/external runs the REAL validator, nonce store and AuthService around it.
+    public StubGoogleIdTokenVerifier GoogleVerifier { get; } = new();
+
+    // The client id the test host reports as configured; ExternalAuthOptions rejects placeholders.
+    internal const string GoogleClientId = "123456789-xunit.apps.googleusercontent.com";
+
     public RentalPlatformWebAppFactory()
     {
         _connection.Open();
@@ -59,6 +67,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
 
         // FileStorage options ValidateOnStart check.
         Environment.SetEnvironmentVariable("FileStorage__ListingsImagesPath", "uploads/listings");
+
+        // Google sign-in is "configured" in the test host; one test blanks it to prove the 503.
+        Environment.SetEnvironmentVariable("ExternalAuth__Google__ValidAudiences__0", GoogleClientId);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -78,6 +89,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
             // Capture-fake transport (ADR-029 seam): the real LoggingEmailSender would only log.
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(EmailSender);
+
+            services.RemoveAll<IGoogleIdTokenVerifier>();
+            services.AddSingleton<IGoogleIdTokenVerifier>(GoogleVerifier);
 
             // Test-only: lets a test pin its simulated client IP (X-Test-Remote-Ip header) so
             // rate-limit partitioning can be isolated per test class. See

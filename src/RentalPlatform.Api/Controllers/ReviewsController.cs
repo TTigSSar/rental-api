@@ -124,6 +124,7 @@ public sealed class ReviewsController : ControllerBase
             "review.unauthenticated"       => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
             "review.booking_not_found"     => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "review.forbidden"             => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "review.user_blocked"          => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "review.booking_not_completed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "review.already_submitted"     => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))

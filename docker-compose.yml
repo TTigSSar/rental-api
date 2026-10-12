@@ -31,6 +31,8 @@ services:
       Jwt__Audience: "RentalPlatform.Api"
       FileStorage__ListingsImagesPath: "uploads/listings"
       FileStorage__ChatAttachmentsPath: "uploads/chat"
+      # Public OAuth client id (not a secret); empty audiences = Google unavailable (ADR-030 §7).
+      ExternalAuth__Google__ValidAudiences__0: "${GOOGLE_CLIENT_ID:-6707214612-40dcffqfdopo4h12l9bg69h9gqp7oupt.apps.googleusercontent.com}"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat

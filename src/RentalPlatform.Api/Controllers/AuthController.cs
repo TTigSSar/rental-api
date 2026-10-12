@@ -13,10 +13,12 @@ namespace RentalPlatform.Api.Controllers;
 public sealed class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IExternalNonceService _externalNonceService;
 
-    public AuthController(IAuthService authService)
+    public AuthController(IAuthService authService, IExternalNonceService externalNonceService)
     {
         _authService = authService;
+        _externalNonceService = externalNonceService;
     }
 
     [HttpPost("register")]
@@ -105,12 +107,34 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    // The single-use nonce the SPA passes to Google Identity Services (ADR-030 section 2). 503 when
+    // Google is not configured or the nonce store is full.
+    [HttpPost("external/nonce")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.ExternalAuthNoncePolicy)]
+    [ProducesResponseType(typeof(ExternalNonceResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public ActionResult<ExternalNonceResponse> ExternalNonce()
+    {
+        var result = _externalNonceService.Issue();
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     [HttpPost("external")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.ExternalAuthPolicy)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<AuthResponse>> External(
         [FromBody] ExternalAuthRequest request,
         CancellationToken cancellationToken)
@@ -153,6 +177,48 @@ public sealed class AuthController : ControllerBase
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    [HttpPut("me/name")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.NameUpdatePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> UpdateName(
+        [FromBody] UpdateNameRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.UpdateNameAsync(request.FirstName, request.LastName, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromError(result.Error);
+    }
+
+    [HttpPut("me/phone")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.PhoneUpdatePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> UpdatePhone(
+        [FromBody] UpdatePhoneRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.UpdatePhoneAsync(request.PhoneNumber, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
         }
 
         return FromError(result.Error);
@@ -259,6 +325,8 @@ public sealed class AuthController : ControllerBase
             "auth.verification_cooldown" => CooldownResponse(error),
             "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "auth.external_link_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.external_pending_registration" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.external_provider_unavailable" => StatusCode(StatusCodes.Status503ServiceUnavailable, error.ToProblemDetails(StatusCodes.Status503ServiceUnavailable)),
             "auth.invalid_current_password" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.password_not_set" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.password_unchanged" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),

@@ -20,6 +20,7 @@ public sealed class BookingsService : IBookingsService
     {
         public const string Unauthenticated = "booking.unauthenticated";
         public const string UserBlocked = "booking.user_blocked";
+        public const string PhoneRequired = "booking.phone_required";
         public const string ListingNotFound = "booking.listing_not_found";
         public const string ListingNotApproved = "booking.listing_not_approved";
         public const string OwnListingForbidden = "booking.own_listing_forbidden";
@@ -71,6 +72,14 @@ public sealed class BookingsService : IBookingsService
         }
 
         var renter = userResult.Value;
+
+        // ADR-030 section 8: auth -> blocked -> phone -> everything else, before the booking insert,
+        // so a client that retries after adding a phone is safe.
+        if (string.IsNullOrWhiteSpace(renter.PhoneNumber))
+        {
+            return Failure<BookingResponse>(ErrorCodes.PhoneRequired, "Add a phone number before sending a booking request.");
+        }
+
         var listing = await _bookingsStore.FindListingByIdAsync(request.ListingId, cancellationToken);
         if (listing is null)
         {

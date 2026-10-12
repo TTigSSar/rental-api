@@ -57,4 +57,19 @@ public sealed class FakeUserAuthStore : IUserAuthStore
         _pendingAdds.Clear();
         return Task.CompletedTask;
     }
+
+    // Set to simulate the unique index on (ExternalAuthProvider, ExternalProviderId) rejecting a link.
+    public bool FailNextTrySaveWithUniqueViolation { get; set; }
+
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (FailNextTrySaveWithUniqueViolation)
+        {
+            FailNextTrySaveWithUniqueViolation = false;
+            return false;
+        }
+
+        await SaveChangesAsync(cancellationToken);
+        return true;
+    }
 }

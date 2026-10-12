@@ -47,6 +47,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
         services.AddScoped<IExternalIdentityTokenValidator, ExternalIdentityTokenValidator>();
+        services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();
+        // Singleton on purpose: the nonce store is process-wide state (ADR-030 section 2). The
+        // validator that consumes it is Scoped.
+        services.AddSingleton<ExternalAuthNonceStore>();
+        services.AddScoped<IExternalNonceService, ExternalNonceService>();
+        services.AddHostedService<ExternalAuthNonceSweepService>();
+        services.AddHostedService<ExternalAuthConfigurationStartupCheck>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

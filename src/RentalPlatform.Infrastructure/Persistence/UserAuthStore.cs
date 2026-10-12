@@ -35,4 +35,19 @@ public sealed class UserAuthStore : IUserAuthStore
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (EmailVerificationStore.IsUniqueViolation(exception))
+        {
+            // The rejected values must not linger in the tracker and be re-sent by a later save.
+            _dbContext.ChangeTracker.Clear();
+            return false;
+        }
+    }
 }

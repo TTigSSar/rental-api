@@ -927,7 +927,7 @@ public sealed class EmailVerificationFlowTests
         public Task<RotateTokenOutcome> TryRotateTokenAsync(UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default) => _inner.TryRotateTokenAsync(token, now, limits, cancellationToken);
         public Task<VerificationTokenView?> FindTokenAsync(byte[] tokenHash, TokenPurpose purpose, CancellationToken cancellationToken = default) => _inner.FindTokenAsync(tokenHash, purpose, cancellationToken);
         public Task<bool> TryCommitVerificationAsync(Guid tokenId, Guid userId, TokenPurpose purpose, string seenPasswordHash, DateTime now, CancellationToken cancellationToken = default) => _inner.TryCommitVerificationAsync(tokenId, userId, purpose, seenPasswordHash, now, cancellationToken);
-        public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, DateTime now, CancellationToken cancellationToken = default) => _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, now, cancellationToken);
+        public Task<bool> TryResetPendingForExternalAsync(Guid userId, ExternalUserInfo external, string firstName, string lastName, string? preferredLanguage, DateTime now, CancellationToken cancellationToken = default) => _inner.TryResetPendingForExternalAsync(userId, external, firstName, lastName, preferredLanguage, now, cancellationToken);
         public Task<int> DiscardHomePointIfAccountChangedAsync(Guid userId, string registrantPasswordHash, CancellationToken cancellationToken = default) => _inner.DiscardHomePointIfAccountChangedAsync(userId, registrantPasswordHash, cancellationToken);
     }
 
@@ -935,7 +935,7 @@ public sealed class EmailVerificationFlowTests
     public async Task A_Home_Point_Is_Not_Left_On_An_Account_An_External_Sign_In_Took_Over_Mid_Registration()
     {
         using var db = new SqliteTestDatabase();
-        await db.SeedAsync(Pending("hijack@example.org"));
+        await db.SeedAsync(Pending("hijack@gmail.com"));
         await using var context = db.CreateContext();
         var (latitude, longitude) = TestData.KentronPoint;
 
@@ -943,16 +943,16 @@ public sealed class EmailVerificationFlowTests
         // before the registrant home point is written.
         await using var externalContext = db.CreateContext();
         var external = new AuthHarness(externalContext);
-        external.External.Result = Google("hijack@example.org");
+        external.External.Result = Google("hijack@gmail.com");
         var h = new AuthHarness(
             context,
             decorateStore: inner => new ResetAfterReplaceStore(inner, async () =>
                 Assert.True((await external.Auth.ExternalAsync(AnyExternalRequest)).IsSuccess)));
         h.Clock.Advance(TimeSpan.FromMinutes(5));
 
-        await h.Auth.RegisterAsync(AuthHarness.Register("hijack@example.org", latitude: latitude, longitude: longitude));
+        await h.Auth.RegisterAsync(AuthHarness.Register("hijack@gmail.com", latitude: latitude, longitude: longitude));
 
-        var user = await UserAsync(db, "hijack@example.org");
+        var user = await UserAsync(db, "hijack@gmail.com");
         Assert.True(user.IsEmailConfirmed);
         Assert.Equal("google", user.ExternalAuthProvider);
         Assert.Null(user.HomeLatitude);
@@ -1065,16 +1065,16 @@ public sealed class EmailVerificationFlowTests
         var h = new AuthHarness(context);
         var (latitude, longitude) = TestData.KentronPoint;
         await h.Auth.RegisterAsync(AuthHarness.Register(
-            "squatted@example.org", "AttackerPassword1", firstName: "Squatter", phone: "+374 99 000111",
+            "squatted@gmail.com", "AttackerPassword1", firstName: "Squatter", phone: "+374 99 000111",
             latitude: latitude, longitude: longitude));
         h.Clock.Advance(TimeSpan.FromMinutes(5));
-        // An unrelated domain: pending accounts are replaced by any provider-verified proof of the mailbox.
-        h.External.Result = Google("squatted@example.org");
+        // gmail.com: only an authoritative email replaces a pending registration (ADR-030 section 4).
+        h.External.Result = Google("squatted@gmail.com");
 
         var result = await h.Auth.ExternalAsync(AnyExternalRequest);
 
         Assert.True(result.IsSuccess);
-        var user = await UserAsync(db, "squatted@example.org");
+        var user = await UserAsync(db, "squatted@gmail.com");
         Assert.True(user.IsEmailConfirmed);
         Assert.Equal(h.Clock.GetUtcNow().UtcDateTime, user.EmailConfirmedAt);
         Assert.Equal(string.Empty, user.PasswordHash);
@@ -1087,11 +1087,11 @@ public sealed class EmailVerificationFlowTests
         Assert.All(await TokensAsync(db, user.Id), token => Assert.NotNull(token.ConsumedAt));
 
         // The squatter's password no longer logs in, and their emailed link is dead.
-        var login = await h.Auth.LoginAsync(new LoginRequest { Email = "squatted@example.org", Password = "AttackerPassword1" });
+        var login = await h.Auth.LoginAsync(new LoginRequest { Email = "squatted@gmail.com", Password = "AttackerPassword1" });
         Assert.Equal("auth.invalid_credentials", login.Error!.Code);
         var link = await h.Auth.VerifyEmailAsync(new VerifyEmailRequest
         {
-            Token = h.Sender.LastTokenFor("squatted@example.org")!,
+            Token = h.Sender.LastTokenFor("squatted@gmail.com")!,
             Password = "AttackerPassword1"
         });
         Assert.False(link.IsSuccess);

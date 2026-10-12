@@ -1820,8 +1820,12 @@ docker compose -f docker-compose.production.yml exec -T -e SQLCMDPASSWORD db \
 отказ, значение не изменилось; `RentalPlatformDb_rehearsal` — 1 строка.
 
 ```bash
-ex "USE [$DB]; IF DB_NAME() = N'RentalPlatformDb' OR DB_NAME() NOT LIKE N'%[_]rehearsal' THROW 50000, N'rehearsal only: refusing to modify this database', 1; UPDATE dbo.Users SET IsEmailConfirmed = 0 WHERE Id IN (SELECT TOP (1) OwnerId FROM dbo.Listings);"
+ex "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; USE [$DB]; IF DB_NAME() = N'RentalPlatformDb' OR DB_NAME() NOT LIKE N'%[_]rehearsal' THROW 50000, N'rehearsal only: refusing to modify this database', 1; UPDATE dbo.Users SET IsEmailConfirmed = 0 WHERE Id IN (SELECT TOP (1) OwnerId FROM dbo.Listings);"
 # ожидается: (1 rows affected). "Msg 50000 ... rehearsal only" — $DB указывает не туда, СТОП
+# Префикс SET обязателен (предупреждение в «Репетиция миграций…»): у dbo.Users есть
+# фильтрованный индекс, и без него UPDATE падает с Msg 1934 'QUOTED_IDENTIFIER' —
+# так и случилось на живом прогоне 2026-10-10 (строка не изменилась, 4c пришлось
+# повторить на заново восстановленной копии).
 # затем тот же вызов sqlcmd со скриптом, два раза подряд
 # ожидается: 1-й прогон before=1, marked verified=1; 2-й прогон before=0, marked verified=0
 ```

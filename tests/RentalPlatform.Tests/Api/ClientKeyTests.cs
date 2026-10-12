@@ -37,6 +37,30 @@ public sealed class ClientKeyTests
         Assert.Equal("2001:db8:1:2::/64", Key("2001:db8:1:2:aaaa:bbbb:cccc:dddd"));
     }
 
+    private static string Key48(string ip) => RateLimiterExtensions.ResolveClientKey48(IPAddress.Parse(ip));
+
+    // The two Google sign-in policies key IPv6 on the /48 (ADR-030 section 7): one /48 holds 65 536
+    // /64s, enough to fill the nonce store within minutes if each had its own budget.
+    [Fact]
+    public void Key48_IPv6_SameSlash48_SameKey_DifferentSlash48_DifferentKey()
+    {
+        Assert.Equal("2001:db8:1::/48", Key48("2001:db8:1:2:aaaa:bbbb:cccc:dddd"));
+        Assert.Equal(Key48("2001:db8:1:2::1"), Key48("2001:db8:1:ffff:ffff::1")); // different /64, same /48
+        Assert.NotEqual(Key48("2001:db8:1:2::1"), Key48("2001:db8:2:2::1"));
+    }
+
+    [Fact]
+    public void Key48_IPv4_And_Mapped_IPv4_And_Null_Are_Unchanged()
+    {
+        Assert.Equal("203.0.113.9", Key48("203.0.113.9"));
+        Assert.Equal("172.18.0.3", Key48("::ffff:172.18.0.3"));
+        Assert.Equal("unknown", RateLimiterExtensions.ResolveClientKey48((IPAddress?)null));
+    }
+
+    [Fact]
+    public void The_Slash64_Key_Used_By_Other_Policies_Is_Not_Affected_By_The_Slash48_Variant() =>
+        Assert.Equal("2001:db8:1:2::/64", Key("2001:db8:1:2:aaaa:bbbb:cccc:dddd"));
+
     [Fact]
     public void IPv6_DifferentSlash64_DifferentKey() =>
         Assert.NotEqual(Key("2001:db8:1:2::1"), Key("2001:db8:1:3::1"));

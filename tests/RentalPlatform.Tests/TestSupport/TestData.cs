@@ -12,6 +12,8 @@ public static class TestData
 {
     public static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.UtcNow);
 
+    public const string DefaultPhone = "+374 99 000000";
+
     public static User User(
         Guid id,
         string email,
@@ -33,9 +35,14 @@ public static class TestData
         string? preferredLanguage = "en",
         // Verified by default: the hard email gate (ADR-028) would otherwise make every test that
         // logs in or acts as this user fail for a reason it is not about.
-        bool isEmailConfirmed = true) => new()
+        bool isEmailConfirmed = true,
+        // Has a phone by default: creating a listing or a booking without one is refused with 409
+        // *.phone_required (ADR-030 section 8), which would otherwise fail every test that is not
+        // about that gate. A test of the gate passes phoneNumber: null.
+        string? phoneNumber = DefaultPhone) => new()
     {
         Id = id,
+        PhoneNumber = phoneNumber,
         Email = email,
         PasswordHash = passwordHash ?? "x",
         FirstName = firstName ?? "Test",
@@ -91,7 +98,8 @@ public static class TestData
         (decimal Latitude, decimal Longitude)? point = null,
         Guid? homeDistrictId = null,
         bool isBlocked = false,
-        string? preferredLanguage = "en")
+        string? preferredLanguage = "en",
+        string? phoneNumber = DefaultPhone)
     {
         var resolved = point ?? KentronPoint;
         var (latitude, longitude) = resolved;
@@ -106,7 +114,8 @@ public static class TestData
             homePublicLatitude: publicLatitude,
             homePublicLongitude: publicLongitude,
             homeDistrictId: homeDistrictId ?? DistrictIdFor(resolved),
-            preferredLanguage: preferredLanguage);
+            preferredLanguage: preferredLanguage,
+            phoneNumber: phoneNumber);
     }
 
     // Only the points this file declares are known here; anything else is treated as

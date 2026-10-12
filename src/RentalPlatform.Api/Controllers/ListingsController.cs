@@ -83,6 +83,7 @@ public sealed class ListingsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CreateListingResponse>> Create(
         [FromBody] CreateListingRequest request,
         CancellationToken cancellationToken)
@@ -352,6 +353,8 @@ public sealed class ListingsController : ControllerBase
             // 409, not 400: the request itself is well-formed and nothing about it can be fixed by
             // editing the form — the owner has to go and set a home point first (home-point model).
             "listing.home_point_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            // Same reasoning: the owner has to add a phone (PUT /api/auth/me/phone) and then retry.
+            "listing.phone_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "listing.image_empty" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "listing.image_invalid_type" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "listing.image_too_many" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),

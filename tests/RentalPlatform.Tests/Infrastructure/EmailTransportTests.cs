@@ -524,7 +524,9 @@ public sealed class AppleIdentityTokenValidationTests
                 Apple = new AppleExternalAuthOptions { Issuer = Issuer, JwksUrl = "https://appleid.apple.com/auth/keys", ValidAudiences = new[] { Audience } }
             }),
             new StubHttpClientFactory(handler),
-            TimeProvider.System);
+            TimeProvider.System,
+            new RentalPlatform.Infrastructure.Services.GoogleIdTokenVerifier(),
+            new ExternalAuthNonceStore(Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalAuthNonceStore>.Instance));
     }
 
     private static async Task<string?> EmailFor(Action<List<Claim>> claims)

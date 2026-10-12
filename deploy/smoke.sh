@@ -4,11 +4,13 @@
 #
 #   smoke.sh    run all checks, print one PASS/WARN/FAIL line per check + summary
 #
-# READ-ONLY by design: this script never mutates production state (no writes, no
-# restarts, no docker exec into service workloads). Safe to run at any time, as
-# often as needed, from any cwd — it resolves the compose project directory from
-# its own location (script at <repo>/deploy/, compose file at <repo>/), same as
-# backup-production.sh.
+# READ-ONLY by design: this script never mutates persistent production state (no DB or
+# file writes, no restarts, no docker exec into service workloads). One stated exception,
+# ephemeral by construction: check google-nonce asks the api to issue ONE Google sign-in
+# nonce — an in-memory entry that expires on its own after 5 minutes (see the check). Safe
+# to run at any time, as often as needed (well under the 30/min nonce rate limit), from any
+# cwd — it resolves the compose project directory from its own location (script at
+# <repo>/deploy/, compose file at <repo>/), same as backup-production.sh.
 #
 # Secret hygiene: the only values this script ever reads out of .env are the two
 # Cloudflare Access service-token keys it needs to authenticate its own public-domain
@@ -576,6 +578,72 @@ check_email_gate() {
     fi
 }
 
+# Google sign-in (ADR-030 section 7). Same silent-failure class as email-gate: with no
+# GOOGLE_CLIENT_ID the api does NOT crash (M-016) and every other check stays green, while
+# Google sign-in answers 503 auth.external_provider_unavailable and the SPA quietly hides the
+# button. Unlike email-gate this check makes a REQUEST, because the nonce endpoint is the
+# cheapest exact probe of the very thing the browser does first: one anonymous
+# POST /api/auth/external/nonce through the ui container's nginx (so the /api/ proxy route is
+# exercised for a POST as well).
+#
+# This is the ONE request in this script that is not a pure read, stated honestly: it makes
+# the api issue a nonce, i.e. adds one entry to the in-memory ExternalAuthNonceStore
+# (capacity 50 000, expires by itself after 5 min, no DB write, nothing persisted) and spends
+# one token of the external-auth-nonce rate limit (30/min per client IP; loopback requests
+# carry no CF-Connecting-IP, so they share the nginx container's bucket, which no public user
+# is in). The nonce value is never printed. This is a liveness/configuration check, NOT a
+# data invariant — ADR-010 is not involved.
+#
+# What it CANNOT see: whether https://dorent.am is in the client's Authorized JavaScript
+# origins in Google Cloud Console. Google enforces that in the browser popup only; the server
+# never hears about it. That stays a manual post-deploy check (DEPLOY-PRODUCTION.md, Google
+# sign-in release).
+GOOGLE_GATE_MARKER='Google sign-in is NOT operational in Production'
+check_google_nonce() {
+    local url="${UI_BASE}/api/auth/external/nonce"
+    local out code body cid started sample=""
+    # ONE request (code and body together): a second request would issue a second nonce.
+    out="$(curl -s --max-time "${CURL_TIMEOUT_LOCAL}" -X POST --data '' -w '\n%{http_code}' "${url}" 2>/dev/null || true)"
+    code="${out##*$'\n'}"
+    body="${out%$'\n'*}"
+    [[ "${code}" =~ ^[0-9]{3}$ ]] || code="000"
+    [[ "${out}" == *$'\n'* ]] || body=""
+
+    if [[ "${code}" == "200" && "${body}" =~ \"nonce\"[[:space:]]*:[[:space:]]*\"[A-Za-z0-9_-]{20,}\" ]]; then
+        report_pass "google-nonce" "POST ${url} -> 200 with a nonce (Google sign-in configured server-side; Authorized JavaScript origins are a manual check)"
+        return
+    fi
+
+    case "${code}" in
+        200)
+            report_fail "google-nonce" "POST ${url} -> 200 but no \"nonce\" string in the body (unexpected response shape — ExternalNonceResponse changed?)"
+            ;;
+        503)
+            # Name the cause from the CURRENT api process's own startup line, as email-gate does.
+            cid="$("${COMPOSE[@]}" ps -q api 2>/dev/null || true)"
+            if [[ -n "${cid}" ]]; then
+                started="$(docker inspect -f '{{.State.StartedAt}}' "${cid}" 2>/dev/null || true)"
+                if [[ -n "${started}" ]] && docker logs --since "${started}" "${cid}" 2>&1 | grep -qF "${GOOGLE_GATE_MARKER}"; then
+                    sample=" — api startup logged '${GOOGLE_GATE_MARKER}'"
+                fi
+            fi
+            report_fail "google-nonce" "POST ${url} -> 503 auth.external_provider_unavailable: Google sign-in is OFF${sample}. Usual cause: GOOGLE_CLIENT_ID missing/empty in ${ENV_FILE} (set it, then 'up -d api'); otherwise the nonce store is full (Critical 'nonce store is full' in the api log). Also confirm https://dorent.am is in the client's Authorized JavaScript origins (DEPLOY-PRODUCTION.md, Google sign-in release)"
+            ;;
+        404)
+            report_fail "google-nonce" "POST ${url} -> 404: the running api image predates Google sign-in (ADR-030) or the /api/ proxy lost the route"
+            ;;
+        405)
+            report_fail "google-nonce" "POST ${url} -> 405: the SPA fallback answered the POST — nginx lost the /api/ location (regression class M-008)"
+            ;;
+        429)
+            report_fail "google-nonce" "POST ${url} -> 429: the external-auth-nonce rate limit (30/min) is exhausted for loopback requests — something on this host is hammering the endpoint; re-run in a minute and investigate"
+            ;;
+        *)
+            report_fail "google-nonce" "POST ${url} -> ${code} (expected 200 + nonce; 000 = nothing answered, 5xx = api/proxy broken)"
+            ;;
+    esac
+}
+
 # --- WARNING checks ------------------------------------------------------------------
 
 # Recent critical errors in the api container's logs. Pattern targets ASP.NET
@@ -721,6 +789,7 @@ main() {
     check_uploads_routing
     check_websocket_negotiate
     check_email_gate
+    check_google_nonce
 
     # WARNING tier (disk can escalate itself to FAIL at >=90%)
     check_api_logs

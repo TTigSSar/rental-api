@@ -117,6 +117,14 @@ services:
       # Base of the verification link ({base}/auth/verify-email#token=...). Taken only from
       # config, never from the request Host. Must be https in Production (gate above).
       App__PublicBaseUrl: ${APP_PUBLIC_BASE_URL:-https://dorent.am}
+      # Google sign-in (ADR-030 section 7). The PUBLIC OAuth client id, not a secret; it lives
+      # in the server's .env like the rest of the config. Empty default on purpose (M-016):
+      # an unset or empty GOOGLE_CLIENT_ID never crashes the api. Production then logs ONE
+      # Critical line at startup ("Google sign-in is NOT operational in Production: ...") and
+      # POST /api/auth/external and /api/auth/external/nonce answer 503
+      # auth.external_provider_unavailable; the SPA hides the Google button, password sign-in
+      # keeps working. smoke.sh (check google-nonce) fails in that state.
+      ExternalAuth__Google__ValidAudiences__0: "${GOOGLE_CLIENT_ID:-}"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat

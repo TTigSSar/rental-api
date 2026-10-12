@@ -839,8 +839,11 @@ dbo.Users COUNT(*) = <N>` — и `N` должно быть правдоподо�
 и по петле `127.0.0.1`, и **через публичные домены**, потому что край Cloudflare
 эти маршруты видит иначе, чем nginx (см. «Публичные проверки и Cloudflare
 Access» ниже), плюс предупреждающие проверки: ошибки в логах API, диск, своп, бэкапы,
-права на `.env`. Скрипт **только читает** — ничего в стенде не меняет,
-секретов не печатает, запускать можно в любой момент и из любого каталога.
+права на `.env`. Скрипт **только читает** — ничего постоянного в стенде не
+меняет, секретов не печатает, запускать можно в любой момент и из любого
+каталога. Одно оговорённое исключение — `google-nonce` (ниже): он просит API
+выдать один nonce, а это запись в памяти процесса, которая сама истекает через
+5 минут; база и файлы не затрагиваются.
 
 Особняком стоит `geo-map-pins`: это единственная проверка, которая смотрит не
 «отвечает ли компонент», а **на сами данные**. Гео-поверхность умеет ломаться
@@ -865,6 +868,25 @@ Access» ниже), плюс предупреждающие проверки: о
 `docker logs`, без запросов к API. На образах до релиза email-верификации
 строки нет никогда — проверка проходит. С ней проверок на одну больше:
 в полном зелёном прогоне от `dorent` — `pass=21 warn=0`.
+
+Третье «молчаливое» место — `google-nonce` (обязательная, с релиза Google
+sign-in, ADR-030). Без `GOOGLE_CLIENT_ID` в `.env` API тоже не падает (M-016):
+пишет при старте одну строку `crit:` `Google sign-in is NOT operational in
+Production: ...`, а `/api/auth/external` и `/api/auth/external/nonce` отвечают
+503 `auth.external_provider_unavailable`; SPA прячет кнопку Google, вход по
+паролю работает. Проверка делает **один** анонимный `POST
+http://127.0.0.1:4200/api/auth/external/nonce` (через nginx контейнера `ui`) и
+ждёт 200 с полем `nonce`; значение nonce не печатается. Цена: одна запись в
+памяти `ExternalAuthNonceStore` (сама истекает через 5 мин) и один токен
+лимита `external-auth-nonce` (30/мин на IP; у запросов по петле нет
+`CF-Connecting-IP`, поэтому у них своё ведро — адрес контейнера nginx, —
+публичные пользователи в него не попадают). 503 → FAIL с именем
+`GOOGLE_CLIENT_ID`; 404 → образ `api` старше ADR-030. Чего проверка **не
+видит**: есть ли `https://dorent.am` в Authorized JavaScript origins клиента в
+Google Cloud Console — это Google проверяет только в popup браузера, сервер об
+этом не узнаёт; остаётся ручной проверкой после деплоя. Это проверка
+конфигурации, а не инвариант данных — ADR-010 тут ни при чём. С ней полный
+зелёный прогон от `dorent` — `pass=22 warn=0`.
 
 **Правило рабочего процесса: деплой не считается завершённым, пока
 `smoke.sh` не отработал без `FAIL`.** Запускать после каждого обновления
@@ -1953,3 +1975,162 @@ unset SQLCMDPASSWORD
 
 Оставшиеся `still unverified` — обычные ожидающие регистрации без данных: они
 подтверждаются штатно, по ссылке или повторной отправке письма.
+
+## Релиз: Google sign-in v1 (ADR-030)
+
+**Что меняется.**
+
+- **Образ `api`**: вход через Google с серверным одноразовым nonce
+  (`POST /api/auth/external/nonce`, лимит 30/мин на IP; `POST
+  /api/auth/external`, 10/мин), новые `PUT /api/auth/me/name` и `PUT
+  /api/auth/me/phone`, требование телефона при первом объявлении и первой
+  брони (409 `listing.phone_required` / `booking.phone_required`), отказ
+  заблокированным пользователям на путях записи (ADR-030 §11) и в отзывах.
+- **Образ `ui`**: блок Google в окне входа/регистрации, обязательный шаг
+  «как вас называть», шаг «добавьте телефон», карточка «Личные данные» в
+  профиле. `clientId` уже зашит в сборку (`environment.prod.ts`).
+- **Миграций EF нет** — схема не меняется, репетиция ADR-023 не нужна.
+  Проверено 2026-10-12: между развёрнутым `ea0fb02` и `main` нет ни одного
+  файла в `Migrations/` (включая `ModelSnapshot`), сущности и EF-конфигурации
+  не менялись.
+- **`docker-compose.production.yml`**: в `environment` сервиса `api` один
+  новый ключ `ExternalAuth__Google__ValidAudiences__0: "${GOOGLE_CLIENT_ID:-}"`.
+  Больше ничего: **ни `networks`/`ipam`, ни томов, ни сервиса `db`**.
+- **`.env`**: новый ключ `GOOGLE_CLIENT_ID` — **публичный** OAuth client id
+  (не секрет, тот же, что в бандле SPA).
+- **nginx/Cloudflare/DNS/туннель** — без изменений. Заголовков CSP/COOP ни
+  nginx, ни Cloudflare не ставят (проверено 2026-10-12), так что popup GIS
+  ничто не блокирует.
+
+**Risk: MEDIUM** — изменение окружения `api` (без миграции). `up -d`
+пересоздаёт только `api` (образ + окружение) и `ui` (образ); `db` и
+`cloudflared` остаются Running. Сеть не меняется — сценарий M-055 не должен
+возникнуть, но проверка алиаса `db` после `up -d` всё равно обязательна.
+
+**Простой.** Пересоздание `api` (холодный старт, без миграции) и `ui`:
+прошлые релизы — 13–18 с; верхняя граница по healthcheck-у `api`
+(`start_period` 180 с) — около 3–5 минут. Сборка в простой не входит.
+
+### Предусловия — делает Тигран, ДО деплоя
+
+1. **PR с этим изменением compose/smoke смёржен в `main`** (сервер стоит на
+   `main` и подтягивает только его).
+2. **`GOOGLE_CLIENT_ID` вписан в `/opt/dorent/rental-api/.env`** (файл
+   рядом с compose, права 600 — не `/opt/dorent/.env`):
+   `GOOGLE_CLIENT_ID=6707214612-40dcffqfdopo4h12l9bg69h9gqp7oupt.apps.googleusercontent.com`.
+   Без него деплой не ломает сайт, но Google-вход выключен (503, кнопки нет),
+   и `smoke.sh` честно даёт `FAIL google-nonce`.
+3. **`https://dorent.am` есть в Authorized JavaScript origins** этого клиента
+   (Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client
+   IDs → Web client). Сервер этого не видит: при ошибке кнопка рисуется, а
+   popup Google отвечает `origin_mismatch`. Если вход планируется и через
+   `www.dorent.am` — добавить и его.
+
+**Проверка предусловий агентом** (значение не секрет, но печатается только
+через `compose config`):
+
+```bash
+cd /opt/dorent/rental-api
+stat -c '%a' .env                                       # ожидается: 600
+grep -cE '^GOOGLE_CLIENT_ID=.+' .env                    # ожидается: 1
+# после git pull — как compose отрисует ключ:
+docker compose -f docker-compose.production.yml config | grep -E '^\s+ExternalAuth__'
+# ожидается: ExternalAuth__Google__ValidAudiences__0: 6707214612-40dcffqfdopo4h12l9bg69h9gqp7oupt.apps.googleusercontent.com
+# "" = ключа нет = СТОП (или осознанный выкат с выключенным Google)
+```
+
+### Последовательность
+
+```bash
+cd /opt/dorent/rental-api
+
+# 0) ДО build пометить текущие образы — быстрый откат без пересборки
+docker tag rental-api-api:latest rental-api-api:pre-google-signin
+docker tag rental-api-ui:latest  rental-api-ui:pre-google-signin
+
+# 1) код (оба репозитория, ветка main) и проверка дельты
+PRE_API=$(git rev-parse --short HEAD); PRE_UI=$(git -C ../Rental-Ui rev-parse --short HEAD)
+git pull --ff-only && git -C ../Rental-Ui pull --ff-only
+git diff --name-only "$PRE_API"..HEAD | grep -i migrat     # ожидается: пусто. Непусто — СТОП (ADR-023)
+git diff "$PRE_API"..HEAD -- docker-compose.production.yml | grep -E '^[+-][^+-]' | grep -vE '^\+\s+#'
+# ожидается ровно одна строка: +      ExternalAuth__Google__ValidAudiences__0: "${GOOGLE_CLIENT_ID:-}"
+git -C ../Rental-Ui diff --stat "$PRE_UI"..HEAD -- nginx.conf Dockerfile   # ожидается: пусто
+
+# 2) бэкап + --verify. Миграции нет, так что формально не обязателен (ночной
+#    03:30 есть), но дёшев (~1 мин) и даёт точку отката данных на момент релиза
+./deploy/backup-production.sh
+./deploy/backup-production.sh --verify       # ожидается: VERIFY PASS ...
+
+# 3) сборка — по одному образу (2 ГБ RAM)
+docker compose -f docker-compose.production.yml build api
+docker compose -f docker-compose.production.yml build ui
+
+# 4) production
+docker compose -f docker-compose.production.yml up -d
+# ожидается: Recreate api, Recreate ui; db и cloudflared — Running (не Recreate)
+
+# 5) алиас db — проверка, а не предположение (M-055)
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]
+
+# 6) лог старта: ни миграций, ни гейтов
+docker compose -f docker-compose.production.yml logs --no-color api </dev/null \
+  | grep -E "Applying migration|NOT operational in Production|Application started"
+# ожидается: только "Application started". "Google sign-in is NOT operational" = нет GOOGLE_CLIENT_ID
+
+# 7) smoke — включает google-nonce (раздел j)
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
+# ожидается: PASS google-nonce ... ; checks: pass=22 warn=0 fail=0; overall: PASS
+```
+
+### Smoke: ручная часть
+
+Сверх `smoke.sh` — его зелёный прогон не доказывает, что Google пустит
+пользователя:
+
+1. **Кнопка Google на `https://dorent.am`** в окне входа (вкладка «Вход» и
+   шаг 1 «Регистрации») на **en, ru и hy** — надпись кнопки на языке
+   интерфейса (после переключения языка тоже, ADR-030 §9).
+2. **Реальный вход через Google — Тигран**, в обычном браузере (не во
+   встроенном WebView): popup открывается без `origin_mismatch`, вход
+   выполнен. Если у аккаунта Google нет имени — появляется шаг «как вас
+   называть».
+3. **Вход по паролю** у существующего аккаунта по-прежнему работает.
+4. Создание объявления / брони пользователем без телефона показывает шаг
+   «добавьте телефон» (по желанию — тестовым аккаунтом).
+
+Затем — строка в `/opt/dorent/deployment-notes/deploys.log`.
+
+### Откат
+
+**Код — оба образа сразу И окружение `api`.** Старый код (`ea0fb02`) с
+настоящим client id в `ExternalAuth__Google__ValidAudiences__0` **начал бы
+принимать** Google-токены на `POST /api/auth/external` — без nonce, без
+лимита, с 500 на гонке: ровно то, что ADR-030 закрывал. Поэтому при откате
+ключ из окружения убирается вместе с образами — возвратом прежнего compose:
+
+```bash
+cd /opt/dorent/rental-api
+docker tag rental-api-api:pre-google-signin rental-api-api:latest
+docker tag rental-api-ui:pre-google-signin  rental-api-ui:latest
+git checkout <PRE_API> -- docker-compose.production.yml   # без ключа ExternalAuth__*
+docker compose -f docker-compose.production.yml config | grep -cE '^\s+ExternalAuth__'   # ожидается: 0
+docker compose -f docker-compose.production.yml up -d     # БЕЗ down -v, никогда
+docker inspect -f '{{(index .NetworkSettings.Networks "rental-api_default").Aliases}}' \
+  "$(docker compose -f docker-compose.production.yml ps -q db </dev/null)"
+# ожидается: [rental-api-db-1 db]
+sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
+# google-nonce на старом образе даст FAIL 404 — это ожидаемо после отката, остальное PASS
+```
+
+Рабочее дерево после этого расходится с `HEAD` по одному файлу — это и есть
+откат; вернуть `git checkout HEAD -- docker-compose.production.yml`, когда
+исправление пройдёт через PR. До этого не пересобирать: сборка с текущего
+дерева вернула бы новый код. `GOOGLE_CLIENT_ID` в `.env` можно оставить —
+прежний compose его не читает.
+
+**Схема.** Отката нет и не нужно: миграций в релизе нет. Данные, записанные
+новым кодом (пользователи с `ExternalAuthProvider = google`, имена, телефоны),
+старый код читает — колонки те же. Восстановление `.bak` — только при порче
+данных, и это потеря всего, что записано после бэкапа шага 2.

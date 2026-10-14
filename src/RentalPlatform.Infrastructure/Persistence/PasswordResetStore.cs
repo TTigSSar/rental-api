@@ -18,7 +18,7 @@ public sealed class PasswordResetStore : IPasswordResetStore
     }
 
     public async Task<IssueResetTokenOutcome> TryIssueAsync(
-        UserToken token, DateTime now, TokenLimits limits, CancellationToken cancellationToken = default)
+        UserToken token, DateTime now, TokenLimits limits, Func<bool> reserveSend, CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -59,6 +59,15 @@ public sealed class PasswordResetStore : IPasswordResetStore
 
             _dbContext.UserTokens.Add(token);
             await _dbContext.SaveChangesAsync(cancellationToken);
+
+            // Reached only when the issue is certain to succeed, so a refusal never costs budget. If the
+            // budget ran out since the caller's check, roll back: the previous link keeps working.
+            if (!reserveSend())
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _dbContext.Entry(token).State = EntityState.Detached;
+                return IssueResetTokenOutcome.BudgetExhausted;
+            }
 
             await transaction.CommitAsync(cancellationToken);
             return IssueResetTokenOutcome.Issued;

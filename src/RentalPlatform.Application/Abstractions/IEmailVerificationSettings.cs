@@ -27,4 +27,11 @@ public interface IEmailSendBudget
 {
     /// <summary>Reserves one send. False when the window is exhausted (a Critical log is written).</summary>
     bool TryAcquire();
+
+    /// <summary>
+    /// True while at least one send is left. Reserves nothing; writes the same Critical log when the
+    /// window is exhausted. Used by password reset to answer 503 before touching any account
+    /// (ADR-035 §7 amendment 2026-10-14).
+    /// </summary>
+    bool HasCapacity();
 }

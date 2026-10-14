@@ -2,8 +2,9 @@ using System.ComponentModel.DataAnnotations;
 
 namespace RentalPlatform.Application.DTOs;
 
-// ADR-035. No [EmailAddress]/[Required] on purpose: a malformed or empty address must answer the same
-// 202 as an unknown one, so the shape of the input can never tell a caller anything.
+// ADR-035. No [EmailAddress]/[Required] on purpose: a malformed or empty address of ordinary length
+// answers the same 202 as an unknown one. Over-length input (email > 320, preferredLanguage > 16) is a
+// model-validation 400; that depends on the shape of the input only, never on whether an account exists.
 public sealed class ForgotPasswordRequest
 {
     [MaxLength(320)]

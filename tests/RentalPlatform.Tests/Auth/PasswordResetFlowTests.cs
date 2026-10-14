@@ -236,18 +236,142 @@ public sealed class PasswordResetFlowTests
     }
 
     [Fact]
-    public async Task Forgot_With_An_Exhausted_Global_Budget_Is_Silent_And_Sends_Nothing()
+    public async Task Forgot_With_An_Exhausted_Global_Budget_Answers_503_For_Existing_And_Unknown_Emails_Alike()
     {
         using var db = new SqliteTestDatabase();
         await db.SeedAsync(Verified());
         await using var context = db.CreateContext();
         var h = new AuthHarness(context);
+        var liveToken = await IssueAsync(h);
+        h.Clock.Advance(TimeSpan.FromMinutes(5)); // past the cooldown: without the gate a new token would be issued
+        h.Sender.Clear();
         h.Budget.Remaining = 0;
+
+        var existing = await h.Auth.ForgotPasswordAsync(Forgot());
+        var unknown = await h.Auth.ForgotPasswordAsync(Forgot("nobody@test.local"));
+        var empty = await h.Auth.ForgotPasswordAsync(Forgot(""));
+
+        foreach (var result in new[] { existing, unknown, empty })
+        {
+            Assert.False(result.IsSuccess);
+            Assert.Equal("auth.password_reset_unavailable", result.Error!.Code);
+        }
+
+        Assert.Empty(h.Sender.Messages);
+
+        // No token issued and the previous live token NOT revoked.
+        var tokens = await TokensAsync(db);
+        var only = Assert.Single(tokens);
+        Assert.Null(only.ConsumedAt);
+        Assert.True((await h.Auth.CheckResetTokenAsync(new ResetPasswordCheckRequest { Token = liveToken })).IsSuccess);
+    }
+
+    [Fact]
+    public async Task A_Refused_Issue_Never_Consumes_Send_Budget()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Verified());
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        h.Budget.Remaining = 10;
+
+        await h.Auth.ForgotPasswordAsync(Forgot());
+        Assert.Equal(1, h.Budget.Acquired);
+
+        // Cooldown refusal (service pre-check) and a store-level refusal (cap) both leave the budget alone.
+        h.Clock.Advance(TimeSpan.FromSeconds(10));
+        await h.Auth.ForgotPasswordAsync(Forgot());
+        Assert.Equal(1, h.Budget.Acquired);
+
+        var now = h.Clock.GetUtcNow().UtcDateTime;
+        var limits = new RentalPlatform.Application.Abstractions.TokenLimits(now.AddSeconds(-60), now.AddHours(-24), 1);
+        var reserved = false;
+        var outcome = await h.PasswordResetStore.TryIssueAsync(
+            ResetToken("x", now), now, limits, () => reserved = true);
+        Assert.Equal(RentalPlatform.Application.Abstractions.IssueResetTokenOutcome.Refused, outcome);
+        Assert.False(reserved);
+        Assert.Equal(1, h.Budget.Acquired);
+    }
+
+    [Fact]
+    public async Task A_Budget_That_Runs_Out_After_The_Check_Rolls_The_Issue_Back_And_Answers_503()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Verified());
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        var previous = await IssueAsync(h);
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+        h.Sender.Clear();
+        h.Budget.DenyAcquire = true; // HasCapacity still true, the acquire fails: the race
 
         var result = await h.Auth.ForgotPasswordAsync(Forgot());
 
-        Assert.True(result.IsSuccess);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("auth.password_reset_unavailable", result.Error!.Code);
         Assert.Empty(h.Sender.Messages);
+
+        // Consistent: still exactly the previous, live token; its link still works.
+        var only = Assert.Single(await TokensAsync(db));
+        Assert.Null(only.ConsumedAt);
+        Assert.True((await h.Auth.CheckResetTokenAsync(new ResetPasswordCheckRequest { Token = previous })).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Verification_Register_And_Resend_Are_Unchanged_When_The_Budget_Is_Exhausted()
+    {
+        using var db = new SqliteTestDatabase();
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        h.Budget.Remaining = 0;
+
+        var register = await h.Auth.RegisterAsync(AuthHarness.Register("late@test.local"));
+
+        Assert.True(register.IsSuccess); // ADR-028 section 8: still a 201, just no email
+        Assert.Empty(h.Sender.Messages);
+    }
+
+    [Fact]
+    public async Task A_Reset_Cap_Hit_Logs_A_Warning_With_The_User_Id_And_Never_The_Address()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(Verified());
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        var logger = new CollectingLogger<RentalPlatform.Infrastructure.Services.EmailVerificationMonitor>();
+        var service = new RentalPlatform.Application.Services.PasswordResetService(
+            h.Store, h.PasswordResetStore, h.PasswordHasher,
+            new RentalPlatform.Infrastructure.Services.EmailService(h.Sender,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<RentalPlatform.Infrastructure.Services.EmailService>.Instance),
+            h.Settings, h.Budget, new RentalPlatform.Infrastructure.Services.EmailVerificationMonitor(logger), h.Clock);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await service.ForgotAsync(Email, null);
+            h.Clock.Advance(TimeSpan.FromSeconds(61));
+        }
+
+        Assert.Empty(logger.Entries);
+        var sixth = await service.ForgotAsync(Email, null);
+
+        Assert.True(sixth.IsSuccess); // still 202
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, entry.Level);
+        Assert.Contains(UserId.ToString(), entry.Text);
+        Assert.DoesNotContain(Email, entry.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class CollectingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Text)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     [Fact]

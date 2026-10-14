@@ -11,7 +11,8 @@ namespace RentalPlatform.Application.Services;
 // reuse IEmailVerificationStore (purpose-aware). This class owns the decisions around them: who may
 // receive a link, the cooldown, the per-recipient cap, the shared global send budget and the ordering
 // "write first, send after commit". Everything the outside can observe on forgot-password is a 202,
-// whatever happened (anti-enumeration, ADR-035 section 6).
+// whatever happened (anti-enumeration, ADR-035 section 6), except the two account-independent 503s:
+// email not configured, and the exhausted global send budget (section 7 amendment).
 public sealed class PasswordResetService : IPasswordResetService
 {
     public static class ErrorCodes
@@ -35,6 +36,7 @@ public sealed class PasswordResetService : IPasswordResetService
     private readonly IEmailService _emailService;
     private readonly IEmailVerificationSettings _settings;
     private readonly IEmailSendBudget _budget;
+    private readonly IEmailVerificationMonitor _monitor;
     private readonly TimeProvider _timeProvider;
 
     public PasswordResetService(
@@ -44,8 +46,10 @@ public sealed class PasswordResetService : IPasswordResetService
         IEmailService emailService,
         IEmailVerificationSettings settings,
         IEmailSendBudget budget,
+        IEmailVerificationMonitor monitor,
         TimeProvider timeProvider)
     {
+        _monitor = monitor;
         _reads = reads;
         _store = store;
         _passwordHasher = passwordHasher;
@@ -61,6 +65,14 @@ public sealed class PasswordResetService : IPasswordResetService
         // Same gate as register/resend (ADR-028 section 9, ADR-035 section 10): a 202 would promise a
         // link that cannot be sent. The 503 says nothing about the account, so section 6 holds.
         if (!_settings.IsOperational)
+        {
+            return Fail<bool>(ErrorCodes.Unavailable, "Password reset is temporarily unavailable. Please try again later.");
+        }
+
+        // Exhausted shared budget (ADR-035 section 7 amendment): the same 503, checked before any account
+        // lookup and for every request, so unknown and existing emails stay indistinguishable. Nothing is
+        // reserved here; the slot is taken inside the issue transaction.
+        if (!_budget.HasCapacity())
         {
             return Fail<bool>(ErrorCodes.Unavailable, "Password reset is temporarily unavailable. Please try again later.");
         }
@@ -91,21 +103,27 @@ public sealed class PasswordResetService : IPasswordResetService
         // Counted over reset tokens only: verification squatting must not lock the owner out (section 7).
         if (await _reads.CountTokensCreatedSinceAsync(state.Id, TokenPurpose.PasswordReset, now - SendCapWindow, cancellationToken) >= MaxTokensPerWindow)
         {
+            // Stays a silent 202 (section 7): an answer here would reveal the account. User id only.
+            _monitor.PasswordResetCapReached(state.Id);
             return ServiceResult<bool>.Success(true);
         }
 
         var (rawToken, token) = NewToken(state.Id, now);
         var limits = new TokenLimits(now - Cooldown, now - SendCapWindow, MaxTokensPerWindow);
-        if (await _store.TryIssueAsync(token, now, limits, cancellationToken) != IssueResetTokenOutcome.Issued)
+
+        // The global budget is shared with verification email (one provider quota). The slot is reserved
+        // by the store inside the issue transaction, after the insert succeeded: a refused issue never
+        // costs budget, and if the budget raced to zero since the check above everything rolls back.
+        var outcome = await _store.TryIssueAsync(token, now, limits, _budget.TryAcquire, cancellationToken);
+        if (outcome == IssueResetTokenOutcome.BudgetExhausted)
         {
-            // Cooldown seen late, cap reached by a concurrent writer, or the account changed state.
-            return ServiceResult<bool>.Success(true);
+            return Fail<bool>(ErrorCodes.Unavailable, "Password reset is temporarily unavailable. Please try again later.");
         }
 
-        // The global budget is shared with verification email (one provider quota). Exhausted: the
-        // budget writes the Critical log, the caller still gets 202.
-        if (!_budget.TryAcquire())
+        if (outcome != IssueResetTokenOutcome.Issued)
         {
+            // Cooldown seen late, cap reached by a concurrent writer, or the account changed state.
+            _monitor.PasswordResetRefused(state.Id);
             return ServiceResult<bool>.Success(true);
         }
 

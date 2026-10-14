@@ -256,13 +256,19 @@ public sealed class AuthService : IAuthService
         // Issued only after the commit, from a fresh read of the row (the store cleared the tracker),
         // exactly like verify-email.
         var user = await _userAuthStore.FindByIdAsync(reset.Value, cancellationToken);
-        if (user is null || user.IsBlocked)
+        if (user is null)
         {
             return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = PasswordResetService.ErrorCodes.TokenInvalid,
                 Message = "The password reset link is invalid."
             });
+        }
+
+        // Blocked between the commit and this read: the password is already changed, but no session is issued.
+        if (user.IsBlocked)
+        {
+            return ServiceResult<AuthResponse>.Failure(BlockedError());
         }
 
         return ServiceResult<AuthResponse>.Success(new AuthResponse

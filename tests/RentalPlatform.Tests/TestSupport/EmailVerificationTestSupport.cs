@@ -41,8 +41,18 @@ public sealed class FakeEmailSendBudget : IEmailSendBudget
 
     public int Acquired { get; private set; }
 
+    // Set to simulate the budget running out between the HasCapacity check and the acquire.
+    public bool DenyAcquire { get; set; }
+
+    public bool HasCapacity() => Remaining is not { } remaining || remaining > 0;
+
     public bool TryAcquire()
     {
+        if (DenyAcquire)
+        {
+            return false;
+        }
+
         if (Remaining is { } remaining)
         {
             if (remaining <= 0)
@@ -265,7 +275,7 @@ public sealed class AuthHarness
 
         PasswordResetStore = new RentalPlatform.Infrastructure.Persistence.PasswordResetStore(context);
         PasswordReset = new RentalPlatform.Application.Services.PasswordResetService(
-            verificationStore, PasswordResetStore, PasswordHasher, emailService, Settings, Budget, Clock);
+            verificationStore, PasswordResetStore, PasswordHasher, emailService, Settings, Budget, Monitor, Clock);
 
         Auth = new RentalPlatform.Application.Services.AuthService(
             authUserStore,
@@ -334,5 +344,12 @@ public sealed class FakeEmailVerificationMonitor : IEmailVerificationMonitor
 {
     public List<Guid> CapReached { get; } = new();
 
+    public List<Guid> ResetCapReached { get; } = new();
+    public List<Guid> ResetRefused { get; } = new();
+
     public void PerRecipientCapReached(Guid userId) => CapReached.Add(userId);
+
+    public void PasswordResetCapReached(Guid userId) => ResetCapReached.Add(userId);
+
+    public void PasswordResetRefused(Guid userId) => ResetRefused.Add(userId);
 }

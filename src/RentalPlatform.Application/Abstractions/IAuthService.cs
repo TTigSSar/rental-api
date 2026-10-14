@@ -9,6 +9,12 @@ public interface IAuthService
     Task<ServiceResult<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default);
     Task<ServiceResult<AuthResponse>> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken = default);
     Task<ServiceResult<bool>> ResendVerificationAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default);
+    /// <summary>ADR-035. 202 for everything except the closed production email gate.</summary>
+    Task<ServiceResult<bool>> ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken cancellationToken = default);
+    /// <summary>ADR-035. Read-only liveness check of a reset token.</summary>
+    Task<ServiceResult<bool>> CheckResetTokenAsync(ResetPasswordCheckRequest request, CancellationToken cancellationToken = default);
+    /// <summary>ADR-035. Sets the password and signs the user in.</summary>
+    Task<ServiceResult<AuthResponse>> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default);
     Task<ServiceResult<AuthResponse>> ExternalAsync(ExternalAuthRequest request, CancellationToken cancellationToken = default);
     Task<ServiceResult<CurrentUserResponse>> GetCurrentUserAsync(CancellationToken cancellationToken = default);
     Task<ServiceResult<CurrentUserResponse>> UpdatePreferredLanguageAsync(string? preferredLanguage, CancellationToken cancellationToken = default);

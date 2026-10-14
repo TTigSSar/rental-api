@@ -29,4 +29,13 @@ public sealed class FakeEmailService : IEmailService
         VerificationSent.Add((email, preferredLanguage, link));
         return Task.CompletedTask;
     }
+
+    public List<(string Email, string? Language, string Link)> PasswordResetSent { get; } = new();
+
+    public Task SendPasswordResetAsync(
+        string email, string? preferredLanguage, string link, CancellationToken cancellationToken = default)
+    {
+        PasswordResetSent.Add((email, preferredLanguage, link));
+        return Task.CompletedTask;
+    }
 }

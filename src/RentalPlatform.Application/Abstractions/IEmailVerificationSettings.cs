@@ -14,6 +14,9 @@ public interface IEmailVerificationSettings
 
     /// <summary>Builds <c>{App:PublicBaseUrl}/auth/verify-email#token=…</c>. Never derived from the request host.</summary>
     string BuildVerificationLink(string token);
+
+    /// <summary>Builds <c>{App:PublicBaseUrl}/auth/reset-password#token=…</c> (ADR-035 §1). Never derived from the request host.</summary>
+    string BuildPasswordResetLink(string token);
 }
 
 /// <summary>

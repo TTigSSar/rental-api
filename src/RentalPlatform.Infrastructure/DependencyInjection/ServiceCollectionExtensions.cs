@@ -63,6 +63,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<IEmailVerificationService, EmailVerificationService>();
         services.AddScoped<IEmailVerificationStore, EmailVerificationStore>();
+        services.AddScoped<IPasswordResetService, PasswordResetService>();
+        services.AddScoped<IPasswordResetStore, PasswordResetStore>();
 
         // Email transport (ADR-029). Options are plain strings and parsed tolerantly (M-016); the
         // sender is chosen per scope from Email:Provider (default: Log).

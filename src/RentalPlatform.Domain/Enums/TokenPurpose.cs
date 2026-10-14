@@ -4,5 +4,6 @@ namespace RentalPlatform.Domain.Enums;
 // (ADR-028 §11): a retired purpose keeps its number forever.
 public enum TokenPurpose
 {
-    EmailVerification = 1
+    EmailVerification = 1,
+    PasswordReset = 2
 }

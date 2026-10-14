@@ -107,6 +107,67 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    // ADR-035. Always 202 with no body, whether or not the address belongs to a verified account.
+    // The only other answers are 429 (rate limit) and 503 while the production email gate is closed.
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.PasswordResetPolicy)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult> ForgotPassword(
+        [FromBody] ForgotPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.ForgotPasswordAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return Accepted();
+        }
+
+        return FromError(result.Error);
+    }
+
+    // The reset page checks its link on load. Read-only: never consumes or revokes the token.
+    [HttpPost("reset-password/check")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.PasswordResetPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> CheckResetPassword(
+        [FromBody] ResetPasswordCheckRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.CheckResetTokenAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromError(result.Error);
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.PasswordResetPolicy)]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<AuthResponse>> ResetPassword(
+        [FromBody] ResetPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.ResetPasswordAsync(request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     // The single-use nonce the SPA passes to Google Identity Services (ADR-030 section 2). 503 when
     // Google is not configured or the nonce store is full.
     [HttpPost("external/nonce")]
@@ -322,6 +383,9 @@ public sealed class AuthController : ControllerBase
             "auth.verification_token_expired" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.email_already_verified" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "auth.registration_unavailable" => StatusCode(StatusCodes.Status503ServiceUnavailable, error.ToProblemDetails(StatusCodes.Status503ServiceUnavailable)),
+            "auth.password_reset_unavailable" => StatusCode(StatusCodes.Status503ServiceUnavailable, error.ToProblemDetails(StatusCodes.Status503ServiceUnavailable)),
+            "auth.reset_token_invalid" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "auth.reset_token_expired" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.verification_cooldown" => CooldownResponse(error),
             "auth.user_blocked" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "auth.external_link_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),

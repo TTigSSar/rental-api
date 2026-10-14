@@ -57,6 +57,7 @@ public sealed class AuthService : IAuthService
     private readonly IEmailVerificationService _emailVerification;
     private readonly IEmailVerificationStore _emailVerificationStore;
     private readonly TimeProvider _timeProvider;
+    private readonly IPasswordResetService _passwordReset;
 
     public AuthService(
         IUserAuthStore userAuthStore,
@@ -67,8 +68,10 @@ public sealed class AuthService : IAuthService
         IHomePointService homePointService,
         IEmailVerificationService emailVerification,
         IEmailVerificationStore emailVerificationStore,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IPasswordResetService passwordReset)
     {
+        _passwordReset = passwordReset;
         _emailVerification = emailVerification;
         _emailVerificationStore = emailVerificationStore;
         _timeProvider = timeProvider;
@@ -235,6 +238,39 @@ public sealed class AuthService : IAuthService
 
     public Task<ServiceResult<bool>> ResendVerificationAsync(ResendVerificationRequest request, CancellationToken cancellationToken = default) =>
         _emailVerification.ResendAsync(request.Email, cancellationToken);
+
+    public Task<ServiceResult<bool>> ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken cancellationToken = default) =>
+        _passwordReset.ForgotAsync(request.Email, request.PreferredLanguage, cancellationToken);
+
+    public Task<ServiceResult<bool>> CheckResetTokenAsync(ResetPasswordCheckRequest request, CancellationToken cancellationToken = default) =>
+        _passwordReset.CheckAsync(request.Token, cancellationToken);
+
+    public async Task<ServiceResult<AuthResponse>> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default)
+    {
+        var reset = await _passwordReset.ResetAsync(request.Token, request.NewPassword, cancellationToken);
+        if (!reset.IsSuccess)
+        {
+            return ServiceResult<AuthResponse>.Failure(reset.Error!);
+        }
+
+        // Issued only after the commit, from a fresh read of the row (the store cleared the tracker),
+        // exactly like verify-email.
+        var user = await _userAuthStore.FindByIdAsync(reset.Value, cancellationToken);
+        if (user is null || user.IsBlocked)
+        {
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            {
+                Code = PasswordResetService.ErrorCodes.TokenInvalid,
+                Message = "The password reset link is invalid."
+            });
+        }
+
+        return ServiceResult<AuthResponse>.Success(new AuthResponse
+        {
+            AccessToken = _jwtTokenService.GenerateAccessToken(user),
+            User = MapUser(user)
+        });
+    }
 
     public async Task<ServiceResult<AuthResponse>> ExternalAsync(ExternalAuthRequest request, CancellationToken cancellationToken = default)
     {

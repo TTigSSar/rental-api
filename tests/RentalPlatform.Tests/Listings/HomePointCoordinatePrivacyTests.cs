@@ -172,7 +172,8 @@ public sealed class HomePointCoordinatePrivacyTests
                 new FakeEmailVerificationMonitor(),
                 TimeProvider.System),
             new EmailVerificationStore(context),
-            TimeProvider.System);
+            TimeProvider.System,
+            new NotSupportedPasswordResetService());
 
         var result = await service.GetCurrentUserAsync();
 

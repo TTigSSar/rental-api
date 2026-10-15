@@ -136,7 +136,7 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
         var user = _users.Users.FirstOrDefault(candidate => candidate.Email == email);
         return Task.FromResult(user is null
             ? null
-            : new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage));
+            : new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage, user.Email));
     }
 
     public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default)

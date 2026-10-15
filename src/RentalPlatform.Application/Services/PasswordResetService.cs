@@ -92,6 +92,14 @@ public sealed class PasswordResetService : IPasswordResetService
             return ServiceResult<bool>.Success(true);
         }
 
+        // Collation-equal is not equal (N'ss' = N'ß' on SQL Server): a row matched by a different
+        // address is treated as unknown, so a link can never be steered to a lookalike domain.
+        var storedEmail = state.Email.Trim().ToLowerInvariant();
+        if (!string.Equals(storedEmail, normalized, StringComparison.Ordinal))
+        {
+            return ServiceResult<bool>.Success(true);
+        }
+
         var now = Now();
 
         var latest = await _reads.GetLatestTokenCreatedAtAsync(state.Id, TokenPurpose.PasswordReset, cancellationToken);
@@ -132,7 +140,7 @@ public sealed class PasswordResetService : IPasswordResetService
 
         // CancellationToken.None: the row is committed, so a client that disconnected must not also
         // cost the user their email. The sender bounds itself with its own timeout.
-        await _emailService.SendPasswordResetAsync(normalized, language, link, CancellationToken.None);
+        await _emailService.SendPasswordResetAsync(state.Email, language, link, CancellationToken.None);
         return ServiceResult<bool>.Success(true);
     }
 

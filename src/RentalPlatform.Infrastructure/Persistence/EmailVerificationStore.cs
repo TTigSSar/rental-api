@@ -27,7 +27,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
         _dbContext.Users
             .AsNoTracking()
             .Where(user => user.Email == email)
-            .Select(user => new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage))
+            .Select(user => new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage, user.Email))
             .FirstOrDefaultAsync(cancellationToken);
 
     public Task<DateTime?> GetLatestTokenCreatedAtAsync(

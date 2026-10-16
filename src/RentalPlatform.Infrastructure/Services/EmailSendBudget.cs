@@ -26,7 +26,11 @@ public sealed class EmailSendBudget : IEmailSendBudget
         _logger = logger;
     }
 
-    public bool TryAcquire()
+    public bool TryAcquire() => Evaluate(consume: true);
+
+    public bool HasCapacity() => Evaluate(consume: false);
+
+    private bool Evaluate(bool consume)
     {
         DateTimeOffset resetAt;
 
@@ -41,7 +45,11 @@ public sealed class EmailSendBudget : IEmailSendBudget
 
             if (_count < _limit)
             {
-                _count++;
+                if (consume)
+                {
+                    _count++;
+                }
+
                 return true;
             }
 
@@ -49,7 +57,7 @@ public sealed class EmailSendBudget : IEmailSendBudget
         }
 
         _logger.LogCritical(
-            "Email send budget exhausted ({Limit} per {WindowHours} h). Verification emails are NOT being sent until {ResetAt:O}. " +
+            "Email send budget exhausted ({Limit} per {WindowHours} h). Transactional emails (verification and password reset) are NOT being sent until {ResetAt:O}. " +
             "Check for abuse and the provider quota.",
             _limit, _window.TotalHours, resetAt);
         return false;

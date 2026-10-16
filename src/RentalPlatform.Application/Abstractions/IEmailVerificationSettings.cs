@@ -14,6 +14,9 @@ public interface IEmailVerificationSettings
 
     /// <summary>Builds <c>{App:PublicBaseUrl}/auth/verify-email#token=…</c>. Never derived from the request host.</summary>
     string BuildVerificationLink(string token);
+
+    /// <summary>Builds <c>{App:PublicBaseUrl}/auth/reset-password#token=…</c> (ADR-035 §1). Never derived from the request host.</summary>
+    string BuildPasswordResetLink(string token);
 }
 
 /// <summary>
@@ -24,4 +27,11 @@ public interface IEmailSendBudget
 {
     /// <summary>Reserves one send. False when the window is exhausted (a Critical log is written).</summary>
     bool TryAcquire();
+
+    /// <summary>
+    /// True while at least one send is left. Reserves nothing; writes the same Critical log when the
+    /// window is exhausted. Used by password reset to answer 503 before touching any account
+    /// (ADR-035 §7 amendment 2026-10-14).
+    /// </summary>
+    bool HasCapacity();
 }

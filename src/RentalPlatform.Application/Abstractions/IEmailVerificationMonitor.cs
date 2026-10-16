@@ -12,4 +12,10 @@ public interface IEmailVerificationMonitor
     /// emails for the window. Distinguishes cap refusals from plain cooldown 429s for monitoring.
     /// </summary>
     void PerRecipientCapReached(Guid userId);
+
+    /// <summary>A forgot-password request for an existing verified account was silently dropped because the reset cap was reached (ADR-035 §7).</summary>
+    void PasswordResetCapReached(Guid userId);
+
+    /// <summary>A forgot-password issue was refused by the store (cooldown, cap or race) for an existing verified account.</summary>
+    void PasswordResetRefused(Guid userId);
 }

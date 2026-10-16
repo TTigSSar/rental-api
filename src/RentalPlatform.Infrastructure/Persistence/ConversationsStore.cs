@@ -140,10 +140,10 @@ public sealed class ConversationsStore : IConversationsStore
             .Include(conversation => conversation.Booking)
             .Include(conversation => conversation.Owner)
             .Include(conversation => conversation.Renter)
-            // SQL Server sorts NULL lowest, so descending places conversations with no
-            // activity yet (LastMessageAt == null) at the end.
-            .OrderByDescending(conversation => conversation.LastMessageAt)
-            .ThenByDescending(conversation => conversation.CreatedAt)
+            // Order by last activity: COALESCE(LastMessageAt, CreatedAt) DESC — creating a
+            // thread counts as activity, so a message-less conversation sorts by its creation time.
+            .OrderByDescending(conversation => conversation.LastMessageAt ?? conversation.CreatedAt)
+            .ThenByDescending(conversation => conversation.Id)
             .ToListAsync(cancellationToken);
 
         if (conversations.Count == 0)
@@ -550,7 +550,8 @@ public sealed class ConversationsStore : IConversationsStore
         }
 
         // SQL Server sorts NULL lowest, so descending places conversations with no activity yet
-        // (LastMessageAt == null) at the end — same convention as ListForUserAsync.
+        // (LastMessageAt == null) at the end. Intentionally differs from ListForUserAsync, which
+        // orders by COALESCE(LastMessageAt, CreatedAt); moderation keeps message-less threads last.
         var conversations = await query
             .OrderByDescending(conversation => conversation.LastMessageAt)
             .ThenByDescending(conversation => conversation.CreatedAt)

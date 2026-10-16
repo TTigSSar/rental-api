@@ -168,6 +168,13 @@ public sealed class EmailVerificationService : IEmailVerificationService
             return ServiceResult<bool>.Success(true);
         }
 
+        // Collation-equal is not equal (N'ss' = N'ß' on SQL Server): treat a row matched by a different
+        // address as unknown, and only ever send to the stored address.
+        if (!string.Equals(state.Email.Trim().ToLowerInvariant(), normalized, StringComparison.Ordinal))
+        {
+            return ServiceResult<bool>.Success(true);
+        }
+
         var now = Now();
         var issued = await _store.CountTokensCreatedSinceAsync(
             state.Id, TokenPurpose.EmailVerification, now - SendCapWindow, cancellationToken);
@@ -184,7 +191,7 @@ public sealed class EmailVerificationService : IEmailVerificationService
             return ServiceResult<bool>.Success(true);
         }
 
-        await SendAsync(normalized, state.PreferredLanguage, rawToken);
+        await SendAsync(state.Email, state.PreferredLanguage, rawToken);
         return ServiceResult<bool>.Success(true);
     }
 

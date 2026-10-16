@@ -74,6 +74,25 @@ public sealed class EmailService : IEmailService
             _logger.LogError(exception, "Verification email could not be sent ({ExceptionType}).", exception.GetType().Name);
         }
     }
+
+    public async Task SendPasswordResetAsync(
+        string email,
+        string? preferredLanguage,
+        string link,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var message = PasswordResetEmailTemplate.Render(email, preferredLanguage, link);
+            await _sender.SendAsync(message, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Never throws, and the log carries no link and no address (ADR-029 section 3): the token
+            // is a credential. The user can simply ask again.
+            _logger.LogError("Password reset email could not be sent ({ExceptionType}).", exception.GetType().Name);
+        }
+    }
 }
 
 // en/hy/ru with an English fallback (ADR-025 precedent), HTML plus a text part. The body carries no

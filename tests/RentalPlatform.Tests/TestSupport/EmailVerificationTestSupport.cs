@@ -30,6 +30,8 @@ public sealed class FakeEmailVerificationSettings : IEmailVerificationSettings
     public bool IsOperational { get; set; } = true;
 
     public string BuildVerificationLink(string token) => $"https://test.local/auth/verify-email#token={token}";
+
+    public string BuildPasswordResetLink(string token) => $"https://test.local/auth/reset-password#token={token}";
 }
 
 // Budget double: unlimited unless a test sets Remaining.
@@ -39,8 +41,18 @@ public sealed class FakeEmailSendBudget : IEmailSendBudget
 
     public int Acquired { get; private set; }
 
+    // Set to simulate the budget running out between the HasCapacity check and the acquire.
+    public bool DenyAcquire { get; set; }
+
+    public bool HasCapacity() => Remaining is not { } remaining || remaining > 0;
+
     public bool TryAcquire()
     {
+        if (DenyAcquire)
+        {
+            return false;
+        }
+
         if (Remaining is { } remaining)
         {
             if (remaining <= 0)
@@ -124,7 +136,7 @@ public sealed class FakeEmailVerificationStore : IEmailVerificationStore
         var user = _users.Users.FirstOrDefault(candidate => candidate.Email == email);
         return Task.FromResult(user is null
             ? null
-            : new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage));
+            : new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage, user.Email));
     }
 
     public Task<bool> TryAddUserAsync(User user, UserToken? token, CancellationToken cancellationToken = default)
@@ -205,7 +217,8 @@ public static class AuthServiceFactory
             homePointService,
             verification,
             new FakeEmailVerificationStore(store),
-            timeProvider);
+            timeProvider,
+            new NotSupportedPasswordResetService());
     }
 }
 
@@ -260,6 +273,10 @@ public sealed class AuthHarness
         Verification = new RentalPlatform.Application.Services.EmailVerificationService(
             verificationStore, PasswordHasher, homePoints, emailService, Settings, Budget, Monitor, Clock);
 
+        PasswordResetStore = new RentalPlatform.Infrastructure.Persistence.PasswordResetStore(context);
+        PasswordReset = new RentalPlatform.Application.Services.PasswordResetService(
+            verificationStore, PasswordResetStore, PasswordHasher, emailService, Settings, Budget, Monitor, Clock);
+
         Auth = new RentalPlatform.Application.Services.AuthService(
             authUserStore,
             PasswordHasher,
@@ -269,7 +286,8 @@ public sealed class AuthHarness
             homePoints,
             Verification,
             verificationStore,
-            Clock);
+            Clock,
+            PasswordReset);
     }
 
     public RentalPlatform.Infrastructure.Persistence.AppDbContext Context { get; }
@@ -284,6 +302,8 @@ public sealed class AuthHarness
     public RentalPlatform.Infrastructure.Persistence.EmailVerificationStore Store { get; }
     public RentalPlatform.Application.Services.EmailVerificationService Verification { get; }
     public RentalPlatform.Application.Services.AuthService Auth { get; }
+    public RentalPlatform.Infrastructure.Persistence.PasswordResetStore PasswordResetStore { get; }
+    public RentalPlatform.Application.Services.PasswordResetService PasswordReset { get; }
 
     public static RegisterRequest Register(
         string email = "new.user@test.local",
@@ -306,10 +326,30 @@ public sealed class AuthHarness
     };
 }
 
+// For the unit tests that predate password reset and never reach it.
+public sealed class NotSupportedPasswordResetService : IPasswordResetService
+{
+    public Task<RentalPlatform.Application.Common.ServiceResult<bool>> ForgotAsync(string? email, string? requestLanguage, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalPlatform.Application.Common.ServiceResult<bool>> CheckAsync(string token, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalPlatform.Application.Common.ServiceResult<Guid>> ResetAsync(string token, string newPassword, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+}
+
 // Records cap signals so a test can assert the monitor fired (or did not).
 public sealed class FakeEmailVerificationMonitor : IEmailVerificationMonitor
 {
     public List<Guid> CapReached { get; } = new();
 
+    public List<Guid> ResetCapReached { get; } = new();
+    public List<Guid> ResetRefused { get; } = new();
+
     public void PerRecipientCapReached(Guid userId) => CapReached.Add(userId);
+
+    public void PasswordResetCapReached(Guid userId) => ResetCapReached.Add(userId);
+
+    public void PasswordResetRefused(Guid userId) => ResetRefused.Add(userId);
 }

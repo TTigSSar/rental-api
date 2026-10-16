@@ -30,4 +30,14 @@ public interface IEmailService
         string? preferredLanguage,
         string link,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends the password-reset link (ADR-035). Same contract as the verification email: en/hy/ru with
+    /// an English fallback, no user-controlled data in the body, never throws.
+    /// </summary>
+    Task SendPasswordResetAsync(
+        string email,
+        string? preferredLanguage,
+        string link,
+        CancellationToken cancellationToken = default);
 }

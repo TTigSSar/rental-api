@@ -49,14 +49,18 @@ public sealed class EmailVerificationSettings : IEmailVerificationSettings
         return missing;
     }
 
-    public string BuildVerificationLink(string token)
+    public string BuildVerificationLink(string token) => BuildLink("/auth/verify-email", token);
+
+    public string BuildPasswordResetLink(string token) => BuildLink("/auth/reset-password", token);
+
+    private string BuildLink(string path, string token)
     {
         var baseUrl = string.IsNullOrWhiteSpace(_app.PublicBaseUrl)
             ? DevelopmentFallbackBaseUrl
             : _app.PublicBaseUrl.Trim();
 
         // The token sits in the fragment so it never reaches access logs or Referer (ADR-028 section 6).
-        return $"{baseUrl.TrimEnd('/')}/auth/verify-email#token={token}";
+        return $"{baseUrl.TrimEnd('/')}{path}#token={token}";
     }
 
     private static bool IsHttpsBaseUrl(string? value) =>

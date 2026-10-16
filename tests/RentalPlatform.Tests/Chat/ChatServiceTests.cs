@@ -185,6 +185,52 @@ public sealed class ChatServiceTests
         Assert.False(item.LastMessageIsMine);
     }
 
+    // Inbox order is COALESCE(LastMessageAt, CreatedAt) DESC: a message-less conversation sorts by
+    // its creation time, above threads whose last message is older and below those with a newer one.
+    [Fact]
+    public async Task List_Orders_By_Last_Activity_Using_CreatedAt_For_Messageless_Conversation()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.User(RenterId, "renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId));
+
+        var now = DateTime.UtcNow;
+        var olderId = new Guid("b0000000-0000-0000-0000-0000000000a1");
+        var newMessageless = new Guid("b0000000-0000-0000-0000-0000000000a2");
+        var newerId = new Guid("b0000000-0000-0000-0000-0000000000a3");
+
+        foreach (var (conversationId, createdAt, lastMessageAt) in new (Guid, DateTime, DateTime?)[]
+        {
+            (olderId, now.AddHours(-10), now.AddHours(-5)),       // last message older than the new thread's CreatedAt
+            (newMessageless, now.AddHours(-2), null),             // brand new, no messages
+            (newerId, now.AddHours(-10), now.AddHours(-1)),       // last message newer than the new thread's CreatedAt
+        })
+        {
+            var bookingId = Guid.NewGuid();
+            await db.SeedAsync(TestData.Booking(
+                bookingId, ListingId, RenterId,
+                Today.AddDays(5), Today.AddDays(8),
+                BookingStatus.Approved));
+            var conversation = TestData.Conversation(conversationId, bookingId, OwnerId, RenterId);
+            conversation.CreatedAt = createdAt;
+            conversation.LastMessageAt = lastMessageAt;
+            await db.SeedAsync(conversation);
+        }
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, OwnerId);
+
+        var result = await service.GetConversationsAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            new[] { newerId, newMessageless, olderId },
+            result.Value!.Select(item => item.Id).ToArray());
+    }
+
     [Fact]
     public async Task Details_CounterpartId_Is_Renter_When_Viewer_Is_Owner()
     {

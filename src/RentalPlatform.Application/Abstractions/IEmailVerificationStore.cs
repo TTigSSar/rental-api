@@ -5,7 +5,7 @@ using RentalPlatform.Domain.Enums;
 namespace RentalPlatform.Application.Abstractions;
 
 /// <summary>Untracked snapshot of an account, enough to decide register/resend/external outcomes.</summary>
-public sealed record AccountState(Guid Id, bool IsEmailConfirmed, bool IsBlocked, string? PreferredLanguage);
+public sealed record AccountState(Guid Id, bool IsEmailConfirmed, bool IsBlocked, string? PreferredLanguage, string Email);
 
 /// <summary>Untracked snapshot of a token and its owner, as read by verify-email.</summary>
 public sealed record VerificationTokenView(

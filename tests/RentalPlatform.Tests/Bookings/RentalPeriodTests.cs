@@ -164,7 +164,36 @@ public sealed class RentalPeriodTests
         await SeedAsync(db);
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context, RenterId).CreateAsync(Request(1, 91)); // 90 days
+        var result = await CreateService(context, RenterId).CreateAsync(Request(1, 366)); // 365 days
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(365 * 10m, result.Value!.TotalPrice);
+    }
+
+    [Fact]
+    public async Task Create_Rejects_More_Than_Max_Rental_Days()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(Request(1, 367)); // 366 days
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.invalid_dates", result.Error!.Code);
+        Assert.Contains("365", result.Error.Message);
+    }
+
+    [Theory]
+    [InlineData(365)]
+    [InlineData(180)]
+    public async Task Create_Allows_Long_Minimum_Rental_Booked_For_Exactly_The_Minimum(int min)
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAsync(db, min);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).CreateAsync(Request(1, 1 + min));
 
         Assert.True(result.IsSuccess);
     }

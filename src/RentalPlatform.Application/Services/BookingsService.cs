@@ -11,7 +11,8 @@ public sealed class BookingsService : IBookingsService
 {
     // Upper bound on a single rental window (RentalPeriod.Days, ADR-043). Guards against absurd requests
     // (e.g. a multi-year booking) that would lock a listing's calendar and balloon TotalPrice.
-    private const int MaxRentalDays = 90;
+    // ADR-043 section 5: 365 rental days (end - start <= 365).
+    private const int MaxRentalDays = 365;
 
     // Upper bound on the renter's note to the owner, after trimming.
     private const int MaxNoteLength = 280;

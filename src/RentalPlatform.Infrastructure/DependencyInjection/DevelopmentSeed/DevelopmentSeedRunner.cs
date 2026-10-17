@@ -705,7 +705,7 @@ internal sealed class DevelopmentSeedRunner
             }
 
             var startDate = today.AddDays(seed.StartDaysFromToday);
-            var endDate = startDate.AddDays(seed.DurationDays - 1);
+            var endDate = startDate.AddDays(seed.DurationDays); // ADR-043: DurationDays = rental days (end - start)
             var totalPrice = RentalPeriod.Days(startDate, endDate) * pricePerDay;
             var createdAt = now.AddDays(-seed.CreatedDaysAgo);
 

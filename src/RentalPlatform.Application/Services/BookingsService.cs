@@ -132,7 +132,7 @@ public sealed class BookingsService : IBookingsService
             EndDate = request.EndDate,
             // NOTE: assumes a per-DAY rate. Listings now carry a PriceUnit (Hourly/Daily/Weekly/
             // Monthly/Yearly); once non-daily units are bookable this multiplication must convert
-            // the window to the listing's unit instead of multiplying inclusive days by the amount.
+            // the window to the listing's unit instead of multiplying rental days (RentalPeriod.Days, ADR-043) by the amount.
             TotalPrice = rentalDays * listing.PricePerDay,
             Status = BookingStatus.Pending,
             ExpiresAt = now.AddHours(24),

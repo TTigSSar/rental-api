@@ -262,6 +262,19 @@ public sealed class ListingsOwnerHttpTests
         Assert.Contains("Minimum rental days must be between 1 and 365.", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Patch_Listing_Malformed_Optional_Reports_The_Property_Path()
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        var response = await PatchRawAsync(client, listingId, """{"ageFromMonths":"abc"}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var keys = doc.RootElement.GetProperty("errors").EnumerateObject().Select(p => p.Name).ToList();
+        Assert.Contains("$.ageFromMonths", keys);
+    }
+
     // M-038: the home-point requirement is new, and owners who published before it existed still
     // have listings. Tightening CREATE must not make their existing listings uneditable — a dead
     // Save button with no explanation is exactly the trap that mistake records.

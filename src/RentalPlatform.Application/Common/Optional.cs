@@ -50,15 +50,20 @@ public sealed class OptionalJsonConverterFactory : JsonConverterFactory
                 return new Optional<T>(default!);
             }
 
-            return new Optional<T>(JsonSerializer.Deserialize<T>(ref reader, options)!);
+            // Call the inner converter directly (not a nested JsonSerializer.Deserialize) so a malformed
+            // value keeps the property path ($.ageFromMonths) in the model-state error key.
+            var inner = (JsonConverter<T>)options.GetConverter(typeof(T));
+            return new Optional<T>(inner.Read(ref reader, typeof(T), options)!);
         }
 
         public override void Write(Utf8JsonWriter writer, Optional<T> value, JsonSerializerOptions options)
         {
+            // An unset Optional must be omitted by the owning property ([JsonIgnore(WhenWritingDefault)]);
+            // writing null here would read back as "clear", so refuse instead of corrupting a round-trip.
             if (!value.IsSet)
             {
-                writer.WriteNullValue();
-                return;
+                throw new InvalidOperationException(
+                    "An unset Optional<T> cannot be serialized; mark the property [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)].");
             }
 
             JsonSerializer.Serialize(writer, value.Value, options);

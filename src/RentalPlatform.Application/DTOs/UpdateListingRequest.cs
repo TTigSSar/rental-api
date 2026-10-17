@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Enums;
 
@@ -37,23 +38,32 @@ public sealed class UpdateListingRequest : IValidatableObject
     //   a value          -> set it
     // Blank/whitespace text still normalises to null (clears). Range/length checks live in Validate()
     // because validation attributes cannot see through the wrapper; messages are unchanged.
+    // WhenWritingDefault keeps serialisation round-trip safe: an unset Optional (default) is omitted
+    // rather than written as null, which would read back as "clear".
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<int?> AgeFromMonths { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<int?> AgeToMonths { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<string?> Condition { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<string?> HygieneNotes { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<string?> SafetyNotes { get; init; }
 
     // Absent leaves the amount unchanged; a value sets it. Unlike the clearable optionals an explicit
     // `null` is rejected (ADR-018: the amount is required once set) - see Validate(). See
     // CreateListingRequest.CompensationAmount for the "Loss & damage compensation" semantics.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<decimal?> CompensationAmount { get; init; }
 
     // Clearable optional (ADR-040): shortest number of days a renter may book for. Absent leaves it
     // unchanged, explicit `null` clears it, a value sets it.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Optional<int?> MinRentalDays { get; init; }
 
     // Optional: how the toy is handed over. Null leaves the existing value unchanged; when supplied

@@ -1,3 +1,4 @@
+using RentalPlatform.Application.Common;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -100,6 +101,11 @@ public static class ServiceCollectionExtensions
 
         services.AddSwaggerGen(options =>
         {
+            // Optional<T> (ADR-040) is wire-transparent: show the inner nullable type, not {isSet,value}.
+            options.MapType<Optional<int?>>(() => new OpenApiSchema { Type = "integer", Format = "int32", Nullable = true });
+            options.MapType<Optional<string?>>(() => new OpenApiSchema { Type = "string", Nullable = true });
+            options.MapType<Optional<decimal?>>(() => new OpenApiSchema { Type = "number", Format = "double", Nullable = true });
+
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
                 Name = "Authorization",

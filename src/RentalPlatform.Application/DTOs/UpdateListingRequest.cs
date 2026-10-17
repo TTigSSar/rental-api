@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.DTOs;
@@ -30,29 +31,30 @@ public sealed class UpdateListingRequest : IValidatableObject
     // neither City nor Country is reconciled by ListingLocationBackfillRunner — on a listing
     // publishing a Yerevan district and a Yerevan pin beside it.
 
-    [Range(0, 600, ErrorMessage = "Age (from, months) must be between 0 and 600.")]
-    public int? AgeFromMonths { get; init; }
+    // Clearable optionals (ADR-040) - three states, carried by Optional<T>:
+    //   property ABSENT  -> leave unchanged   (IsSet == false)
+    //   explicit `null`  -> clear to null     (IsSet == true, Value == null)
+    //   a value          -> set it
+    // Blank/whitespace text still normalises to null (clears). Range/length checks live in Validate()
+    // because validation attributes cannot see through the wrapper; messages are unchanged.
+    public Optional<int?> AgeFromMonths { get; init; }
 
-    [Range(0, 600, ErrorMessage = "Age (to, months) must be between 0 and 600.")]
-    public int? AgeToMonths { get; init; }
+    public Optional<int?> AgeToMonths { get; init; }
 
-    [MaxLength(50, ErrorMessage = "Condition must be at most 50 characters.")]
-    public string? Condition { get; init; }
+    public Optional<string?> Condition { get; init; }
 
-    [MaxLength(1000, ErrorMessage = "Hygiene notes must be at most 1000 characters.")]
-    public string? HygieneNotes { get; init; }
+    public Optional<string?> HygieneNotes { get; init; }
 
-    [MaxLength(1000, ErrorMessage = "Safety notes must be at most 1000 characters.")]
-    public string? SafetyNotes { get; init; }
+    public Optional<string?> SafetyNotes { get; init; }
 
-    // Optional (partial update): null leaves the existing amount unchanged. See
+    // Absent leaves the amount unchanged; a value sets it. Unlike the clearable optionals an explicit
+    // `null` is rejected (ADR-018: the amount is required once set) - see Validate(). See
     // CreateListingRequest.CompensationAmount for the "Loss & damage compensation" semantics.
-    [Range(typeof(decimal), "1000", "10000000", ErrorMessage = "Loss & damage compensation must be between 1,000 and 10,000,000 AMD.")]
-    public decimal? CompensationAmount { get; init; }
+    public Optional<decimal?> CompensationAmount { get; init; }
 
-    // Optional: shortest number of days a renter may book for. Null leaves the existing value unchanged.
-    [Range(1, 365, ErrorMessage = "Minimum rental days must be between 1 and 365.")]
-    public int? MinRentalDays { get; init; }
+    // Clearable optional (ADR-040): shortest number of days a renter may book for. Absent leaves it
+    // unchanged, explicit `null` clears it, a value sets it.
+    public Optional<int?> MinRentalDays { get; init; }
 
     // Optional: how the toy is handed over. Null leaves the existing value unchanged; when supplied
     // it must be a defined enum value. Legacy single-select field — see DeliveryTypes below.
@@ -68,6 +70,64 @@ public sealed class UpdateListingRequest : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (AgeFromMonths is { IsSet: true, Value: { } ageFrom } && (ageFrom < 0 || ageFrom > 600))
+        {
+            yield return new ValidationResult(
+                "Age (from, months) must be between 0 and 600.",
+                new[] { nameof(AgeFromMonths) });
+        }
+
+        if (AgeToMonths is { IsSet: true, Value: { } ageTo } && (ageTo < 0 || ageTo > 600))
+        {
+            yield return new ValidationResult(
+                "Age (to, months) must be between 0 and 600.",
+                new[] { nameof(AgeToMonths) });
+        }
+
+        if (Condition is { IsSet: true, Value: { } condition } && condition.Length > 50)
+        {
+            yield return new ValidationResult(
+                "Condition must be at most 50 characters.",
+                new[] { nameof(Condition) });
+        }
+
+        if (HygieneNotes is { IsSet: true, Value: { } hygieneNotes } && hygieneNotes.Length > 1000)
+        {
+            yield return new ValidationResult(
+                "Hygiene notes must be at most 1000 characters.",
+                new[] { nameof(HygieneNotes) });
+        }
+
+        if (SafetyNotes is { IsSet: true, Value: { } safetyNotes } && safetyNotes.Length > 1000)
+        {
+            yield return new ValidationResult(
+                "Safety notes must be at most 1000 characters.",
+                new[] { nameof(SafetyNotes) });
+        }
+
+        if (CompensationAmount.IsSet)
+        {
+            if (CompensationAmount.Value is not { } compensation)
+            {
+                yield return new ValidationResult(
+                    "Loss & damage compensation cannot be cleared.",
+                    new[] { nameof(CompensationAmount) });
+            }
+            else if (compensation < 1000m || compensation > 10000000m)
+            {
+                yield return new ValidationResult(
+                    "Loss & damage compensation must be between 1,000 and 10,000,000 AMD.",
+                    new[] { nameof(CompensationAmount) });
+            }
+        }
+
+        if (MinRentalDays is { IsSet: true, Value: { } minDays } && (minDays < 1 || minDays > 365))
+        {
+            yield return new ValidationResult(
+                "Minimum rental days must be between 1 and 365.",
+                new[] { nameof(MinRentalDays) });
+        }
+
         if (DeliveryTypes is null)
         {
             yield break;

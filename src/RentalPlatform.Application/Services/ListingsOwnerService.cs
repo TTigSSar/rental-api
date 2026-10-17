@@ -357,7 +357,10 @@ public sealed class ListingsOwnerService : IListingsOwnerService
             });
         }
 
-        if (request.AgeFromMonths is { } from && request.AgeToMonths is { } to && to < from)
+        // Compare the EFFECTIVE post-update values: the request's value when supplied, else the stored one.
+        var effectiveAgeFrom = request.AgeFromMonths.IsSet ? request.AgeFromMonths.Value : listing.AgeFromMonths;
+        var effectiveAgeTo = request.AgeToMonths.IsSet ? request.AgeToMonths.Value : listing.AgeToMonths;
+        if (effectiveAgeFrom is { } from && effectiveAgeTo is { } to && to < from)
         {
             return ServiceResult<Guid>.Failure(new ServiceError
             {
@@ -374,19 +377,20 @@ public sealed class ListingsOwnerService : IListingsOwnerService
 
         if (request.Title is not null) contentChanged |= SetIfChanged(() => listing.Title, v => listing.Title = v!, request.Title.Trim());
         if (request.Description is not null) contentChanged |= SetIfChanged(() => listing.Description, v => listing.Description = v!, request.Description.Trim());
-        if (request.Condition is not null) contentChanged |= SetIfChanged(() => listing.Condition, v => listing.Condition = v, NormalizeOptional(request.Condition));
-        if (request.HygieneNotes is not null) contentChanged |= SetIfChanged(() => listing.HygieneNotes, v => listing.HygieneNotes = v, NormalizeOptional(request.HygieneNotes));
-        if (request.SafetyNotes is not null) contentChanged |= SetIfChanged(() => listing.SafetyNotes, v => listing.SafetyNotes = v, NormalizeOptional(request.SafetyNotes));
+        if (request.Condition.IsSet) contentChanged |= SetIfChanged(() => listing.Condition, v => listing.Condition = v, NormalizeOptional(request.Condition.Value));
+        if (request.HygieneNotes.IsSet) contentChanged |= SetIfChanged(() => listing.HygieneNotes, v => listing.HygieneNotes = v, NormalizeOptional(request.HygieneNotes.Value));
+        if (request.SafetyNotes.IsSet) contentChanged |= SetIfChanged(() => listing.SafetyNotes, v => listing.SafetyNotes = v, NormalizeOptional(request.SafetyNotes.Value));
 
         // Structured, non-content fields — never require re-moderation.
         if (request.PricePerDay is not null) listing.PricePerDay = request.PricePerDay.Value;
         if (request.PriceUnit is not null) listing.PriceUnit = request.PriceUnit.Value;
         // Country and City are no longer editable — they are derived from the owner's home point on
         // create and re-derived by HomePointService whenever the point moves (home-point model).
-        if (request.AgeFromMonths is not null) listing.AgeFromMonths = request.AgeFromMonths;
-        if (request.AgeToMonths is not null) listing.AgeToMonths = request.AgeToMonths;
-        if (request.CompensationAmount is not null) listing.CompensationAmount = request.CompensationAmount;
-        if (request.MinRentalDays is not null) listing.MinRentalDays = request.MinRentalDays;
+        if (request.AgeFromMonths.IsSet) listing.AgeFromMonths = request.AgeFromMonths.Value;
+        if (request.AgeToMonths.IsSet) listing.AgeToMonths = request.AgeToMonths.Value;
+        // An explicit null is rejected by Validate() (ADR-018); the pattern also guards a caller that bypasses validation.
+        if (request.CompensationAmount is { IsSet: true, Value: { } compensation }) listing.CompensationAmount = compensation;
+        if (request.MinRentalDays.IsSet) listing.MinRentalDays = request.MinRentalDays.Value;
 
         if (request.DeliveryTypes is not null)
         {

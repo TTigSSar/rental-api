@@ -161,6 +161,120 @@ public sealed class ListingsOwnerHttpTests
         Assert.Equal(TestData.KentronPoint.Longitude, stored.Longitude);
     }
 
+    // ADR-040: unit tests with C# object initialisers cannot prove the wire behaviour. This sends RAW
+    // JSON so the real model binder + Optional<T> converter decide: absent leaves, null clears.
+    private async Task<(HttpClient Client, Guid ListingId)> SeedListingWithOptionalsAsync()
+    {
+        var ownerId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var email = $"{ownerId:N}@listing-owner.local";
+
+        await _factory.SeedAsync(
+            TestData.OwnerWithHome(ownerId, email, TestData.KentronPoint),
+            TestData.Category(categoryId));
+
+        var listing = TestData.Listing(listingId, ownerId, categoryId, ListingStatus.Approved);
+        listing.AgeFromMonths = 12;
+        listing.AgeToMonths = 60;
+        listing.Condition = "Good";
+        listing.HygieneNotes = "Washed";
+        listing.SafetyNotes = "No small parts";
+        listing.MinRentalDays = 3;
+        listing.CompensationAmount = 5000m;
+        await _factory.SeedAsync(listing);
+
+        return (ClientFor(ownerId, email), listingId);
+    }
+
+    private static Task<HttpResponseMessage> PatchRawAsync(HttpClient client, Guid listingId, string json) =>
+        client.SendAsync(new HttpRequestMessage(HttpMethod.Patch, $"/api/listings/{listingId}")
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        });
+
+    private async Task<RentalPlatform.Domain.Entities.Listing> LoadListingAsync(Guid listingId)
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Listings.AsNoTracking().SingleAsync(l => l.Id == listingId);
+    }
+
+    [Fact]
+    public async Task Patch_Listing_Absent_Optionals_Leave_Values_And_Explicit_Null_Clears_Them()
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        // Absent: only the price is on the wire, so all seven optionals must survive.
+        var absent = await PatchRawAsync(client, listingId, """{"pricePerDay":3100}""");
+        Assert.Equal(HttpStatusCode.NoContent, absent.StatusCode);
+
+        var afterAbsent = await LoadListingAsync(listingId);
+        Assert.Equal(3100m, afterAbsent.PricePerDay);
+        Assert.Equal(12, afterAbsent.AgeFromMonths);
+        Assert.Equal(60, afterAbsent.AgeToMonths);
+        Assert.Equal("Good", afterAbsent.Condition);
+        Assert.Equal("Washed", afterAbsent.HygieneNotes);
+        Assert.Equal("No small parts", afterAbsent.SafetyNotes);
+        Assert.Equal(3, afterAbsent.MinRentalDays);
+        Assert.Equal(5000m, afterAbsent.CompensationAmount);
+        Assert.Equal(ListingStatus.Approved, afterAbsent.Status);
+
+        // Explicit null: the same six keys, now present as null, must clear.
+        var cleared = await PatchRawAsync(client, listingId,
+            """{"ageFromMonths":null,"ageToMonths":null,"condition":null,"hygieneNotes":null,"safetyNotes":null,"minRentalDays":null}""");
+        Assert.Equal(HttpStatusCode.NoContent, cleared.StatusCode);
+
+        var afterNull = await LoadListingAsync(listingId);
+        Assert.Null(afterNull.AgeFromMonths);
+        Assert.Null(afterNull.AgeToMonths);
+        Assert.Null(afterNull.Condition);
+        Assert.Null(afterNull.HygieneNotes);
+        Assert.Null(afterNull.SafetyNotes);
+        Assert.Null(afterNull.MinRentalDays);
+        Assert.Equal(5000m, afterNull.CompensationAmount);
+        Assert.Equal(ListingStatus.PendingApproval, afterNull.Status); // text cleared on an approved listing
+    }
+
+    [Fact]
+    public async Task Patch_Listing_Explicit_Null_CompensationAmount_Is_400_And_Absent_Is_Not()
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        var rejected = await PatchRawAsync(client, listingId, """{"compensationAmount":null}""");
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Contains("Loss & damage compensation cannot be cleared.", await rejected.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(5000m, (await LoadListingAsync(listingId)).CompensationAmount);
+
+        var setValue = await PatchRawAsync(client, listingId, """{"compensationAmount":7000}""");
+        Assert.Equal(HttpStatusCode.NoContent, setValue.StatusCode);
+        Assert.Equal(7000m, (await LoadListingAsync(listingId)).CompensationAmount);
+    }
+
+    [Fact]
+    public async Task Patch_Listing_Out_Of_Range_Optional_Is_400_With_The_Original_Message()
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        var response = await PatchRawAsync(client, listingId, """{"minRentalDays":0}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Minimum rental days must be between 1 and 365.", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Patch_Listing_Malformed_Optional_Reports_The_Property_Path()
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        var response = await PatchRawAsync(client, listingId, """{"ageFromMonths":"abc"}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var keys = doc.RootElement.GetProperty("errors").EnumerateObject().Select(p => p.Name).ToList();
+        Assert.Contains("$.ageFromMonths", keys);
+    }
+
     // M-038: the home-point requirement is new, and owners who published before it existed still
     // have listings. Tightening CREATE must not make their existing listings uneditable — a dead
     // Save button with no explanation is exactly the trap that mistake records.

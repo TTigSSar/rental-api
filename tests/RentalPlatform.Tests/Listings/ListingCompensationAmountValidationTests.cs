@@ -66,7 +66,8 @@ public sealed class ListingCompensationAmountValidationTests
     [Fact]
     public void Update_Accepts_Omitted_CompensationAmount()
     {
-        var request = new UpdateListingRequest { CompensationAmount = null };
+        // Absent - an explicit null is a 400 (ADR-040 / ADR-018).
+        var request = new UpdateListingRequest();
 
         Assert.Empty(Validate(request));
     }

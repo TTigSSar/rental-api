@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Infrastructure.DependencyInjection.SeedSupport;
@@ -705,8 +706,7 @@ internal sealed class DevelopmentSeedRunner
 
             var startDate = today.AddDays(seed.StartDaysFromToday);
             var endDate = startDate.AddDays(seed.DurationDays - 1);
-            var inclusiveDays = endDate.DayNumber - startDate.DayNumber + 1;
-            var totalPrice = inclusiveDays * pricePerDay;
+            var totalPrice = RentalPeriod.Days(startDate, endDate) * pricePerDay;
             var createdAt = now.AddDays(-seed.CreatedDaysAgo);
 
             var booking = new Booking

@@ -379,8 +379,8 @@ public sealed class ReviewsServiceTests
         await using var read = db.CreateContext();
         var summary = await CreateService(read, null).GetListingToyReviewsAsync(ListingId);
 
-        // PastEnd - PastStart inclusive = 8 days.
-        Assert.Equal(PastEnd.DayNumber - PastStart.DayNumber + 1, summary.Comments.First().RentedDays);
+        // ADR-043: PastEnd - PastStart (min 1) days; the return day is not counted.
+        Assert.Equal(PastEnd.DayNumber - PastStart.DayNumber, summary.Comments.First().RentedDays);
     }
 
     // --- ADR-001: read-only chat lock (Conversation.ClosedAt) ---

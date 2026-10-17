@@ -9,7 +9,7 @@ namespace RentalPlatform.Application.Services;
 
 public sealed class BookingsService : IBookingsService
 {
-    // Upper bound on a single rental window (inclusive days). Guards against absurd requests
+    // Upper bound on a single rental window (RentalPeriod.Days, ADR-043). Guards against absurd requests
     // (e.g. a multi-year booking) that would lock a listing's calendar and balloon TotalPrice.
     private const int MaxRentalDays = 90;
 
@@ -26,6 +26,7 @@ public sealed class BookingsService : IBookingsService
         public const string OwnListingForbidden = "booking.own_listing_forbidden";
         public const string InvalidDates = "booking.invalid_dates";
         public const string NoteTooLong = "booking.note_too_long";
+        public const string BelowMinRental = "booking.below_min_rental";
         public const string Overlap = "booking.overlap";
         public const string BookingNotFound = "booking.not_found";
         public const string BookingForbidden = "booking.forbidden";
@@ -112,7 +113,15 @@ public sealed class BookingsService : IBookingsService
 
         var note = string.IsNullOrEmpty(trimmedNote) ? null : trimmedNote;
 
-        var inclusiveDays = request.EndDate.DayNumber - request.StartDate.DayNumber + 1;
+        // ADR-043: minimum rental. Same-day booking counts as 1 day.
+        var rentalDays = RentalPeriod.Days(request.StartDate, request.EndDate);
+        if (listing.MinRentalDays is > 0 && rentalDays < listing.MinRentalDays)
+        {
+            return Failure<BookingResponse>(
+                ErrorCodes.BelowMinRental,
+                $"Minimum rental for this listing is {listing.MinRentalDays} days.");
+        }
+
         var booking = new Booking
         {
             Id = Guid.NewGuid(),
@@ -123,7 +132,7 @@ public sealed class BookingsService : IBookingsService
             // NOTE: assumes a per-DAY rate. Listings now carry a PriceUnit (Hourly/Daily/Weekly/
             // Monthly/Yearly); once non-daily units are bookable this multiplication must convert
             // the window to the listing's unit instead of multiplying inclusive days by the amount.
-            TotalPrice = inclusiveDays * listing.PricePerDay,
+            TotalPrice = rentalDays * listing.PricePerDay,
             Status = BookingStatus.Pending,
             ExpiresAt = now.AddHours(24),
             CreatedAt = now,
@@ -475,8 +484,7 @@ public sealed class BookingsService : IBookingsService
             return "StartDate cannot be in the past.";
         }
 
-        var inclusiveDays = endDate.DayNumber - startDate.DayNumber + 1;
-        if (inclusiveDays > MaxRentalDays)
+        if (RentalPeriod.Days(startDate, endDate) > MaxRentalDays)
         {
             return $"A booking cannot exceed {MaxRentalDays} days.";
         }

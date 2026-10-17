@@ -200,6 +200,7 @@ public sealed class BookingsController : ControllerBase
             "booking.owner_only" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "booking.listing_not_approved" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "booking.invalid_dates" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "booking.below_min_rental" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "booking.note_too_long" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };

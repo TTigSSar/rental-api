@@ -33,7 +33,7 @@ public sealed class NotificationEmitterTests
             ListingId,
             RenterId,
             TestData.Today,
-            TestData.Today.AddDays(2), // start..start+2 inclusive == 3 days
+            TestData.Today.AddDays(3), // ADR-043: end - start == 3 days (return day is free)
             BookingStatus.Pending);
         booking.TotalPrice = 7500m;
 

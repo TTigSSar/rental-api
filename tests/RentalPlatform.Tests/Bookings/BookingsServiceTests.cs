@@ -256,7 +256,7 @@ public sealed class BookingsServiceTests
         {
             ListingId = ListingId,
             StartDate = Today.AddDays(1),
-            EndDate = Today.AddDays(1 + 90) // 91 inclusive days
+            EndDate = Today.AddDays(1 + 91) // 91 rental days (ADR-043: end - start)
         });
 
         Assert.False(result.IsSuccess);

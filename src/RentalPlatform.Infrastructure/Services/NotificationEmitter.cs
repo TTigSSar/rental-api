@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -251,7 +252,7 @@ public sealed class NotificationEmitter : INotificationEmitter
     /// </summary>
     private static string BuildMeta(Booking booking)
     {
-        var days = booking.EndDate.DayNumber - booking.StartDate.DayNumber + 1;
+        var days = RentalPeriod.Days(booking.StartDate, booking.EndDate);
         var dayLabel = days == 1 ? "day" : "days";
         var amount = booking.TotalPrice.ToString("#,##0", CultureInfo.InvariantCulture);
         return $"{days} {dayLabel} · {amount}\u00A0֏";

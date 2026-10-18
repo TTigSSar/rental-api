@@ -1390,8 +1390,9 @@ internal static class DevelopmentSeedData
     ];
 
     // Bookings covering every state the UI needs to render.
-    // Dates are relative to today, TotalPrice is calculated by the seeder as (inclusive days) x PricePerDay.
-    // Renter is never the listing owner; no Approved bookings overlap (they are on distinct listings).
+    // Dates are relative to today, TotalPrice is calculated by the seeder as RentalPeriod.Days (ADR-043: end - start, min 1) x PricePerDay.
+    // DurationDays = rental days: EndDate = StartDate + DurationDays. Renter is never the listing owner;
+    // no two bookings on one listing overlap under the ADR-043 night rule (checked when the rule changed).
     public static readonly SeedBooking[] Bookings =
     [
         new(

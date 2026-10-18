@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -42,13 +43,16 @@ public sealed class BookingsStore : IBookingsStore
         // effectively dead even if the background sweep hasn't flipped it to Expired yet. This keeps
         // create-correctness independent of sweep timing.
         var now = DateTime.UtcNow;
+        var newEffectiveEnd = RentalPeriod.EffectiveEnd(booking.StartDate, booking.EndDate);
         var hasBlockingOverlap = await _dbContext.Bookings.AnyAsync(other =>
             other.ListingId == booking.ListingId &&
             ((other.Status == BookingStatus.Pending && other.ExpiresAt > now) ||
              other.Status == BookingStatus.Approved ||
              other.Status == BookingStatus.Active) &&
-            other.StartDate <= booking.EndDate &&
-            other.EndDate >= booking.StartDate,
+            // ADR-043: occupied nights are [start, effEnd); back-to-back is allowed. Written inline
+            // (not via RentalPeriod) so EF translates it to SQL; keep in step with RentalPeriod.
+            other.StartDate < newEffectiveEnd &&
+            booking.StartDate < (other.EndDate > other.StartDate ? other.EndDate : other.StartDate.AddDays(1)),
             cancellationToken);
 
         if (hasBlockingOverlap)
@@ -71,12 +75,13 @@ public sealed class BookingsStore : IBookingsStore
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable, cancellationToken);
 
+        var newEffectiveEnd = RentalPeriod.EffectiveEnd(booking.StartDate, booking.EndDate);
         var hasApprovedOverlap = await _dbContext.Bookings.AnyAsync(other =>
             other.ListingId == booking.ListingId &&
             other.Id != booking.Id &&
             (other.Status == BookingStatus.Approved || other.Status == BookingStatus.Active) &&
-            other.StartDate <= booking.EndDate &&
-            other.EndDate >= booking.StartDate,
+            other.StartDate < newEffectiveEnd &&
+            booking.StartDate < (other.EndDate > other.StartDate ? other.EndDate : other.StartDate.AddDays(1)),
             cancellationToken);
 
         if (hasApprovedOverlap)

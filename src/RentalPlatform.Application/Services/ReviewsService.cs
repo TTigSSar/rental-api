@@ -1,6 +1,7 @@
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -344,7 +345,7 @@ public sealed class ReviewsService : IReviewsService
         ReviewerLastName = reviewer.LastName,
         ReviewerAvatarUrl = reviewer.AvatarUrl,
         Comment = comment,
-        RentedDays = booking.EndDate.DayNumber - booking.StartDate.DayNumber + 1,
+        RentedDays = RentalPeriod.Days(booking.StartDate, booking.EndDate),
         CreatedAt = createdAt
     };
 

@@ -2,14 +2,23 @@
 #
 # Production infrastructure smoke check for dorent.am (docker-compose.production.yml).
 #
-#   smoke.sh    run all checks, print one PASS/WARN/FAIL line per check + summary
+#   smoke.sh                    run all checks, print one PASS/WARN/FAIL line per check + summary
+#   smoke.sh --record-baseline  run NO checks; measure the approved catalogue's totalCount and
+#                               its number of distinct map-pin coordinate pairs and write them
+#                               to the geo baseline file (GEO_BASELINE_FILE below). Run it in the
+#                               deploy procedure immediately BEFORE `up -d`; the post-deploy run
+#                               compares against it (check geo-pin-diversity, ADR-010 amendment
+#                               2026-10-18).
 #
-# READ-ONLY by design: this script never mutates persistent production state (no DB or
-# file writes, no restarts, no docker exec into service workloads). One stated exception,
-# ephemeral by construction: check google-nonce asks the api to issue ONE Google sign-in
-# nonce — an in-memory entry that expires on its own after 5 minutes (see the check). Safe
-# to run at any time, as often as needed (well under the 30/min nonce rate limit), from any
-# cwd — it resolves the compose project directory from its own location (script at
+# READ-ONLY by design: a normal run never mutates persistent production state (no DB or
+# file writes, no restarts, no docker exec into service workloads). Two stated exceptions:
+#   - check google-nonce asks the api to issue ONE Google sign-in nonce — an in-memory entry
+#     that expires on its own after 5 minutes (see the check). Ephemeral by construction.
+#   - `--record-baseline`, and only that flag, writes ONE small file outside the database
+#     (the geo baseline: two numbers plus when/where they were measured). A run without the
+#     flag only ever READS that file. Deliberate, accepted in the ADR-010 amendment.
+# Safe to run at any time, as often as needed (well under the 30/min nonce rate limit), from
+# any cwd — it resolves the compose project directory from its own location (script at
 # <repo>/deploy/, compose file at <repo>/), same as backup-production.sh.
 #
 # Secret hygiene: the only values this script ever reads out of .env are the two
@@ -41,13 +50,15 @@
 #   MANDATORY — any failure makes the overall verdict FAIL and the exit code 1.
 #   WARNING   — reported as WARN, but the exit code stays 0 if all mandatory pass.
 #
-# Most checks here ask "does this component answer at all". geo-map-pins is the exception
-# and the reason is worth stating up front: it asserts a property of the DATA, because the
+# Most checks here ask "does this component answer at all". geo-map-pins and
+# geo-pin-diversity are the exception and the reason is worth stating up front: they assert a
+# property of the DATA, because the
 # geo surface can fail while every liveness check stays green (see the check for the full
 # reasoning). Liveness is not health.
 #
-# Exit codes: 0 = all mandatory checks passed (warnings possible)
-#             1 = at least one mandatory check failed
+# Exit codes: 0 = all mandatory checks passed (warnings possible) / baseline recorded
+#             1 = at least one mandatory check failed / baseline could not be recorded
+#             2 = unknown argument
 #
 # See DEPLOY-PRODUCTION.md (section j) for when to run this and how to read it.
 
@@ -67,6 +78,18 @@ COMPOSE=(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" --proj
 
 BACKUPS_DIR="${BACKUPS_DIR:-/opt/dorent/backups}"
 BACKUP_LOG="${BACKUPS_DIR}/backup.log"
+
+# Geo baseline for check geo-pin-diversity (written only by --record-baseline). Overridable
+# for the same reason API_BASE is — so a rehearsal against a mock never reads or overwrites
+# the real file; the path is printed in every message that uses it. Not a secret: two counts,
+# a timestamp and the API base they were measured against.
+GEO_BASELINE_FILE="${SMOKE_GEO_BASELINE:-/opt/dorent/deployment-notes/smoke-geo-baseline}"
+# The baseline describes the catalogue "just before this deploy". Older than this, it no
+# longer describes anything the current run can be held to (owners move, listings leave),
+# so the comparison is reported as NOT assessed instead of producing a false FAIL. This is a
+# property of the deploy procedure (record -> up -d -> smoke within minutes), not of the
+# catalogue — no product fact is encoded in it.
+GEO_BASELINE_MAX_AGE_HOURS=24
 
 # Loopback endpoints (M-014: always 127.0.0.1, never localhost — IPv6 ::1 trap).
 #
@@ -115,6 +138,7 @@ ACCESS_MODE="public"
 ACCESS_CURL_ARGS=()
 ACCESS_PARTIAL_DETAIL=""
 CF_CURL_CONFIG=""
+GEO_BASELINE_TMP=""   # --record-baseline's half-written temp file, removed on any exit
 
 # The two header values must never appear on a command line: /proc/<pid>/cmdline is
 # world-readable, so `curl -H "CF-Access-Client-Secret: ..."` would expose the secret to
@@ -123,6 +147,9 @@ CF_CURL_CONFIG=""
 cleanup_access_config() {
     if [[ -n "${CF_CURL_CONFIG}" && -f "${CF_CURL_CONFIG}" ]]; then
         rm -f "${CF_CURL_CONFIG}" || true
+    fi
+    if [[ -n "${GEO_BASELINE_TMP}" && -f "${GEO_BASELINE_TMP}" ]]; then
+        rm -f "${GEO_BASELINE_TMP}" || true
     fi
     return 0
 }
@@ -331,41 +358,92 @@ check_reverse_proxy_db() {
 # is a perfectly normal listing. The share of coordinate-less listings is a product fact that
 # moves as the catalogue moves, and a threshold pinned to it would turn an ordinary listing
 # edit into a red deploy — fragile in exactly the way this check must not be.
-check_geo_map_pins() {
+# --- Geo measurement, shared by geo-map-pins, geo-pin-diversity and --record-baseline ---
+# One measurement per run: the two data checks look at the SAME pair of responses, and
+# --record-baseline records exactly what a later run will compare against.
+GEO_MEASURED=0      # 1 once geo_fetch succeeded
+GEO_TOTAL=""        # approved-catalogue totalCount
+GEO_PINS=""         # number of pins map-pins returned
+GEO_DISTINCT=""     # number of DISTINCT coordinate pairs among them
+GEO_TRUNCATED=0     # 1 if map-pins reported isTruncated=true
+GEO_ERR=""          # why geo_fetch failed (a complete check message)
+
+# geo_distinct_pairs <map-pins body> → prints the number of distinct (latitude, longitude)
+# pairs, or prints nothing and returns 1 if latitudes and longitudes do not pair up.
+#
+# Distinct is EXACT string equality of the serialized pair, which is the right key and not a
+# proximity guess: public coordinates are geohash-7 centroids stored as decimal(9,6), so two
+# listings in one cell publish byte-identical values — the same key the catalogue map
+# clusters on (ADR-012 §3). Each pin carries exactly one "latitude": and one "longitude":, in
+# the same order; a title containing that text is JSON-escaped (\"latitude\":) and cannot
+# match. grep exits 1 on no match under pipefail, hence the `|| true`s.
+geo_distinct_pairs() {
+    local body="$1" lats lngs n_lat n_lng
+    lats="$(printf '%s' "${body}" | grep -oE '"latitude"[[:space:]]*:[[:space:]]*-?[0-9][0-9.eE+-]*' | sed -E 's/^.*:[[:space:]]*//' || true)"
+    lngs="$(printf '%s' "${body}" | grep -oE '"longitude"[[:space:]]*:[[:space:]]*-?[0-9][0-9.eE+-]*' | sed -E 's/^.*:[[:space:]]*//' || true)"
+    n_lat="$(printf '%s' "${lats}" | grep -c . || true)"
+    n_lng="$(printf '%s' "${lngs}" | grep -c . || true)"
+    [[ "${n_lat}" == "${n_lng}" ]] || return 1
+    if [[ "${n_lat}" == "0" ]]; then
+        printf '0'
+        return 0
+    fi
+    paste -d ',' <(printf '%s\n' "${lats}") <(printf '%s\n' "${lngs}") | sort -u | grep -c . || true
+}
+
+# geo_fetch → fills the GEO_* globals; returns 1 with GEO_ERR set on any failure.
+# Both requests go to the API DIRECTLY (see check_geo_map_pins for why).
+geo_fetch() {
     local listings_url="${API_BASE}/api/listings?page=1&pageSize=1"
     local pins_url="${API_BASE}/api/listings/map-pins"
-    local code body total pins truncated=""
+    local code body
 
     # Denominator first: it decides whether the pin count means anything at all.
     code="$(http_code "${CURL_TIMEOUT_LOCAL}" "${listings_url}")"
     if [[ "${code}" != "200" ]]; then
-        report_fail "geo-map-pins" "GET ${listings_url} -> ${code} (expected 200; cannot establish the approved-listing count this check is measured against)"
-        return
+        GEO_ERR="GET ${listings_url} -> ${code} (expected 200; cannot establish the approved-listing count this check is measured against)"
+        return 1
     fi
     body="$(http_body "${CURL_TIMEOUT_LOCAL}" "${listings_url}")"
-    total="$(printf '%s' "${body}" | sed -n -E 's/.*"totalCount"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
-    if [[ ! "${total}" =~ ^[0-9]+$ ]]; then
-        report_fail "geo-map-pins" "GET ${listings_url} -> 200 but no numeric \"totalCount\" in the body (unexpected response shape — the paged-result envelope changed?)"
-        return
+    GEO_TOTAL="$(printf '%s' "${body}" | sed -n -E 's/.*"totalCount"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
+    if [[ ! "${GEO_TOTAL}" =~ ^[0-9]+$ ]]; then
+        GEO_ERR="GET ${listings_url} -> 200 but no numeric \"totalCount\" in the body (unexpected response shape — the paged-result envelope changed?)"
+        return 1
     fi
 
     code="$(http_code "${CURL_TIMEOUT_LOCAL}" "${pins_url}")"
     if [[ "${code}" != "200" ]]; then
-        report_fail "geo-map-pins" "GET ${pins_url} -> ${code} (expected 200; the map has no data source at all)"
-        return
+        GEO_ERR="GET ${pins_url} -> ${code} (expected 200; the map has no data source at all)"
+        return 1
     fi
     body="$(http_body "${CURL_TIMEOUT_LOCAL}" "${pins_url}")"
     if [[ "${body}" != *'"items"'* ]]; then
-        report_fail "geo-map-pins" "GET ${pins_url} -> 200 but the body carries no \"items\" envelope (unexpected response shape)"
-        return
+        GEO_ERR="GET ${pins_url} -> 200 but the body carries no \"items\" envelope (unexpected response shape)"
+        return 1
     fi
 
-    # Exactly one "latitude": per pin, and the envelope itself has none. A listing title
-    # containing that literal text is JSON-escaped to \"latitude\": and cannot match.
-    # grep exits 1 on no match and `set -o pipefail` is on, hence the `|| true`; wc still
-    # prints 0, which is the answer we want.
-    pins="$(printf '%s' "${body}" | grep -o '"latitude"[[:space:]]*:' | wc -l | tr -d '[:space:]' || true)"
-    [[ "${body}" == *'"isTruncated"'*'true'* ]] && truncated=" (capped at the pin limit: isTruncated=true)"
+    # Exactly one "latitude": per pin, and the envelope itself has none (see geo_distinct_pairs).
+    GEO_PINS="$(printf '%s' "${body}" | grep -o '"latitude"[[:space:]]*:' | wc -l | tr -d '[:space:]' || true)"
+    if ! GEO_DISTINCT="$(geo_distinct_pairs "${body}")" || [[ ! "${GEO_DISTINCT}" =~ ^[0-9]+$ ]]; then
+        GEO_ERR="GET ${pins_url} -> 200 but latitude/longitude values do not pair up one-to-one (unexpected response shape — ListingMapPinResponse changed?)"
+        return 1
+    fi
+    GEO_TRUNCATED=0
+    [[ "${body}" == *'"isTruncated"'*'true'* ]] && GEO_TRUNCATED=1
+    GEO_MEASURED=1
+    return 0
+}
+
+check_geo_map_pins() {
+    local total pins truncated=""
+
+    if ! geo_fetch; then
+        report_fail "geo-map-pins" "${GEO_ERR}"
+        return
+    fi
+    total="${GEO_TOTAL}"
+    pins="${GEO_PINS}"
+    (( GEO_TRUNCATED == 1 )) && truncated=" (capped at the pin limit: isTruncated=true)"
 
     if (( total == 0 )); then
         if (( pins == 0 )); then
@@ -387,6 +465,138 @@ check_geo_map_pins() {
     fi
 
     report_pass "geo-map-pins" "${pins} of ${total} approved listing(s) carry public coordinates and reach the map${truncated}"
+}
+
+# Geo surface, second half: the pins must not have COLLAPSED onto fewer points.
+#
+# The failure this exists for (ADR-024 home-point release): the AddUserHomePoint migration
+# moves every listing of an owner onto that owner's ONE home point, and only
+# DemoContentBootstrapRunner (BOOTSTRAP_DEMO_CONTENT_ENABLED=true in .env) spreads the
+# showcase back across per-district owners. If the runner does not run, 56 listings sit on 1
+# pin, and geo-map-pins honestly reports "56 of 56 carry public coordinates" — the COUNT is
+# intact, only the DIVERSITY is gone.
+#
+# Why this compares against a baseline instead of asserting a number. Under ADR-024 all
+# listings of one owner LEGITIMATELY share one pin, so the public edge shows distinct pins ==
+# distinct owners (measured live 2026-10-18: 57 pins, 14 distinct pairs, 14 distinct owners).
+# A catalogue collapsed by a failed runner and a catalogue that genuinely belongs to one
+# owner are therefore byte-identical from outside: same owners, same pins, same districts.
+# Nothing in the public responses separates them, and any floor ("at least N pins") is a
+# threshold pinned to a product fact — rejected by ADR-010. What DOES separate them is the
+# catalogue's own state a few minutes earlier: `--record-baseline` right before `up -d`
+# captures it, and the baseline plays the role totalCount plays in geo-map-pins — the
+# "there should have been something" (ADR-010 amendment 2026-10-18).
+#
+# The rule:
+#   no measurement           -> WARN  (geo-map-pins already FAILed and says why)
+#   totalCount == 0          -> PASS, inert: an empty catalogue has no pins to diversify
+#   no / unreadable / stale baseline, baseline from another API_BASE, or either side capped
+#   by isTruncated           -> WARN, "NOT assessed", with the reason — never a silent PASS
+#   distinct pins fell AND totalCount did not fall
+#                            -> FAIL. Listings stayed, points vanished: a collapse.
+#   distinct pins fell AND totalCount fell
+#                            -> WARN. Listings leaving the catalogue legitimately take their
+#                               owner's pin with them; this check cannot tell that from a
+#                               collapse that coincided with it.
+#   otherwise                -> PASS
+# Accepted false positive: an owner moving their home point into another owner's geohash
+# cell between --record-baseline and this run (minutes, during a deploy) is a real drop with
+# an unchanged count. Rare, visible, and resolved by looking at the two pins.
+check_geo_pin_diversity() {
+    local id="geo-pin-diversity" src="(api ${API_BASE}, baseline ${GEO_BASELINE_FILE})"
+    local b_total b_distinct b_api b_epoch b_at b_trunc now age_h
+
+    if (( GEO_MEASURED != 1 )); then
+        report_warn "${id}" "NOT assessed: geo-map-pins could not read the catalogue (see its FAIL above) ${src}"
+        return
+    fi
+    if (( GEO_TOTAL == 0 )); then
+        report_pass "${id}" "approved catalogue is empty, so there are no pins to compare — not exercised ${src}"
+        return
+    fi
+    if [[ ! -r "${GEO_BASELINE_FILE}" ]]; then
+        report_warn "${id}" "NOT assessed: no baseline file — pin diversity is unverified (now ${GEO_DISTINCT} distinct pin(s) for ${GEO_TOTAL} listing(s)). Record one right before the next 'up -d': deploy/smoke.sh --record-baseline (DEPLOY-PRODUCTION.md, 'Обновление стенда' step 5) ${src}"
+        return
+    fi
+
+    b_total="$(read_kv_key "${GEO_BASELINE_FILE}" total)"
+    b_distinct="$(read_kv_key "${GEO_BASELINE_FILE}" distinct_pins)"
+    b_trunc="$(read_kv_key "${GEO_BASELINE_FILE}" truncated)"
+    b_api="$(read_kv_key "${GEO_BASELINE_FILE}" api_base)"
+    b_epoch="$(read_kv_key "${GEO_BASELINE_FILE}" recorded_epoch)"
+    b_at="$(read_kv_key "${GEO_BASELINE_FILE}" recorded_at)"
+    if [[ ! "${b_total}" =~ ^[0-9]+$ || ! "${b_distinct}" =~ ^[0-9]+$ || ! "${b_epoch}" =~ ^[0-9]+$ ]]; then
+        report_warn "${id}" "NOT assessed: baseline file is unreadable (missing total/distinct_pins/recorded_epoch) — re-record it with --record-baseline ${src}"
+        return
+    fi
+    if [[ "${b_api}" != "${API_BASE}" ]]; then
+        report_warn "${id}" "NOT assessed: baseline was measured against ${b_api:-<unknown>}, this run against ${API_BASE} — not comparable ${src}"
+        return
+    fi
+    now="$(date +%s)"
+    age_h=$(( (now - b_epoch) / 3600 ))
+    if (( now - b_epoch > GEO_BASELINE_MAX_AGE_HOURS * 3600 )); then
+        report_warn "${id}" "NOT assessed: baseline is ${age_h}h old (recorded ${b_at}), older than ${GEO_BASELINE_MAX_AGE_HOURS}h — it describes a pre-deploy moment, not now; now ${GEO_DISTINCT} distinct pin(s) for ${GEO_TOTAL} listing(s) ${src}"
+        return
+    fi
+    if (( GEO_TRUNCATED == 1 )) || [[ "${b_trunc}" == "1" ]]; then
+        report_warn "${id}" "NOT assessed: map-pins hit its row cap (isTruncated) on one side, so distinct-pin counts are of a partial set ${src}"
+        return
+    fi
+
+    if (( GEO_DISTINCT < b_distinct )); then
+        if (( GEO_TOTAL >= b_total )); then
+            report_fail "${id}" "map pins COLLAPSED: ${b_distinct} -> ${GEO_DISTINCT} distinct pin(s) while approved listings went ${b_total} -> ${GEO_TOTAL} (baseline recorded ${b_at}). Listings stayed, their points merged — the home-point signature (ADR-024): most likely DemoContentBootstrapRunner did not redistribute the showcase (check BOOTSTRAP_DEMO_CONTENT_ENABLED=true in .env and the 'Demo content bootstrap completed' line in the api startup log). Pre-migration locations survive in ListingLocationsBeforeHomePoint — the undo tape (DEPLOY-PRODUCTION.md section g, 'Первая загрузка после деплоя home-point') ${src}"
+        else
+            report_warn "${id}" "distinct pins fell ${b_distinct} -> ${GEO_DISTINCT} while approved listings also fell ${b_total} -> ${GEO_TOTAL} (baseline recorded ${b_at}) — consistent with listings leaving the catalogue, but a collapse at the same time would look the same; look at the map if the drop is larger than the departures explain ${src}"
+        fi
+        return
+    fi
+
+    report_pass "${id}" "${GEO_DISTINCT} distinct pin(s) for ${GEO_TOTAL} listing(s) vs baseline ${b_distinct} for ${b_total} (recorded ${b_at}, ${age_h}h ago) — no collapse ${src}"
+}
+
+# read_kv_key <file> <key> → value of the last `key=value` line, or nothing. Never sourced:
+# the file is plain data and must not be able to execute anything.
+read_kv_key() {
+    sed -n -E "s/^${2}=//p" "$1" 2>/dev/null | tail -n 1 | tr -d '\r' || true
+}
+
+# --record-baseline: measure, write atomically, print what was written. Runs no checks.
+# Refuses (exit 1, file untouched) if the measurement fails — a half-measured baseline would
+# turn the next comparison into noise.
+record_geo_baseline() {
+    local dir tmp
+    printf 'dorent.am smoke — recording geo baseline — %s\n' "$(date '+%Y-%m-%d %H:%M:%S%z')"
+    if ! geo_fetch; then
+        printf 'FAIL  record-baseline: %s — baseline NOT written (%s)\n' "${GEO_ERR}" "${GEO_BASELINE_FILE}"
+        exit 1
+    fi
+    dir="$(dirname -- "${GEO_BASELINE_FILE}")"
+    if [[ ! -d "${dir}" || ! -w "${dir}" ]]; then
+        printf 'FAIL  record-baseline: directory %s is missing or not writable by %s — baseline NOT written\n' "${dir}" "$(id -un)"
+        exit 1
+    fi
+    tmp="$(mktemp "${dir}/.smoke-geo-baseline.XXXXXX")"
+    GEO_BASELINE_TMP="${tmp}"
+    {
+        printf '# written by deploy/smoke.sh --record-baseline; read by check geo-pin-diversity\n'
+        printf 'recorded_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        printf 'recorded_epoch=%s\n' "$(date +%s)"
+        printf 'api_base=%s\n' "${API_BASE}"
+        printf 'total=%s\n' "${GEO_TOTAL}"
+        printf 'pins=%s\n' "${GEO_PINS}"
+        printf 'distinct_pins=%s\n' "${GEO_DISTINCT}"
+        printf 'truncated=%s\n' "${GEO_TRUNCATED}"
+    } > "${tmp}"
+    chmod 644 "${tmp}"
+    mv -f -- "${tmp}" "${GEO_BASELINE_FILE}"
+    printf 'recorded: total=%s pins=%s distinct_pins=%s truncated=%s (api %s) -> %s\n' \
+        "${GEO_TOTAL}" "${GEO_PINS}" "${GEO_DISTINCT}" "${GEO_TRUNCATED}" "${API_BASE}" "${GEO_BASELINE_FILE}"
+    if (( GEO_TOTAL > 0 && GEO_DISTINCT == 0 )); then
+        printf 'note: the catalogue has listings but no pins RIGHT NOW — the stand is already in the geo-map-pins failure state before the deploy\n'
+    fi
+    exit 0
 }
 
 # Service-token sanity: half a token is never a mode, it is a typo in .env that would
@@ -767,6 +977,19 @@ check_backups() {
 # --- Entry point ---------------------------------------------------------------------
 
 main() {
+    case "${1:-}" in
+        "") ;;
+        --record-baseline) record_geo_baseline ;;
+        -h|--help)
+            printf 'usage: %s [--record-baseline]\n' "$0"
+            exit 0
+            ;;
+        *)
+            printf 'smoke.sh: unknown argument: %s (usage: smoke.sh [--record-baseline])\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+
     printf 'dorent.am production smoke check — %s\n' "$(date '+%Y-%m-%d %H:%M:%S%z')"
     printf 'repo: %s\n' "${REPO_ROOT}"
     case "${ACCESS_MODE}" in
@@ -782,6 +1005,7 @@ main() {
     check_ui_shell
     check_reverse_proxy_db
     check_geo_map_pins
+    check_geo_pin_diversity
     check_access_token_config
     check_domains
     check_public_routes

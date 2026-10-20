@@ -15,13 +15,17 @@ namespace RentalPlatform.Application.Abstractions;
 /// <param name="LastMessageType">
 /// Type of the conversation's last message. Null when there is no last message yet.
 /// </param>
+/// <param name="LastMessageSystemKind">
+/// SystemKind of the last message when it is a system line; null otherwise.
+/// </param>
 public sealed record ChatConversationListItem(
     Conversation Conversation,
     User Counterpart,
     Booking? Booking,
     int UnreadCount,
     Guid? LastMessageSenderId,
-    MessageType? LastMessageType = null);
+    MessageType? LastMessageType = null,
+    ChatSystemKind? LastMessageSystemKind = null);
 
 /// <summary>
 /// Full conversation view: the thread, its context, and a page of messages.

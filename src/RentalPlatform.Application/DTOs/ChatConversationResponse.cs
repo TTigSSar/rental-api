@@ -35,6 +35,12 @@ public sealed class ChatConversationResponse
     /// </summary>
     public string? LastMessageType { get; init; }
 
+    /// <summary>
+    /// <c>ChatTokens.SystemKindToken</c> of the last message when it is a system line (ADR-051:
+    /// the UI localizes the preview from it); null for a text/image message or no message.
+    /// </summary>
+    public string? LastMessageSystemKind { get; init; }
+
     /// <summary>True when the conversation's last message was sent by the current user (false if none, or a system message).</summary>
     public bool LastMessageIsMine { get; init; }
 

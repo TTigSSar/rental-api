@@ -49,13 +49,9 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
         EmitAsync(booking, ChatSystemKind.Closed, CompletedBody, cancellationToken);
 
     public Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(
-            booking,
-            ChatSystemKind.Rejected,
-            string.IsNullOrWhiteSpace(booking.RejectionReason)
-                ? RejectedBody
-                : $"{RejectedBody} {booking.RejectionReason}",
-            cancellationToken);
+        // ADR-051: fixed English fallback only; the UI localizes from systemKind and the stored
+        // body never carries user data such as the rejection reason.
+        EmitAsync(booking, ChatSystemKind.Rejected, RejectedBody, cancellationToken);
 
     public Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default) =>
         EmitAsync(booking, ChatSystemKind.Cancelled, CancelledBody, cancellationToken);

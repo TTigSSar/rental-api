@@ -13,7 +13,7 @@ public sealed class ConversationsStore : IConversationsStore
 
     // Projection-only shape for ListForUserAsync's last-message lookup (sender + type),
     // resolved query-time since Conversation only denormalises the snippet/timestamp.
-    private sealed record LastMessageInfo(Guid Id, Guid? SenderId, MessageType Type);
+    private sealed record LastMessageInfo(Guid Id, Guid? SenderId, MessageType Type, ChatSystemKind? SystemKind);
 
     // Projection-only shape for BuildModerationThreadRowsAsync's per-conversation message scan.
     // Type/NoteSubject are carried so the last message's row can expose LastMessageType and (for a
@@ -180,7 +180,7 @@ public sealed class ConversationsStore : IConversationsStore
             : await _dbContext.ChatMessages
                 .AsNoTracking()
                 .Where(message => lastMessageIds.Contains(message.Id))
-                .Select(message => new LastMessageInfo(message.Id, message.SenderId, message.Type))
+                .Select(message => new LastMessageInfo(message.Id, message.SenderId, message.Type, message.SystemKind))
                 .ToDictionaryAsync(info => info.Id, cancellationToken);
 
         return conversations
@@ -198,7 +198,8 @@ public sealed class ConversationsStore : IConversationsStore
                     conversation.Booking,
                     unread,
                     lastMessageInfo?.SenderId,
-                    lastMessageInfo?.Type);
+                    lastMessageInfo?.Type,
+                    lastMessageInfo?.Type == MessageType.System ? lastMessageInfo.SystemKind : null);
             })
             .ToList();
     }

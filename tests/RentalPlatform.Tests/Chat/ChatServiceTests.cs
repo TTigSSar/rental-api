@@ -783,6 +783,60 @@ public sealed class ChatServiceTests
     }
 
     [Fact]
+    public async Task List_LastMessageSystemKind_Is_Token_When_Last_Message_Is_System_Line()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var messageId = Guid.NewGuid();
+        await using (var seed = db.CreateContext())
+        {
+            var message = TestData.ChatMessage(messageId, ConversationId, null, type: MessageType.System);
+            message.SystemKind = ChatSystemKind.Rejected;
+            seed.ChatMessages.Add(message);
+            var conversation = await seed.Conversations.FindAsync(ConversationId);
+            conversation!.LastMessageId = messageId;
+            conversation.LastMessageAt = DateTime.UtcNow;
+            conversation.LastMessageSnippet = "The owner declined the request.";
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).GetConversationsAsync();
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value!);
+        Assert.Equal("system", item.LastMessageType);
+        Assert.Equal("rejected", item.LastMessageSystemKind);
+    }
+
+    [Fact]
+    public async Task List_LastMessageSystemKind_Is_Null_For_Text_Last_Message()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await AddLastMessageAsync(db, senderId: OwnerId, type: MessageType.Text);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).GetConversationsAsync();
+
+        var item = Assert.Single(result.Value!);
+        Assert.Null(item.LastMessageSystemKind);
+    }
+
+    [Fact]
+    public async Task List_LastMessageSystemKind_Is_Null_When_No_Last_Message()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).GetConversationsAsync();
+
+        var item = Assert.Single(result.Value!);
+        Assert.Null(item.LastMessageSystemKind);
+    }
+
+    [Fact]
     public async Task List_LastMessageType_Is_Null_When_No_Last_Message()
     {
         using var db = new SqliteTestDatabase();

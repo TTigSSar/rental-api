@@ -493,6 +493,7 @@ public sealed class ChatService : IChatService
         LastMessageAt = item.Conversation.LastMessageAt,
         LastMessageIsMine = item.LastMessageSenderId == userId,
         LastMessageType = item.LastMessageType is { } type ? ChatTokens.MessageTypeToken(type) : null,
+        LastMessageSystemKind = ChatTokens.SystemKindToken(item.LastMessageSystemKind),
         UnreadCount = item.UnreadCount
     };
 

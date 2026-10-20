@@ -191,6 +191,25 @@ public sealed class SqlServerTestDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Inserts plain text ChatMessages rows with raw SQL, naming only columns that exist at the
+    /// schema state the caller migrated to (no ActorUserId etc.). Same reason as
+    /// <see cref="SeedLegacyUsersAsync"/>.
+    /// </summary>
+    public async Task SeedLegacyTextMessagesAsync(params (Guid Id, Guid ConversationId, Guid SenderId, string Body, DateTime CreatedAt)[] messages)
+    {
+        await using var context = CreateContext();
+        foreach (var (id, conversationId, senderId, body, createdAt) in messages)
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO [ChatMessages] ([Id], [ConversationId], [SenderId], [Type], [Body], [CreatedAt])
+                VALUES ({0}, {1}, {2}, 0, {3}, {4});
+                """,
+                id, conversationId, senderId, body, createdAt);
+        }
+    }
+
     /// <summary>Inserts a minimal Categories row with raw SQL. Same reason as <see cref="SeedLegacyUsersAsync"/>.</summary>
     public async Task SeedLegacyCategoryAsync(Guid id, string name, string slug)
     {

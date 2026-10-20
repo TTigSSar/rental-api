@@ -160,6 +160,9 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("AttachmentUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -195,6 +198,8 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
 
                     b.HasIndex("SenderId");
 
@@ -1205,6 +1210,11 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("RentalPlatform.Domain.Entities.ChatMessage", b =>
                 {
+                    b.HasOne("RentalPlatform.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RentalPlatform.Domain.Entities.Conversation", "Conversation")
                         .WithMany("Messages")
                         .HasForeignKey("ConversationId")

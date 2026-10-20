@@ -36,27 +36,27 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
         _logger = logger;
     }
 
-    public Task BookingRequestedAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(booking, ChatSystemKind.Request, RequestedBody, cancellationToken);
+    public Task BookingRequestedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, actorUserId, ChatSystemKind.Request, RequestedBody, cancellationToken);
 
-    public Task BookingApprovedAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(booking, ChatSystemKind.Approved, ApprovedBody, cancellationToken);
+    public Task BookingApprovedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, actorUserId, ChatSystemKind.Approved, ApprovedBody, cancellationToken);
 
-    public Task BookingHandedOverAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(booking, ChatSystemKind.Handover, HandedOverBody, cancellationToken);
+    public Task BookingHandedOverAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, actorUserId, ChatSystemKind.Handover, HandedOverBody, cancellationToken);
 
-    public Task BookingCompletedAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(booking, ChatSystemKind.Closed, CompletedBody, cancellationToken);
+    public Task BookingCompletedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, actorUserId, ChatSystemKind.Closed, CompletedBody, cancellationToken);
 
-    public Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default) =>
+    public Task BookingRejectedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         // ADR-051: fixed English fallback only; the UI localizes from systemKind and the stored
         // body never carries user data such as the rejection reason.
-        EmitAsync(booking, ChatSystemKind.Rejected, RejectedBody, cancellationToken);
+        EmitAsync(booking, actorUserId, ChatSystemKind.Rejected, RejectedBody, cancellationToken);
 
-    public Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default) =>
-        EmitAsync(booking, ChatSystemKind.Cancelled, CancelledBody, cancellationToken);
+    public Task BookingCancelledAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, actorUserId, ChatSystemKind.Cancelled, CancelledBody, cancellationToken);
 
-    private async Task EmitAsync(Booking booking, ChatSystemKind kind, string body, CancellationToken cancellationToken)
+    private async Task EmitAsync(Booking booking, Guid? actorUserId, ChatSystemKind kind, string body, CancellationToken cancellationToken)
     {
         try
         {
@@ -66,7 +66,7 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
                 return;
             }
 
-            var message = await _store.AddSystemMessageAsync(conversation.Id, kind, body, cancellationToken);
+            var message = await _store.AddSystemMessageAsync(conversation.Id, kind, body, actorUserId, cancellationToken);
             if (message is null)
             {
                 // Already emitted for this conversation (retry) — nothing new to broadcast.

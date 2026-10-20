@@ -18,6 +18,13 @@ public sealed class ChatMessage
     /// <summary>Author of the message. Null for System messages.</summary>
     public Guid? SenderId { get; set; }
 
+    /// <summary>
+    /// The user whose action caused this System line (RC-5, ADR-001). Null for a system/timer
+    /// transition and for lines written before RC-5 — those count as unread for both parties.
+    /// A line never counts as unread for its actor.
+    /// </summary>
+    public Guid? ActorUserId { get; set; }
+
     public MessageType Type { get; set; }
 
     /// <summary>Text body, or the caption of an image message. Null for a bare image.</summary>

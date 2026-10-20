@@ -157,7 +157,7 @@ public sealed class BookingsService : IBookingsService
         await _notificationEmitter.BookingRequestedAsync(booking, renter, listing, cancellationToken);
 
         // Best-effort: drop a "Booking requested." system line into the booking's chat thread.
-        await _chatSystemMessageEmitter.BookingRequestedAsync(booking, cancellationToken);
+        await _chatSystemMessageEmitter.BookingRequestedAsync(booking, renter.Id, cancellationToken);
 
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
@@ -250,7 +250,7 @@ public sealed class BookingsService : IBookingsService
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         // Best-effort: "cancelled" system line so the owner's open chat reloads the rental card.
-        await _chatSystemMessageEmitter.BookingCancelledAsync(booking, cancellationToken);
+        await _chatSystemMessageEmitter.BookingCancelledAsync(booking, renter.Id, cancellationToken);
 
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
@@ -294,7 +294,7 @@ public sealed class BookingsService : IBookingsService
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         // Best-effort: drop a "Toy handed over…" system line into the booking's chat thread.
-        await _chatSystemMessageEmitter.BookingHandedOverAsync(booking, cancellationToken);
+        await _chatSystemMessageEmitter.BookingHandedOverAsync(booking, booking.Listing.OwnerId, cancellationToken);
 
         return ServiceResult<BookingDetailResponse>.Success(MapBookingDetail(booking, callerParty));
     }
@@ -327,7 +327,7 @@ public sealed class BookingsService : IBookingsService
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
         // Best-effort: drop a "The rental is complete." system line into the booking's chat thread.
-        await _chatSystemMessageEmitter.BookingCompletedAsync(booking, cancellationToken);
+        await _chatSystemMessageEmitter.BookingCompletedAsync(booking, booking.Listing.OwnerId, cancellationToken);
 
         // Covers the (unusual) ordering where both party reviews were already submitted before
         // completion — normally the last review submission (ReviewsService) is what closes the
@@ -443,8 +443,7 @@ public sealed class BookingsService : IBookingsService
             await _notificationEmitter.BookingApprovedAsync(booking, owner, cancellationToken);
 
             // Best-effort: drop an "approved" system line into the booking's chat thread.
-            // (Declined has no ChatSystemKind — no system message on rejection.)
-            await _chatSystemMessageEmitter.BookingApprovedAsync(booking, cancellationToken);
+            await _chatSystemMessageEmitter.BookingApprovedAsync(booking, owner.Id, cancellationToken);
         }
         else if (decision == BookingStatus.Rejected)
         {
@@ -452,7 +451,7 @@ public sealed class BookingsService : IBookingsService
 
             // Best-effort: "declined" system line (with the optional reason) so the renter's open
             // chat reloads the rental card.
-            await _chatSystemMessageEmitter.BookingRejectedAsync(booking, cancellationToken);
+            await _chatSystemMessageEmitter.BookingRejectedAsync(booking, owner.Id, cancellationToken);
         }
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));

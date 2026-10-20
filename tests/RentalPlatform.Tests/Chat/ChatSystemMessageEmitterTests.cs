@@ -45,7 +45,7 @@ public sealed class ChatSystemMessageEmitterTests
             notifier,
             NullLogger<ChatSystemMessageEmitter>.Instance);
 
-        await emitter.BookingRejectedAsync(booking);
+        await emitter.BookingRejectedAsync(booking, OwnerId);
 
         await using var verify = db.CreateContext();
         var message = Assert.Single(verify.ChatMessages);

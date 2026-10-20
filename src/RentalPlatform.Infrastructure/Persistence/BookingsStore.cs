@@ -35,7 +35,15 @@ public sealed class BookingsStore : IBookingsStore
                 .SetProperty(booking => booking.Status, BookingStatus.Expired)
                 .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
 
-        return expiring;
+        // Return only the rows this sweep really moved: a row cancelled/approved in the window
+        // between the read and the update was skipped and must not get an "expired" line.
+        // (Status == Expired with UpdatedAt == utcNow is the marker the update just wrote.)
+        return await _dbContext.Bookings
+            .AsNoTracking()
+            .Where(booking => ids.Contains(booking.Id)
+                && booking.Status == BookingStatus.Expired
+                && booking.UpdatedAt == utcNow)
+            .ToListAsync(cancellationToken);
     }
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>

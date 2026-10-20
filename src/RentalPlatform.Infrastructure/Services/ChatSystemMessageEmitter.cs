@@ -21,6 +21,7 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
     private const string CompletedBody = "The rental is complete.";
     private const string RejectedBody = "The owner declined the request.";
     private const string CancelledBody = "The renter cancelled the booking.";
+    private const string ExpiredBody = "The request expired without an answer.";
 
     private readonly IConversationsStore _store;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
@@ -55,6 +56,9 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
 
     public Task BookingCancelledAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         EmitAsync(booking, actorUserId, ChatSystemKind.Cancelled, CancelledBody, cancellationToken);
+
+    public Task BookingExpiredAsync(Booking booking, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, null, ChatSystemKind.Expired, ExpiredBody, cancellationToken);
 
     private async Task EmitAsync(Booking booking, Guid? actorUserId, ChatSystemKind kind, string body, CancellationToken cancellationToken)
     {

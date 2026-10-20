@@ -28,4 +28,7 @@ public interface IChatSystemMessageEmitter
 
     /// <summary>The renter cancelled the booking → "cancelled" system line.</summary>
     Task BookingCancelledAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>A pending request timed out unanswered → "expired" system line. Timer-driven: no actor, unread for both parties.</summary>
+    Task BookingExpiredAsync(Booking booking, CancellationToken cancellationToken = default);
 }

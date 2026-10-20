@@ -38,6 +38,7 @@ public static class ChatTokens
         ChatSystemKind.Closed => "closed",
         ChatSystemKind.Rejected => "rejected",
         ChatSystemKind.Cancelled => "cancelled",
+        ChatSystemKind.Expired => "expired",
         _ => null
     };
 

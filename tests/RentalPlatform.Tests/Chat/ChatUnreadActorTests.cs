@@ -177,4 +177,54 @@ public sealed class ChatUnreadActorTests
         Assert.Equal(2, await UnreadAsync(db, OwnerId));
         Assert.Equal(1, await UnreadAsync(db, RenterId));
     }
+
+    [Fact]
+    public void Expired_Kind_Maps_To_Expired_Token()
+    {
+        Assert.Equal(7, (int)ChatSystemKind.Expired);
+        Assert.Equal("expired", RentalPlatform.Application.Common.ChatTokens.SystemKindToken(ChatSystemKind.Expired));
+    }
+
+    [Fact]
+    public async Task Sweep_Emits_One_Expired_Line_Per_Booking_Unread_For_Both_And_Is_Idempotent()
+    {
+        using var db = await NewDbAsync();
+        var otherListingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Listing(otherListingId, OwnerId, CategoryId));
+        var b1 = Guid.NewGuid();
+        var b2 = Guid.NewGuid();
+        var live = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Booking(b1, ListingId, RenterId, TestData.Today.AddDays(5), TestData.Today.AddDays(6),
+                BookingStatus.Pending, expiresAt: DateTime.UtcNow.AddHours(-1)),
+            TestData.Booking(b2, otherListingId, RenterId, TestData.Today.AddDays(5), TestData.Today.AddDays(6),
+                BookingStatus.Pending, expiresAt: DateTime.UtcNow.AddMinutes(-5)),
+            TestData.Booking(live, otherListingId, RenterId, TestData.Today.AddDays(10), TestData.Today.AddDays(11),
+                BookingStatus.Pending, expiresAt: DateTime.UtcNow.AddHours(5)));
+
+        for (var i = 0; i < 2; i++)
+        {
+            await using var context = db.CreateContext();
+            await BookingExpiryBackgroundService.ExpireAndAnnounceAsync(
+                new BookingsStore(context),
+                new ChatSystemMessageEmitter(
+                    new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
+                    new FakeChatRealtimeNotifier(),
+                    NullLogger<ChatSystemMessageEmitter>.Instance),
+                DateTime.UtcNow,
+                CancellationToken.None);
+        }
+
+        await using var verify = db.CreateContext();
+        var lines = verify.ChatMessages.Where(m => m.SystemKind == ChatSystemKind.Expired).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, m => Assert.Null(m.ActorUserId));
+        Assert.All(lines, m => Assert.Equal("The request expired without an answer.", m.Body));
+        Assert.Equal(BookingStatus.Expired, verify.Bookings.Single(b => b.Id == b1).Status);
+        Assert.Equal(BookingStatus.Pending, verify.Bookings.Single(b => b.Id == live).Status);
+
+        // Two booking conversations, one expired line each => 2 unread for each party.
+        Assert.Equal(2, await UnreadAsync(db, OwnerId));
+        Assert.Equal(2, await UnreadAsync(db, RenterId));
+    }
 }

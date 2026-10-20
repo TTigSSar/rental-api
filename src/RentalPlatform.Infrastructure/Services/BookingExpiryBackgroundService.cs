@@ -36,13 +36,30 @@ public sealed class BookingExpiryBackgroundService : BackgroundService
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
+    // Expires stale pending bookings, then drops one "expired" chat line (no actor, so unread for
+    // both parties) per booking. The emitter is best-effort and never throws; the per-kind
+    // idempotency in AddSystemMessageAsync keeps a repeated sweep from duplicating a line.
+    public static async Task ExpireAndAnnounceAsync(
+        IBookingsStore bookingsStore,
+        IChatSystemMessageEmitter chatEmitter,
+        DateTime utcNow,
+        CancellationToken cancellationToken)
+    {
+        var expired = await bookingsStore.ExpirePendingAsync(utcNow, cancellationToken);
+        foreach (var booking in expired)
+        {
+            await chatEmitter.BookingExpiredAsync(booking, cancellationToken);
+        }
+    }
+
     private async Task SweepAsync(CancellationToken cancellationToken)
     {
         try
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
             var bookingsStore = scope.ServiceProvider.GetRequiredService<IBookingsStore>();
-            await bookingsStore.ExpirePendingAsync(DateTime.UtcNow, cancellationToken);
+            var chatEmitter = scope.ServiceProvider.GetRequiredService<IChatSystemMessageEmitter>();
+            await ExpireAndAnnounceAsync(bookingsStore, chatEmitter, DateTime.UtcNow, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

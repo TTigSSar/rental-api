@@ -16,13 +16,26 @@ public sealed class BookingsStore : IBookingsStore
         _dbContext = dbContext;
     }
 
-    public async Task ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Booking>> ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default)
     {
-        await _dbContext.Bookings
+        var expiring = await _dbContext.Bookings
+            .AsNoTracking()
             .Where(booking => booking.Status == BookingStatus.Pending && booking.ExpiresAt <= utcNow)
+            .ToListAsync(cancellationToken);
+        if (expiring.Count == 0)
+        {
+            return expiring;
+        }
+
+        var ids = expiring.Select(booking => booking.Id).ToList();
+        // Status re-checked so a row that left Pending between the read and the update is skipped.
+        await _dbContext.Bookings
+            .Where(booking => ids.Contains(booking.Id) && booking.Status == BookingStatus.Pending)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(booking => booking.Status, BookingStatus.Expired)
                 .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
+
+        return expiring;
     }
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>

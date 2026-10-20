@@ -21,6 +21,12 @@ public sealed class FakeChatSystemMessageEmitter : IChatSystemMessageEmitter
         return Task.CompletedTask;
     }
 
+    public Task BookingExpiredAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("expired");
+        return Task.CompletedTask;
+    }
+
     public Task BookingRequestedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 

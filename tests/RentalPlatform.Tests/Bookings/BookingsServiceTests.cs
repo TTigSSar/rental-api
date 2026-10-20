@@ -34,12 +34,13 @@ public sealed class BookingsServiceTests
         await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId, ListingStatus.Approved));
     }
 
-    private static BookingsService CreateService(AppDbContext context, Guid currentUserId) =>
+    private static BookingsService CreateService(
+        AppDbContext context, Guid currentUserId, FakeChatSystemMessageEmitter? chatEmitter = null) =>
         new(
             new FakeCurrentUserContext(currentUserId),
             new BookingsStore(context),
             new FakeNotificationEmitter(),
-            new FakeChatSystemMessageEmitter(),
+            chatEmitter ?? new FakeChatSystemMessageEmitter(),
             new ReviewsStore(context),
             new ConversationsStore(context, NullLogger<ConversationsStore>.Instance));
 
@@ -816,5 +817,45 @@ public sealed class BookingsServiceTests
         Assert.True(result.IsSuccess);
         var booking = Assert.Single(result.Value!, b => b.Id == bookingId);
         Assert.Equal(seedStatus, booking.Status);
+    }
+
+    [Fact]
+    public async Task Reject_Emits_Chat_System_Line()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        var emitter = new FakeChatSystemMessageEmitter();
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId, emitter).RejectAsync(bookingId, "dates_unavailable");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new[] { "rejected" }, emitter.Calls);
+    }
+
+    [Fact]
+    public async Task Cancel_Emits_Chat_System_Line()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        var emitter = new FakeChatSystemMessageEmitter();
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId, emitter).CancelAsync(bookingId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new[] { "cancelled" }, emitter.Calls);
     }
 }

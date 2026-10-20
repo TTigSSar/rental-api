@@ -20,4 +20,10 @@ public interface IChatSystemMessageEmitter
 
     /// <summary>The rental completed → "The rental is complete." system line.</summary>
     Task BookingCompletedAsync(Booking booking, CancellationToken cancellationToken = default);
+
+    /// <summary>The owner declined the request → "declined" system line (carries <c>booking.RejectionReason</c> when set).</summary>
+    Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default);
+
+    /// <summary>The renter cancelled the booking → "cancelled" system line.</summary>
+    Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default);
 }

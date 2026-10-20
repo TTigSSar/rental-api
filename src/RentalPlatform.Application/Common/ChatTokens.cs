@@ -36,7 +36,22 @@ public static class ChatTokens
         ChatSystemKind.Handover => "handover",
         ChatSystemKind.Return => "return",
         ChatSystemKind.Closed => "closed",
+        ChatSystemKind.Rejected => "rejected",
+        ChatSystemKind.Cancelled => "cancelled",
         _ => null
+    };
+
+    public const string TurnOwner = "owner";
+    public const string TurnRenter = "renter";
+    public const string TurnNone = "none";
+
+    // Whose move it is on the booking. SINGLE PLACE to replace with the server-computed turn of
+    // ADR-046 section 8 once the new statuses/handover steps land; the UI must never re-derive it.
+    public static string TurnToken(BookingStatus bookingStatus) => bookingStatus switch
+    {
+        BookingStatus.Pending => TurnOwner,
+        BookingStatus.Approved => TurnOwner,
+        _ => TurnNone
     };
 
     public static string? ModerationNoteKindToken(ModerationNoteKind? kind) => kind switch
@@ -73,8 +88,8 @@ public static class ChatTokens
             BookingStatus.Approved => "approved",
             BookingStatus.Active => endDate < today ? "return_due" : "active",
             BookingStatus.Completed => "completed",
-            // Rejected / Cancelled / Expired have no dedicated pill in the design;
-            // fall back to the "requested" token rather than inventing one.
+            // ADR-001 (amended 2026-10-20): terminal non-happening outcomes share one pill.
+            BookingStatus.Rejected or BookingStatus.Cancelled or BookingStatus.Expired => "not_happened",
             _ => "requested"
         };
     }

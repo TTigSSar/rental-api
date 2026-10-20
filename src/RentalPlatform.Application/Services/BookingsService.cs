@@ -249,6 +249,9 @@ public sealed class BookingsService : IBookingsService
         booking.UpdatedAt = now;
         await _bookingsStore.SaveChangesAsync(cancellationToken);
 
+        // Best-effort: "cancelled" system line so the owner's open chat reloads the rental card.
+        await _chatSystemMessageEmitter.BookingCancelledAsync(booking, cancellationToken);
+
         return ServiceResult<BookingResponse>.Success(MapBooking(booking));
     }
 
@@ -446,6 +449,10 @@ public sealed class BookingsService : IBookingsService
         else if (decision == BookingStatus.Rejected)
         {
             await _notificationEmitter.BookingDeclinedAsync(booking, owner, cancellationToken);
+
+            // Best-effort: "declined" system line (with the optional reason) so the renter's open
+            // chat reloads the rental card.
+            await _chatSystemMessageEmitter.BookingRejectedAsync(booking, cancellationToken);
         }
 
         return ServiceResult<BookingRequestResponse>.Success(MapBookingRequest(booking));

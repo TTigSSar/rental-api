@@ -522,6 +522,33 @@ public sealed class ChatServiceTests
         Assert.True(send.IsSuccess);
     }
 
+    [Theory]
+    [InlineData(BookingStatus.Rejected)]
+    [InlineData(BookingStatus.Cancelled)]
+    [InlineData(BookingStatus.Expired)]
+    public async Task Details_And_Inbox_Map_Rejected_Cancelled_Expired_To_NotHappened(BookingStatus status)
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.User(RenterId, "renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId));
+        await db.SeedAsync(TestData.Booking(
+            BookingId, ListingId, RenterId, Today.AddDays(5), Today.AddDays(8), status));
+        await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
+
+        await using var detailsContext = db.CreateContext();
+        var details = await CreateService(detailsContext, OwnerId)
+            .GetConversationAsync(ConversationId, page: null, pageSize: null);
+        Assert.Equal("not_happened", details.Value!.Status);
+        Assert.Equal("not_happened", details.Value.BookingStatus);
+
+        await using var listContext = db.CreateContext();
+        var list = await CreateService(listContext, OwnerId).GetConversationsAsync();
+        Assert.Equal("not_happened", Assert.Single(list.Value!).Status);
+    }
+
     [Fact]
     public async Task Details_Rental_Fields_Are_Null_For_Moderation_Thread()
     {

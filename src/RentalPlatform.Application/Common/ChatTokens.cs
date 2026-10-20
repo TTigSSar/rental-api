@@ -88,8 +88,8 @@ public static class ChatTokens
             BookingStatus.Approved => "approved",
             BookingStatus.Active => endDate < today ? "return_due" : "active",
             BookingStatus.Completed => "completed",
-            // Rejected / Cancelled / Expired have no dedicated pill in the design;
-            // fall back to the "requested" token rather than inventing one.
+            // ADR-001 (amended 2026-10-20): terminal non-happening outcomes share one pill.
+            BookingStatus.Rejected or BookingStatus.Cancelled or BookingStatus.Expired => "not_happened",
             _ => "requested"
         };
     }

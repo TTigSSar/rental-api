@@ -79,10 +79,40 @@ public sealed class ChatTokensTests
     [InlineData(BookingStatus.Rejected)]
     [InlineData(BookingStatus.Cancelled)]
     [InlineData(BookingStatus.Expired)]
-    public void Terminal_NonCompleted_Statuses_Fall_Back_To_Requested(BookingStatus status)
+    public void Rejected_Cancelled_Expired_Map_To_NotHappened(BookingStatus status)
     {
         var token = ChatTokens.StatusToken(status, Today.AddDays(5), closedAt: null, UtcNow);
 
-        Assert.Equal("requested", token);
+        Assert.Equal("not_happened", token);
+    }
+
+    [Theory]
+    [InlineData(BookingStatus.Rejected)]
+    [InlineData(BookingStatus.Cancelled)]
+    [InlineData(BookingStatus.Expired)]
+    public void ClosedAt_Still_Overrides_NotHappened(BookingStatus status)
+    {
+        Assert.Equal("closed", ChatTokens.StatusToken(status, Today.AddDays(5), closedAt: UtcNow, UtcNow));
+    }
+
+    [Fact]
+    public void Every_Defined_BookingStatus_Has_Expected_Token()
+    {
+        var expected = new Dictionary<BookingStatus, string>
+        {
+            [BookingStatus.Pending] = "requested",
+            [BookingStatus.Approved] = "approved",
+            [BookingStatus.Active] = "active",
+            [BookingStatus.Completed] = "completed",
+            [BookingStatus.Rejected] = "not_happened",
+            [BookingStatus.Cancelled] = "not_happened",
+            [BookingStatus.Expired] = "not_happened"
+        };
+
+        foreach (var status in Enum.GetValues<BookingStatus>())
+        {
+            Assert.True(expected.ContainsKey(status), $"Unmapped BookingStatus {status}");
+            Assert.Equal(expected[status], ChatTokens.StatusToken(status, Today.AddDays(5), closedAt: null, UtcNow));
+        }
     }
 }

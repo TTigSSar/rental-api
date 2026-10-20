@@ -530,6 +530,8 @@ public sealed class ChatService : IChatService
             ? null
             : RentalPeriod.Days(details.Booking.StartDate, details.Booking.EndDate),
         RejectionReason = details.Booking?.RejectionReason,
+        ListingId = details.Booking?.ListingId,
+        RenterNote = details.Booking?.Note,
         Messages = details.Messages
             .Select(message => MapMessage(message, userId, details.Counterpart, details.CounterpartLastReadAt))
             .ToList()

@@ -455,6 +455,7 @@ public sealed class ChatServiceTests
             Today.AddDays(5), Today.AddDays(8),
             BookingStatus.Pending, expiresAt: expiresAt);
         booking.RejectionReason = "stale";
+        booking.Note = "Please keep it clean";
         await db.SeedAsync(booking);
         await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
 
@@ -472,6 +473,8 @@ public sealed class ChatServiceTests
         Assert.Equal(Today.AddDays(8), details.EndDate);
         Assert.Equal(3, details.RentalDays);
         Assert.Equal("stale", details.RejectionReason);
+        Assert.Equal(ListingId, details.ListingId);
+        Assert.Equal("Please keep it clean", details.RenterNote);
         Assert.False(details.IsClosed);
     }
 
@@ -582,6 +585,8 @@ public sealed class ChatServiceTests
         Assert.Null(details.EndDate);
         Assert.Null(details.RentalDays);
         Assert.Null(details.RejectionReason);
+        Assert.Null(details.ListingId);
+        Assert.Null(details.RenterNote);
         Assert.False(details.IsClosed);
     }
 

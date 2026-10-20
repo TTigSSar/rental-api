@@ -59,5 +59,13 @@ public sealed class ChatConversationDetailsResponse
     /// <summary>The owner's stored rejection reason (code or free text), if any.</summary>
     public string? RejectionReason { get; init; }
 
+    // Rental-card fields (RC-2b). Null for a Moderation conversation / one without a booking.
+
+    /// <summary>The booked listing's id (for a "show toy listing" link).</summary>
+    public Guid? ListingId { get; init; }
+
+    /// <summary>The renter's note sent with the booking request; null when none was given.</summary>
+    public string? RenterNote { get; init; }
+
     public IReadOnlyCollection<ChatMessageResponse> Messages { get; init; } = Array.Empty<ChatMessageResponse>();
 }

@@ -19,6 +19,8 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
     private const string ApprovedBody = "The owner approved the request.";
     private const string HandedOverBody = "Toy handed over — the rental has started.";
     private const string CompletedBody = "The rental is complete.";
+    private const string RejectedBody = "The owner declined the request.";
+    private const string CancelledBody = "The renter cancelled the booking.";
 
     private readonly IConversationsStore _store;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
@@ -45,6 +47,18 @@ public sealed class ChatSystemMessageEmitter : IChatSystemMessageEmitter
 
     public Task BookingCompletedAsync(Booking booking, CancellationToken cancellationToken = default) =>
         EmitAsync(booking, ChatSystemKind.Closed, CompletedBody, cancellationToken);
+
+    public Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default) =>
+        EmitAsync(
+            booking,
+            ChatSystemKind.Rejected,
+            string.IsNullOrWhiteSpace(booking.RejectionReason)
+                ? RejectedBody
+                : $"{RejectedBody} {booking.RejectionReason}",
+            cancellationToken);
+
+    public Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default) =>
+        EmitAsync(booking, ChatSystemKind.Cancelled, CancelledBody, cancellationToken);
 
     private async Task EmitAsync(Booking booking, ChatSystemKind kind, string body, CancellationToken cancellationToken)
     {

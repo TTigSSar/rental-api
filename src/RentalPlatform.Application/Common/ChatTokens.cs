@@ -36,7 +36,22 @@ public static class ChatTokens
         ChatSystemKind.Handover => "handover",
         ChatSystemKind.Return => "return",
         ChatSystemKind.Closed => "closed",
+        ChatSystemKind.Rejected => "rejected",
+        ChatSystemKind.Cancelled => "cancelled",
         _ => null
+    };
+
+    public const string TurnOwner = "owner";
+    public const string TurnRenter = "renter";
+    public const string TurnNone = "none";
+
+    // Whose move it is on the booking. SINGLE PLACE to replace with the server-computed turn of
+    // ADR-046 section 8 once the new statuses/handover steps land; the UI must never re-derive it.
+    public static string TurnToken(BookingStatus bookingStatus) => bookingStatus switch
+    {
+        BookingStatus.Pending => TurnOwner,
+        BookingStatus.Approved => TurnOwner,
+        _ => TurnNone
     };
 
     public static string? ModerationNoteKindToken(ModerationNoteKind? kind) => kind switch

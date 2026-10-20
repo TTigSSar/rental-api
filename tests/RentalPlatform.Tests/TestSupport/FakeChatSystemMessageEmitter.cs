@@ -7,6 +7,20 @@ namespace RentalPlatform.Tests.TestSupport;
 // effect, so tests of the core booking lifecycle don't need it to do work.
 public sealed class FakeChatSystemMessageEmitter : IChatSystemMessageEmitter
 {
+    public List<string> Calls { get; } = new();
+
+    public Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("rejected");
+        return Task.CompletedTask;
+    }
+
+    public Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("cancelled");
+        return Task.CompletedTask;
+    }
+
     public Task BookingRequestedAsync(Booking booking, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 

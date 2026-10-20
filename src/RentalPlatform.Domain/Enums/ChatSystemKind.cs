@@ -8,5 +8,7 @@ public enum ChatSystemKind
     Approved = 1,  // owner approved the request
     Handover = 2,  // toy handed over / receipt confirmed (Approved → Active)
     Return = 3,    // return due
-    Closed = 4     // rental complete + both reviews in → conversation read-only
+    Closed = 4,    // rental complete + both reviews in → conversation read-only
+    Rejected = 5,  // owner declined the request (body may carry the optional reason)
+    Cancelled = 6  // renter cancelled the booking
 }

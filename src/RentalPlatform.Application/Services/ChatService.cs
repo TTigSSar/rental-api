@@ -1,6 +1,7 @@
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -227,7 +228,7 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
         }
 
-        if (await TryLazyCloseAsync(conversation, cancellationToken))
+        if (await IsLockedForSendAsync(conversation, cancellationToken))
         {
             return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
         }
@@ -333,7 +334,7 @@ public sealed class ChatService : IChatService
                 return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
             }
 
-            if (await TryLazyCloseAsync(conversation, cancellationToken))
+            if (await IsLockedForSendAsync(conversation, cancellationToken))
             {
                 return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
             }
@@ -428,36 +429,52 @@ public sealed class ChatService : IChatService
     // conversation, mirroring the opportunistic IBookingsStore.ExpirePendingAsync pattern (no
     // background job). Cheap in the common case: returns immediately once already closed or the
     // booking isn't Completed, so no review queries run on the hot path.
-    private async Task<bool> TryLazyCloseAsync(Conversation conversation, CancellationToken cancellationToken)
+    private async Task<bool> TryLazyCloseAsync(Conversation conversation, CancellationToken cancellationToken) =>
+        (await LazyCloseAsync(conversation, cancellationToken)).JustClosed;
+
+    // Send guard (ADR-001 amended): a booking thread is read-only once the booking is Completed,
+    // derived from the booking status (reviews no longer gate it). Also runs the legacy lazy close.
+    private async Task<bool> IsLockedForSendAsync(Conversation conversation, CancellationToken cancellationToken)
+    {
+        var (justClosed, bookingCompleted) = await LazyCloseAsync(conversation, cancellationToken);
+        return justClosed || bookingCompleted;
+    }
+
+    private async Task<(bool JustClosed, bool BookingCompleted)> LazyCloseAsync(
+        Conversation conversation, CancellationToken cancellationToken)
     {
         if (conversation.ClosedAt is not null)
         {
-            return false;
+            return (false, false);
         }
 
         // A Moderation thread has no booking and never auto-closes — the ADR-001 close condition
         // below is meaningless for it.
         if (conversation.Kind == ConversationKind.Moderation)
         {
-            return false;
+            return (false, false);
         }
 
         var bookingId = conversation.BookingId!.Value;
         var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
         if (booking is null || booking.Status != BookingStatus.Completed)
         {
-            return false;
+            return (false, false);
         }
 
         var hasOwnerReview = await _reviewsStore.HasOwnerReviewAsync(bookingId, cancellationToken);
         var hasRenterReview = await _reviewsStore.HasRenterReviewAsync(bookingId, cancellationToken);
         if (!hasOwnerReview || !hasRenterReview)
         {
-            return false;
+            return (false, true);
         }
 
-        return await _store.CloseForBookingAsync(bookingId, DateTime.UtcNow, cancellationToken);
+        return (await _store.CloseForBookingAsync(bookingId, DateTime.UtcNow, cancellationToken), true);
     }
+
+    // Read-only = explicitly closed (legacy review-based lock) OR the booking is Completed.
+    private static bool IsClosed(Conversation conversation, Booking? booking) =>
+        conversation.ClosedAt is not null || booking?.Status == BookingStatus.Completed;
 
     private static ChatConversationResponse MapListItem(ChatConversationListItem item, Guid userId, DateTime utcNow) => new()
     {
@@ -498,7 +515,21 @@ public sealed class ChatService : IChatService
             ? null
             : FormatDates(details.Booking.StartDate, details.Booking.EndDate),
         BookingPrice = details.Booking?.TotalPrice,
-        IsClosed = details.Conversation.ClosedAt is not null,
+        IsClosed = IsClosed(details.Conversation, details.Booking),
+        BookingStatus = details.Booking is null
+            ? null
+            : ChatTokens.StatusToken(details.Booking.Status, details.Booking.EndDate, details.Conversation.ClosedAt, utcNow),
+        ViewerRole = details.Booking is null
+            ? null
+            : details.Conversation.OwnerId == userId ? ChatTokens.TurnOwner : ChatTokens.TurnRenter,
+        Turn = details.Booking is null ? null : ChatTokens.TurnToken(details.Booking.Status),
+        DeadlineAt = details.Booking is { Status: BookingStatus.Pending } pending ? pending.ExpiresAt : null,
+        StartDate = details.Booking?.StartDate,
+        EndDate = details.Booking?.EndDate,
+        RentalDays = details.Booking is null
+            ? null
+            : RentalPeriod.Days(details.Booking.StartDate, details.Booking.EndDate),
+        RejectionReason = details.Booking?.RejectionReason,
         Messages = details.Messages
             .Select(message => MapMessage(message, userId, details.Counterpart, details.CounterpartLastReadAt))
             .ToList()

@@ -354,13 +354,16 @@ public sealed class ChatServiceTests
         Assert.NotNull(conversation.ClosedAt);
     }
 
-    // Only one of the two gating reviews is in: the lazy close must NOT trigger, so messaging
-    // keeps working and the pill still reads "completed" rather than "closed".
-    [Fact]
-    public async Task SendMessage_Succeeds_And_GetConversation_Stays_Completed_When_Only_One_Review_Exists()
+    // ADR-001 amended: a Completed booking is read-only even when only one (or no) review is in.
+    // The legacy ClosedAt stays null (pill still "completed"), but sending is refused and IsClosed is derived.
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task SendMessage_Fails_And_Details_IsClosed_When_Booking_Completed_Without_Both_Reviews(
+        bool hasOwnerReview, bool hasRenterReview)
     {
         using var db = new SqliteTestDatabase();
-        await SeedCompletedBookingAsync(db, hasOwnerReview: true, hasRenterReview: false);
+        await SeedCompletedBookingAsync(db, hasOwnerReview, hasRenterReview);
 
         await using var sendContext = db.CreateContext();
         var sendResult = await CreateService(sendContext, OwnerId).SendMessageAsync(new SendChatMessageRequest
@@ -369,19 +372,190 @@ public sealed class ChatServiceTests
             Content = "Hello"
         });
 
-        Assert.True(sendResult.IsSuccess);
+        Assert.False(sendResult.IsSuccess);
+        Assert.Equal("chat.conversation_closed", sendResult.Error!.Code);
+
+        await using var imageContext = db.CreateContext();
+        var imageResult = await CreateService(imageContext, RenterId).SendImageMessageAsync(ImageRequest());
+        Assert.False(imageResult.IsSuccess);
+        Assert.Equal("chat.conversation_closed", imageResult.Error!.Code);
 
         await using var verifyContext = db.CreateContext();
         var conversation = await verifyContext.Conversations.SingleAsync(c => c.Id == ConversationId);
         Assert.Null(conversation.ClosedAt);
+        Assert.Equal(0, await verifyContext.ChatMessages.CountAsync());
 
         await using var readContext = db.CreateContext();
         var detailsResult = await CreateService(readContext, OwnerId)
             .GetConversationAsync(ConversationId, page: null, pageSize: null);
 
         Assert.True(detailsResult.IsSuccess);
-        Assert.False(detailsResult.Value!.IsClosed);
+        Assert.True(detailsResult.Value!.IsClosed);
         Assert.Equal("completed", detailsResult.Value!.Status);
+        Assert.Equal("none", detailsResult.Value.Turn);
+
+        // MarkRead stays allowed on a read-only thread.
+        await using var readMarkContext = db.CreateContext();
+        Assert.True((await CreateService(readMarkContext, RenterId).MarkReadAsync(ConversationId)).IsSuccess);
+    }
+
+    // M-010: exercise the derived lock through the real Complete flow, not a seeded status.
+    [Fact]
+    public async Task SendMessage_Fails_After_Owner_Completes_Booking_Through_BookingsService()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.User(RenterId, "renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId));
+        await db.SeedAsync(TestData.Booking(
+            BookingId, ListingId, RenterId,
+            Today.AddDays(-3), Today.AddDays(-1),
+            BookingStatus.Active));
+        await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
+
+        await using (var bookingContext = db.CreateContext())
+        {
+            var bookings = new BookingsService(
+                new FakeCurrentUserContext(OwnerId),
+                new BookingsStore(bookingContext),
+                new FakeNotificationEmitter(),
+                new FakeChatSystemMessageEmitter(),
+                new ReviewsStore(bookingContext),
+                new ConversationsStore(bookingContext, NullLogger<ConversationsStore>.Instance));
+            Assert.True((await bookings.CompleteAsync(BookingId)).IsSuccess);
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId).SendMessageAsync(new SendChatMessageRequest
+        {
+            ConversationId = ConversationId,
+            Content = "Thanks!"
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.conversation_closed", result.Error!.Code);
+    }
+
+    [Theory]
+    [InlineData(true, "owner")]
+    [InlineData(false, "renter")]
+    public async Task Details_Exposes_Rental_State_For_Pending_Booking(bool viewerIsOwner, string expectedRole)
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.User(RenterId, "renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId));
+        var expiresAt = DateTime.UtcNow.AddHours(12);
+        var booking = TestData.Booking(
+            BookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending, expiresAt: expiresAt);
+        booking.RejectionReason = "stale";
+        await db.SeedAsync(booking);
+        await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, viewerIsOwner ? OwnerId : RenterId)
+            .GetConversationAsync(ConversationId, page: null, pageSize: null);
+
+        Assert.True(result.IsSuccess);
+        var details = result.Value!;
+        Assert.Equal("requested", details.BookingStatus);
+        Assert.Equal(expectedRole, details.ViewerRole);
+        Assert.Equal("owner", details.Turn);
+        Assert.Equal(expiresAt, details.DeadlineAt);
+        Assert.Equal(Today.AddDays(5), details.StartDate);
+        Assert.Equal(Today.AddDays(8), details.EndDate);
+        Assert.Equal(3, details.RentalDays);
+        Assert.Equal("stale", details.RejectionReason);
+        Assert.False(details.IsClosed);
+    }
+
+    [Fact]
+    public async Task Details_DeadlineAt_Is_Null_When_Booking_Not_Pending()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db); // Approved
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId)
+            .GetConversationAsync(ConversationId, page: null, pageSize: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("approved", result.Value!.BookingStatus);
+        Assert.Equal("owner", result.Value.Turn);
+        Assert.Null(result.Value.DeadlineAt);
+    }
+
+    [Theory]
+    [InlineData(BookingStatus.Rejected)]
+    [InlineData(BookingStatus.Cancelled)]
+    [InlineData(BookingStatus.Expired)]
+    public async Task Details_Stays_Open_For_Rejected_Cancelled_Expired(BookingStatus status)
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(OwnerId, "owner@test.local"),
+            TestData.User(RenterId, "renter@test.local"),
+            TestData.Category(CategoryId));
+        await db.SeedAsync(TestData.Listing(ListingId, OwnerId, CategoryId));
+        await db.SeedAsync(TestData.Booking(
+            BookingId, ListingId, RenterId, Today.AddDays(5), Today.AddDays(8), status));
+        await db.SeedAsync(TestData.Conversation(ConversationId, BookingId, OwnerId, RenterId));
+
+        await using var detailsContext = db.CreateContext();
+        var details = await CreateService(detailsContext, OwnerId)
+            .GetConversationAsync(ConversationId, page: null, pageSize: null);
+        Assert.False(details.Value!.IsClosed);
+        Assert.Equal("none", details.Value.Turn);
+
+        await using var sendContext = db.CreateContext();
+        var send = await CreateService(sendContext, OwnerId).SendMessageAsync(new SendChatMessageRequest
+        {
+            ConversationId = ConversationId,
+            Content = "Still open"
+        });
+        Assert.True(send.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Details_Rental_Fields_Are_Null_For_Moderation_Thread()
+    {
+        var adminId = Guid.NewGuid();
+        var moderationId = Guid.NewGuid();
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(
+            TestData.User(adminId, "admin@test.local"),
+            TestData.User(RenterId, "member@test.local"));
+        await db.SeedAsync(new Conversation
+        {
+            Id = moderationId,
+            BookingId = null,
+            Kind = ConversationKind.Moderation,
+            OwnerId = adminId,
+            RenterId = RenterId,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, RenterId)
+            .GetConversationAsync(moderationId, page: null, pageSize: null);
+
+        Assert.True(result.IsSuccess);
+        var details = result.Value!;
+        Assert.Null(details.BookingStatus);
+        Assert.Null(details.ViewerRole);
+        Assert.Null(details.Turn);
+        Assert.Null(details.DeadlineAt);
+        Assert.Null(details.StartDate);
+        Assert.Null(details.EndDate);
+        Assert.Null(details.RentalDays);
+        Assert.Null(details.RejectionReason);
+        Assert.False(details.IsClosed);
     }
 
     private static SendChatImageMessageRequest ImageRequest(

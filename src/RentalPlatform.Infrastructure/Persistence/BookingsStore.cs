@@ -50,7 +50,7 @@ public sealed class BookingsStore : IBookingsStore
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 
     public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
-        _dbContext.Listings.FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
+        _dbContext.Listings.Include(listing => listing.Owner).FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
 
     public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
     {

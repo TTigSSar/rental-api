@@ -9,6 +9,7 @@ namespace RentalPlatform.Tests.Infrastructure;
 // The races ADR-035 section 2 (atomicity R1) exists for, against a REAL SQL Server: concurrent
 // writers and real lock behaviour. [SqlServerFact] skips with a reason when no local SQL Server is
 // reachable, and fails when the declared one is down (see SqlServerFactAttribute).
+[Collection(RentalPlatform.Tests.TestSupport.SqlServerConcurrencyCollection.Name)]
 public sealed class PasswordResetConcurrencyTests
 {
     private const string Email = "race.reset@test.local";

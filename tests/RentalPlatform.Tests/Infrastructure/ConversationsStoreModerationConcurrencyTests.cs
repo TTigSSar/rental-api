@@ -21,6 +21,7 @@ namespace RentalPlatform.Tests.Infrastructure;
 //
 // Requires a local SQL Server reachable at "Server=.;Trusted_Connection=True" (same instance
 // CLAUDE.md's "Running locally" section assumes for RentalPlatformDbDev).
+[Collection(RentalPlatform.Tests.TestSupport.SqlServerConcurrencyCollection.Name)]
 public sealed class ConversationsStoreModerationConcurrencyTests
 {
     // The migration immediately before DeduplicateModerationConversations — no column changes

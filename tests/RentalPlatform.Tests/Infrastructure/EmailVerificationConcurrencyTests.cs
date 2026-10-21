@@ -15,6 +15,7 @@ namespace RentalPlatform.Tests.Infrastructure;
 //
 // [SqlServerFact]: SKIPPED with a reason when no local SQL Server is reachable, and FAILED (never
 // skipped) when RENTALPLATFORM_TEST_SQLSERVER_CONNECTION_STRING declares one that is down.
+[Collection(RentalPlatform.Tests.TestSupport.SqlServerConcurrencyCollection.Name)]
 public sealed class EmailVerificationConcurrencyTests
 {
     private const string Email = "race.user@test.local";
@@ -262,6 +263,18 @@ public sealed class EmailVerificationConcurrencyTests
     // Revoke and count statements filter on (UserId, Purpose[, CreatedAt]); if one of them scanned
     // instead of seeking it would lock OTHER users' rows and could deadlock across accounts. Several
     // different users, each hit by verify + resend + re-registration at once, for repeated rounds.
+    //
+    // Sizing is deliberate. 6 users x 3 racers = 18 sessions at once stalled this test about every
+    // other run on a developer SQL Server: blocked sessions each pin a SQL Server worker, the lock
+    // holder's NEXT batch sat PENDING (THREADPOOL wait, no lock cycle, no 1205) until the 30 s command
+    // timeout, and every racer queued behind it died with "Execution Timeout Expired". That is the
+    // instance starving, not a product deadlock. Measured on that machine, failures per 10 runs by
+    // concurrent users: 2 -> 0, 3 -> 0 (1 in 22 later), 4 -> 1, 6 -> ~5. Two users x 30 rounds keeps
+    // the same 60 user-races; "different users must not touch each other" needs only more than one
+    // user overlapping, and the three-way same-user race has its own test above.
+    private const int CrossUserRounds = 30;
+    private const int CrossUserCount = 2;
+
     [SqlServerFact]
     public async Task Verify_Resend_And_Replacement_Across_Many_Different_Users_Never_Deadlock()
     {
@@ -269,9 +282,9 @@ public sealed class EmailVerificationConcurrencyTests
         var clock = new FakeTimeProvider(new DateTimeOffset(DateTime.UtcNow, TimeSpan.Zero));
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        for (var round = 0; round < 10; round++)
+        for (var round = 0; round < CrossUserRounds; round++)
         {
-            const int users = 6;
+            const int users = CrossUserCount;
             var ids = Enumerable.Range(0, users).Select(_ => Guid.NewGuid()).ToArray();
             for (var u = 0; u < users; u++)
             {

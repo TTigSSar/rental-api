@@ -168,6 +168,8 @@ public sealed class BookingNotificationCopyTests
     public async Task Request_Hy()
     {
         var n = await Requested("hy");
+        Assert.Equal("Նոր վարձակալության հարցում՝ Karen", n.Title);
+        Assert.Equal("Դիտել հարցումը", n.PrimaryActionLabel);
         Assert.Matches(Armenian, n.Title);
         Assert.Matches(Armenian, n.Body);
         Assert.Matches(Armenian, n.PrimaryActionLabel);
@@ -202,6 +204,7 @@ public sealed class BookingNotificationCopyTests
     {
         var n = await Approved("ru");
         Assert.Equal("Ваш запрос одобрен", n.Title);
+        Assert.StartsWith("Игрушка «Wooden Train Set» ваша на 5 окт.–7 окт.", n.Body, StringComparison.Ordinal);
         Assert.Contains("5 окт.–7 окт.", n.Body, StringComparison.Ordinal);
         Assert.Contains("Anahit", n.Body, StringComparison.Ordinal);
         Assert.Equal("2 дня · 1,500 ֏", n.Meta);

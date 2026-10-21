@@ -131,6 +131,13 @@ internal static class NotificationCopy
         return from == to ? from : $"{from}–{to}";
     }
 
+    /// <summary>
+    /// Appends a sentence stop to <paramref name="text"/> without doubling it when the text already ends
+    /// with an abbreviation dot ("5 окт.–7 окт." + "." must not become "окт..").
+    /// </summary>
+    internal static string EndSentence(string text, string stop) =>
+        text.EndsWith('.') ? (stop == "." ? text : text[..^1] + stop) : text + stop;
+
     /// <summary>"3 days · 1,500 ֏". The amount format is kept identical to the Angular DramCurrencyPipe.</summary>
     public static string BookingMeta(string language, int days, decimal totalPrice)
     {
@@ -168,15 +175,15 @@ internal static class NotificationCopy
         {
             "hy" => new Rendered(
                 $"Նոր վարձակալության հարցում՝ {renterName}",
-                $"{renterName} ցանկանում է վարձակալել «{toyTitle}»՝ {range}։ Պատասխանեք 24 ժամվա ընթացքում՝ արագ պատասխանողի նշանը պահպանելու համար։",
+                $"{renterName} ցանկանում է վարձակալել «{toyTitle}»՝ {EndSentence(range, "։")} Պատասխանեք 24 ժամվա ընթացքում՝ արագ պատասխանողի նշանը պահպանելու համար։",
                 "Դիտել հարցումը", meta),
             "ru" => new Rendered(
                 $"Новый запрос на аренду от {renterName}",
-                $"{renterName} хочет взять «{toyTitle}» на {range}. Ответьте в течение 24 часов, чтобы сохранить значок быстрых ответов.",
+                $"{renterName} хочет взять «{toyTitle}» на {EndSentence(range, ".")} Ответьте в течение 24 часов, чтобы сохранить значок быстрых ответов.",
                 "Посмотреть запрос", meta),
             _ => new Rendered(
                 $"New rental request from {renterName}",
-                $"{renterName} wants your \"{toyTitle}\" for {range}. Respond within 24h to keep your fast-reply badge.",
+                $"{renterName} wants your \"{toyTitle}\" for {EndSentence(range, ".")} Respond within 24h to keep your fast-reply badge.",
                 "Review request", meta)
         };
 
@@ -186,21 +193,66 @@ internal static class NotificationCopy
         {
             "hy" => new Rendered(
                 "Ձեր հարցումը հաստատվել է",
-                $"«{toyTitle}»-ը ձերն է՝ {range}։ Վերցնելու ժամը համաձայնեցրեք տիրոջ հետ՝ {ownerName}։",
+                $"«{toyTitle}»-ը ձերն է՝ {EndSentence(range, "։")} Վերցնելու ժամը համաձայնեցրեք տիրոջ հետ՝ {ownerName}։",
                 "Պայմանավորվել վերցնելու մասին", meta),
             "ru" => new Rendered(
                 "Ваш запрос одобрен",
-                $"Игрушка «{toyTitle}» ваша на {range}. Договоритесь с владельцем ({ownerName}) о времени получения.",
+                $"Игрушка «{toyTitle}» ваша на {EndSentence(range, ".")} Договоритесь с владельцем ({ownerName}) о времени получения.",
                 "Договориться о передаче", meta),
             _ => new Rendered(
                 $"{ownerName} approved your request",
-                $"The \"{toyTitle}\" is yours for {range}. Arrange a pickup time with {ownerName}.",
+                $"The \"{toyTitle}\" is yours for {EndSentence(range, ".")} Arrange a pickup time with {ownerName}.",
                 "Arrange pickup", meta)
         };
+
+    /// <summary>
+    /// Booking-rejection reason codes sent by the UI reject dialog (bookings.rejectReason.* in
+    /// Rental-Ui/public/i18n), with the UI's own wording so the renter reads the same phrase in the
+    /// notification and on the booking card. "other" is never sent as a code (the dialog sends the
+    /// typed free text instead), so it is deliberately not mapped.
+    /// </summary>
+    internal static string? RejectionReasonText(string language, string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        var trimmed = reason.Trim();
+        return trimmed switch
+        {
+            "dates_unavailable" => language switch
+            {
+                "hy" => "Ամսաթվերն այլևս հասանելի չեն",
+                "ru" => "Даты больше недоступны",
+                _ => "Dates are no longer available"
+            },
+            "item_unavailable" => language switch
+            {
+                "hy" => "Խաղալիքն այս պահին հասանելի չէ",
+                "ru" => "Игрушка сейчас недоступна",
+                _ => "The toy is currently unavailable"
+            },
+            "not_a_fit" => language switch
+            {
+                "hy" => "Այս ամրագրումը հարմար չէ",
+                "ru" => "Это бронирование не подходит",
+                _ => "This booking isn't a good fit"
+            },
+            // Anything else shaped like a code (snake_case token) or the unmapped "other": never show it raw.
+            "other" => null,
+            _ when LooksLikeCode(trimmed) => null,
+            _ => trimmed
+        };
+    }
+
+    private static bool LooksLikeCode(string value) =>
+        value.Length > 0 && value.All(c => c is (>= 'a' and <= 'z') or '_' or (>= '0' and <= '9')) && value.Contains('_');
 
     /// <summary>To the renter: the owner declined. <paramref name="reason"/> is the owner's own free text, shown verbatim.</summary>
     public static Rendered BookingDeclined(string language, string ownerName, string toyTitle, string? reason, string meta)
     {
+        reason = RejectionReasonText(language, reason);
         var hasReason = !string.IsNullOrWhiteSpace(reason);
         return language switch
         {

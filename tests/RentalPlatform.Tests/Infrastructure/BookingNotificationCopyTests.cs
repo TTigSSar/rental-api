@@ -333,4 +333,87 @@ public sealed class BookingNotificationCopyTests
         var n = await Emit(s, e => e.BookingApprovedAsync(s.Booking, s.Owner), RenterId);
         Assert.Equal("Anahit approved your request", n.Title);
     }
+
+    // ---- Sentence stops after a date that ends with an abbreviation dot ---------------------------
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    [InlineData("hy")]
+    public async Task No_Rendered_Body_Contains_A_Doubled_Stop(string language)
+    {
+        foreach (var body in new[]
+        {
+            (await Requested(language)).Body,
+            (await Requested(language, end: Start)).Body,
+            (await Approved(language)).Body,
+            (await Declined(language)).Body,
+            (await Declined(language, "dates_unavailable")).Body,
+            (await ListingLive(language)).Body,
+            (await ListingChanges(language, null)).Body
+        })
+        {
+            Assert.DoesNotContain("..", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(".։", body, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void EndSentence_Does_Not_Double_An_Abbreviation_Dot()
+    {
+        Assert.Equal("10 мар.–12 мар.", NotificationCopy.EndSentence("10 мар.–12 мар.", "."));
+        Assert.Equal("10 Mar–12 Mar.", NotificationCopy.EndSentence("10 Mar–12 Mar", "."));
+        Assert.Equal("10 մար։", NotificationCopy.EndSentence("10 մար.", "։"));
+    }
+
+    [Fact]
+    public async Task Approved_Ru_Reads_Cleanly_After_The_Dated_Range()
+    {
+        var n = await Approved("ru");
+        Assert.Contains("на 5 окт.–7 окт. Договоритесь", n.Body, StringComparison.Ordinal);
+    }
+
+    // ---- Booking rejection reason codes ----------------------------------------------------------
+
+    [Theory]
+    [InlineData("dates_unavailable", "en", "Dates are no longer available")]
+    [InlineData("dates_unavailable", "ru", "Даты больше недоступны")]
+    [InlineData("dates_unavailable", "hy", "Ամսաթվերն այլևս հասանելի չեն")]
+    [InlineData("item_unavailable", "en", "The toy is currently unavailable")]
+    [InlineData("item_unavailable", "ru", "Игрушка сейчас недоступна")]
+    [InlineData("item_unavailable", "hy", "Խաղալիքն այս պահին հասանելի չէ")]
+    [InlineData("not_a_fit", "en", "This booking isn't a good fit")]
+    [InlineData("not_a_fit", "ru", "Это бронирование не подходит")]
+    [InlineData("not_a_fit", "hy", "Այս ամրագրումը հարմար չէ")]
+    public async Task Declined_Maps_Known_Reason_Codes_To_Localized_Text(string code, string language, string expected)
+    {
+        var n = await Declined(language, code);
+        Assert.Contains(expected, n.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(code, n.Body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    [InlineData("hy")]
+    public async Task Declined_Keeps_Free_Text_Verbatim(string language)
+    {
+        var n = await Declined(language, "Уезжаем на выходные");
+        Assert.Contains("Уезжаем на выходные", n.Body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    [InlineData("hy")]
+    public async Task Declined_Unknown_Code_Shows_No_Reason(string language)
+    {
+        var generic = await Declined(language);
+        foreach (var code in new[] { "some_new_code", "other" })
+        {
+            var n = await Declined(language, code);
+            Assert.Equal(generic.Body, n.Body);
+            Assert.DoesNotContain(code, n.Body, StringComparison.Ordinal);
+        }
+    }
 }

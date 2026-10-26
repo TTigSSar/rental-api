@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.DTOs;
 using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Entities;
@@ -186,6 +188,80 @@ public sealed class ChatUnreadActorTests
         Assert.Equal("expired", RentalPlatform.Application.Common.ChatTokens.SystemKindToken(ChatSystemKind.Expired));
     }
 
+    // Scoped emitter (own DbContext per scope), like the production registration. `wrap` lets a
+    // test decorate the real emitter, e.g. to make one booking's emit throw.
+    private static ServiceProvider EmitterProvider(
+        SqliteTestDatabase db,
+        Func<IChatSystemMessageEmitter, IChatSystemMessageEmitter>? wrap = null)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<IChatSystemMessageEmitter>(_ =>
+        {
+            var context = db.CreateContext();
+            IChatSystemMessageEmitter real = new ChatSystemMessageEmitter(
+                new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
+                new FakeChatRealtimeNotifier(),
+                NullLogger<ChatSystemMessageEmitter>.Instance);
+            return wrap is null ? real : wrap(real);
+        });
+        return services.BuildServiceProvider();
+    }
+
+    private sealed class FailFirstExpiredEmitter : IChatSystemMessageEmitter
+    {
+        private readonly IChatSystemMessageEmitter _inner;
+        private readonly Func<bool> _shouldFail;
+
+        public FailFirstExpiredEmitter(IChatSystemMessageEmitter inner, Func<bool> shouldFail)
+        {
+            _inner = inner;
+            _shouldFail = shouldFail;
+        }
+
+        public Task BookingExpiredAsync(Booking booking, CancellationToken cancellationToken = default) =>
+            _shouldFail()
+                ? throw new InvalidOperationException("simulated emit failure")
+                : _inner.BookingExpiredAsync(booking, cancellationToken);
+
+        public Task BookingRequestedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingRequestedAsync(booking, actorUserId, cancellationToken);
+        public Task BookingApprovedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingApprovedAsync(booking, actorUserId, cancellationToken);
+        public Task BookingHandedOverAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingHandedOverAsync(booking, actorUserId, cancellationToken);
+        public Task BookingCompletedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingCompletedAsync(booking, actorUserId, cancellationToken);
+        public Task BookingRejectedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingRejectedAsync(booking, actorUserId, cancellationToken);
+        public Task BookingCancelledAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) => _inner.BookingCancelledAsync(booking, actorUserId, cancellationToken);
+    }
+
+    [Fact]
+    public async Task Sweep_A_Failing_Emit_For_One_Booking_Does_Not_Lose_The_Next_Bookings_Line()
+    {
+        using var db = await NewDbAsync();
+        var otherListingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Listing(otherListingId, OwnerId, CategoryId));
+        var b1 = Guid.NewGuid();
+        var b2 = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Booking(b1, ListingId, RenterId, TestData.Today.AddDays(5), TestData.Today.AddDays(6),
+                BookingStatus.Pending, expiresAt: DateTime.UtcNow.AddHours(-1)),
+            TestData.Booking(b2, otherListingId, RenterId, TestData.Today.AddDays(5), TestData.Today.AddDays(6),
+                BookingStatus.Pending, expiresAt: DateTime.UtcNow.AddHours(-1)));
+
+        var calls = 0;
+        await using var context = db.CreateContext();
+        using var provider = EmitterProvider(db, real => new FailFirstExpiredEmitter(real, () => calls++ == 0));
+        await BookingExpiryBackgroundService.ExpireAndAnnounceAsync(
+            new BookingsStore(context),
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger.Instance,
+            DateTime.UtcNow,
+            CancellationToken.None);
+
+        Assert.Equal(2, calls);
+        await using var verify = db.CreateContext();
+        Assert.All(new[] { b1, b2 }, id => Assert.Equal(BookingStatus.Expired, verify.Bookings.Single(b => b.Id == id).Status));
+        // Exactly one line landed (the second booking's); the first emit threw.
+        Assert.Single(verify.ChatMessages.Where(m => m.SystemKind == ChatSystemKind.Expired).ToList());
+    }
+
     [Fact]
     public async Task Sweep_Emits_One_Expired_Line_Per_Booking_Unread_For_Both_And_Is_Idempotent()
     {
@@ -206,12 +282,11 @@ public sealed class ChatUnreadActorTests
         for (var i = 0; i < 2; i++)
         {
             await using var context = db.CreateContext();
+            using var provider = EmitterProvider(db);
             await BookingExpiryBackgroundService.ExpireAndAnnounceAsync(
                 new BookingsStore(context),
-                new ChatSystemMessageEmitter(
-                    new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
-                    new FakeChatRealtimeNotifier(),
-                    NullLogger<ChatSystemMessageEmitter>.Instance),
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger.Instance,
                 DateTime.UtcNow,
                 CancellationToken.None);
         }
@@ -278,12 +353,11 @@ public sealed class ChatUnreadActorTests
 
         await using (var context = db.CreateContext(interceptor))
         {
+            using var provider = EmitterProvider(db);
             await BookingExpiryBackgroundService.ExpireAndAnnounceAsync(
                 new BookingsStore(context),
-                new ChatSystemMessageEmitter(
-                    new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
-                    new FakeChatRealtimeNotifier(),
-                    NullLogger<ChatSystemMessageEmitter>.Instance),
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger.Instance,
                 DateTime.UtcNow,
                 CancellationToken.None);
         }

@@ -302,9 +302,7 @@ internal static class NotificationCopy
         if (hasReason)
         {
             // The composed reason ("<label>" or "<label>: <note>") carries no closing punctuation of its own.
-            reason = reason!.Trim();
-            if (Array.IndexOf(TerminalPunctuation, reason[^1]) < 0)
-                reason += language == "hy" ? "։" : ".";
+            reason = CloseSentence(reason!.Trim(), language);
         }
         return language switch
         {
@@ -330,6 +328,14 @@ internal static class NotificationCopy
     }
 
     private static readonly char[] TerminalPunctuation = { '.', '!', '?', '…', '։' };
+
+    /// <summary>
+    /// Appends the language's full stop (Armenian «։», otherwise ".") unless the already-trimmed
+    /// <paramref name="text"/> ends in terminal punctuation. Shared by every copy that embeds
+    /// admin free text in a sentence so the stop is never doubled.
+    /// </summary>
+    public static string CloseSentence(string text, string language) =>
+        Array.IndexOf(TerminalPunctuation, text[^1]) < 0 ? text + (language == "hy" ? "։" : ".") : text;
 
     private static string Fallback(string value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;

@@ -227,7 +227,7 @@ public sealed class AdminListingsService : IAdminListingsService
 
         // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this recategorisation.
         await _moderationNoteEmitter.ListingRecategorisedAsync(
-            admin.Id, listing.OwnerId, listing.Title, fromCategoryName, category.Name, cancellationToken);
+            admin.Id, listing.OwnerId, listing.Owner?.PreferredLanguage, listing.Title, fromCategoryName, category.Name, cancellationToken);
 
         var detail = await BuildDetailAsync(listing, cancellationToken);
         return ServiceResult<AdminListingDetailResponse>.Success(detail);
@@ -374,7 +374,7 @@ public sealed class AdminListingsService : IAdminListingsService
 
         // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this rejection.
         await _moderationNoteEmitter.ListingRejectedAsync(
-            admin.Id, listing.OwnerId, listing.Title, RejectionReasonCatalog.LabelFor(trimmedCode), trimmedNote, cancellationToken);
+            admin.Id, listing.OwnerId, listing.Owner.PreferredLanguage, listing.Title, trimmedCode, trimmedNote, cancellationToken);
 
         return ServiceResult<ModerateListingResponse>.Success(new ModerateListingResponse
         {

@@ -192,7 +192,7 @@ public sealed class AdminUsersService : IAdminUsersService
             }, cancellationToken);
 
             // Best-effort (see IModerationNoteEmitter): never lets a note failure fail the suspension.
-            await _moderationNoteEmitter.AccountSuspendedAsync(admin.Id, user.Id, trimmedReason, cancellationToken);
+            await _moderationNoteEmitter.AccountSuspendedAsync(admin.Id, user.Id, user.PreferredLanguage, trimmedReason, cancellationToken);
         }
         // else: already suspended — idempotent no-op, same convention as VerifyAsync above.
 

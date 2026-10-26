@@ -1,6 +1,6 @@
-using System.Globalization;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
@@ -12,6 +12,12 @@ namespace RentalPlatform.Infrastructure.Services;
 /// best-effort: failures are logged and swallowed so a notification problem can
 /// never break the booking/moderation action that triggered it.
 /// </summary>
+/// <remarks>
+/// Every kind is rendered at emit time in the RECIPIENT's PreferredLanguage (English fallback) from
+/// <see cref="NotificationCopy"/>, per the ADR-025 amendment. The recipient's User row must therefore
+/// be loaded on the entity graph handed in: Request and the listing kinds -> listing.Owner,
+/// Approved/Declined/Pickup -> booking.Renter. A missing navigation falls back to English.
+/// </remarks>
 public sealed class NotificationEmitter : INotificationEmitter
 {
     private const string SystemPlatformName = "DoRent";
@@ -29,152 +35,173 @@ public sealed class NotificationEmitter : INotificationEmitter
     }
 
     public Task BookingRequestedAsync(Booking booking, User renter, Listing listing, CancellationToken cancellationToken = default) =>
-        EmitAsync(new Notification
+        EmitAsync(NotificationKind.Request, booking.Id, listing.OwnerId, () =>
         {
-            Id = Guid.NewGuid(),
-            RecipientId = listing.OwnerId,
-            Kind = NotificationKind.Request,
-            Category = NotificationCategory.Booking,
-            Urgent = true,
-            Title = $"New rental request from {renter.FirstName}",
-            Body = $"{renter.FirstName} wants your \"{listing.Title}\" for {FormatRange(booking)}. Respond within 24h to keep your fast-reply badge.",
-            Meta = BuildMeta(booking),
-            ActorName = FullName(renter),
-            ActorAvatarUrl = renter.AvatarUrl,
-            ActorVerified = renter.IsIdConfirmed,
-            EntityType = NotificationEntityType.Booking,
-            EntityId = booking.Id,
-            DeepLink = "/bookings/requests",
-            ToyTitle = listing.Title,
-            ToyImageUrl = PrimaryImageUrl(listing),
-            PrimaryActionLabel = "Review request",
-            PrimaryActionDeepLink = "/bookings/requests",
-            CreatedAt = DateTime.UtcNow
+            var language = NotificationCopy.ResolveLanguage(listing.Owner?.PreferredLanguage);
+            var copy = NotificationCopy.BookingRequested(
+                language, renter.FirstName, listing.Title, Range(booking, language), Meta(booking, language));
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = listing.OwnerId,
+                Kind = NotificationKind.Request,
+                Category = NotificationCategory.Booking,
+                Urgent = true,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = copy.Meta,
+                ActorName = FullName(renter),
+                ActorAvatarUrl = renter.AvatarUrl,
+                ActorVerified = renter.IsIdConfirmed,
+                EntityType = NotificationEntityType.Booking,
+                EntityId = booking.Id,
+                DeepLink = "/bookings/requests",
+                ToyTitle = listing.Title,
+                ToyImageUrl = PrimaryImageUrl(listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = "/bookings/requests",
+                CreatedAt = DateTime.UtcNow
+            };
         }, cancellationToken);
 
     public Task BookingApprovedAsync(Booking booking, User owner, CancellationToken cancellationToken = default) =>
-        EmitAsync(new Notification
+        EmitAsync(NotificationKind.Approved, booking.Id, booking.RenterId, () =>
         {
-            Id = Guid.NewGuid(),
-            RecipientId = booking.RenterId,
-            Kind = NotificationKind.Approved,
-            Category = NotificationCategory.Booking,
-            Urgent = false,
-            Title = $"{owner.FirstName} approved your request",
-            Body = $"The \"{booking.Listing.Title}\" is yours for {FormatRange(booking)}. Arrange a pickup time with {owner.FirstName}.",
-            Meta = BuildMeta(booking),
-            ActorName = FullName(owner),
-            ActorAvatarUrl = owner.AvatarUrl,
-            ActorVerified = owner.IsIdConfirmed,
-            EntityType = NotificationEntityType.Booking,
-            EntityId = booking.Id,
-            DeepLink = $"/bookings/{booking.Id}",
-            ToyTitle = booking.Listing.Title,
-            ToyImageUrl = PrimaryImageUrl(booking.Listing),
-            PrimaryActionLabel = "Arrange pickup",
-            PrimaryActionDeepLink = $"/bookings/{booking.Id}",
-            CreatedAt = DateTime.UtcNow
+            var language = NotificationCopy.ResolveLanguage(booking.Renter?.PreferredLanguage);
+            var copy = NotificationCopy.BookingApproved(
+                language, owner.FirstName, booking.Listing.Title, Range(booking, language), Meta(booking, language));
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = booking.RenterId,
+                Kind = NotificationKind.Approved,
+                Category = NotificationCategory.Booking,
+                Urgent = false,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = copy.Meta,
+                ActorName = FullName(owner),
+                ActorAvatarUrl = owner.AvatarUrl,
+                ActorVerified = owner.IsIdConfirmed,
+                EntityType = NotificationEntityType.Booking,
+                EntityId = booking.Id,
+                DeepLink = $"/bookings/{booking.Id}",
+                ToyTitle = booking.Listing.Title,
+                ToyImageUrl = PrimaryImageUrl(booking.Listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = $"/bookings/{booking.Id}",
+                CreatedAt = DateTime.UtcNow
+            };
         }, cancellationToken);
 
     public Task BookingDeclinedAsync(Booking booking, User owner, CancellationToken cancellationToken = default) =>
-        EmitAsync(new Notification
+        EmitAsync(NotificationKind.Declined, booking.Id, booking.RenterId, () =>
         {
-            Id = Guid.NewGuid(),
-            RecipientId = booking.RenterId,
-            Kind = NotificationKind.Declined,
-            Category = NotificationCategory.Booking,
-            Urgent = false,
-            Title = $"{owner.FirstName} declined your request",
-            Body = string.IsNullOrWhiteSpace(booking.RejectionReason)
-                ? $"Your request for \"{booking.Listing.Title}\" was declined. Here are similar toys nearby."
-                : $"\"{booking.RejectionReason}\" — here are similar toys nearby.",
-            Meta = BuildMeta(booking),
-            ActorName = FullName(owner),
-            ActorAvatarUrl = owner.AvatarUrl,
-            ActorVerified = owner.IsIdConfirmed,
-            EntityType = NotificationEntityType.Booking,
-            EntityId = booking.Id,
-            DeepLink = "/listings",
-            ToyTitle = booking.Listing.Title,
-            ToyImageUrl = PrimaryImageUrl(booking.Listing),
-            PrimaryActionLabel = "Find similar toys",
-            PrimaryActionDeepLink = "/listings",
-            CreatedAt = DateTime.UtcNow
+            var language = NotificationCopy.ResolveLanguage(booking.Renter?.PreferredLanguage);
+            var copy = NotificationCopy.BookingDeclined(
+                language, owner.FirstName, booking.Listing.Title, booking.RejectionReason, Meta(booking, language));
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = booking.RenterId,
+                Kind = NotificationKind.Declined,
+                Category = NotificationCategory.Booking,
+                Urgent = false,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = copy.Meta,
+                ActorName = FullName(owner),
+                ActorAvatarUrl = owner.AvatarUrl,
+                ActorVerified = owner.IsIdConfirmed,
+                EntityType = NotificationEntityType.Booking,
+                EntityId = booking.Id,
+                DeepLink = "/listings",
+                ToyTitle = booking.Listing.Title,
+                ToyImageUrl = PrimaryImageUrl(booking.Listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = "/listings",
+                CreatedAt = DateTime.UtcNow
+            };
         }, cancellationToken);
 
     public Task ListingApprovedAsync(Listing listing, CancellationToken cancellationToken = default) =>
-        EmitAsync(new Notification
+        EmitAsync(NotificationKind.ListingLive, listing.Id, listing.OwnerId, () =>
         {
-            Id = Guid.NewGuid(),
-            RecipientId = listing.OwnerId,
-            Kind = NotificationKind.ListingLive,
-            Category = NotificationCategory.Listing,
-            Urgent = false,
-            Title = "Your listing is live",
-            Body = $"\"{listing.Title}\" passed moderation. Families can now find and request it.",
-            Meta = null,
-            ActorName = SystemPlatformName,
-            ActorIsSystem = true,
-            ActorSystemIcon = SystemPlatformIcon,
-            EntityType = NotificationEntityType.Listing,
-            EntityId = listing.Id,
-            DeepLink = $"/listings/{listing.Id}",
-            ToyTitle = listing.Title,
-            ToyImageUrl = PrimaryImageUrl(listing),
-            PrimaryActionLabel = "View public listing",
-            PrimaryActionDeepLink = $"/listings/{listing.Id}",
-            CreatedAt = DateTime.UtcNow
+            var language = NotificationCopy.ResolveLanguage(listing.Owner?.PreferredLanguage);
+            var copy = NotificationCopy.ListingLive(language, listing.Title);
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = listing.OwnerId,
+                Kind = NotificationKind.ListingLive,
+                Category = NotificationCategory.Listing,
+                Urgent = false,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = null,
+                ActorName = SystemPlatformName,
+                ActorIsSystem = true,
+                ActorSystemIcon = SystemPlatformIcon,
+                EntityType = NotificationEntityType.Listing,
+                EntityId = listing.Id,
+                DeepLink = $"/listings/{listing.Id}",
+                ToyTitle = listing.Title,
+                ToyImageUrl = PrimaryImageUrl(listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = $"/listings/{listing.Id}",
+                CreatedAt = DateTime.UtcNow
+            };
         }, cancellationToken);
 
-    public Task ListingRejectedAsync(Listing listing, string? reason, CancellationToken cancellationToken = default) =>
-        EmitAsync(new Notification
+    public Task ListingRejectedAsync(Listing listing, string? reasonCode, string? note, CancellationToken cancellationToken = default) =>
+        EmitAsync(NotificationKind.ListingChanges, listing.Id, listing.OwnerId, () =>
         {
-            Id = Guid.NewGuid(),
-            RecipientId = listing.OwnerId,
-            Kind = NotificationKind.ListingChanges,
-            Category = NotificationCategory.Listing,
-            Urgent = true,
-            Title = "Changes needed on your listing",
-            Body = string.IsNullOrWhiteSpace(reason)
-                ? $"\"{listing.Title}\" needs changes before it can go live. Fix the issues and resubmit."
-                : $"{reason} Fix the issues on \"{listing.Title}\" and resubmit — fixes jump the review queue.",
-            Meta = null,
-            ActorName = SystemModeratorName,
-            ActorIsSystem = true,
-            ActorSystemIcon = SystemModeratorIcon,
-            EntityType = NotificationEntityType.Listing,
-            EntityId = listing.Id,
-            DeepLink = $"/my-listings/{listing.Id}/edit",
-            ToyTitle = listing.Title,
-            ToyImageUrl = PrimaryImageUrl(listing),
-            PrimaryActionLabel = "Edit & resubmit",
-            PrimaryActionDeepLink = $"/my-listings/{listing.Id}/edit",
-            CreatedAt = DateTime.UtcNow
+            var language = NotificationCopy.ResolveLanguage(listing.Owner?.PreferredLanguage);
+            var reason = string.IsNullOrWhiteSpace(reasonCode)
+                ? note
+                : RejectionReasonCatalog.Compose(reasonCode, note, language);
+            var copy = NotificationCopy.ListingChanges(language, listing.Title, reason);
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = listing.OwnerId,
+                Kind = NotificationKind.ListingChanges,
+                Category = NotificationCategory.Listing,
+                Urgent = true,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = null,
+                ActorName = SystemModeratorName,
+                ActorIsSystem = true,
+                ActorSystemIcon = SystemModeratorIcon,
+                EntityType = NotificationEntityType.Listing,
+                EntityId = listing.Id,
+                DeepLink = $"/my-listings/{listing.Id}/edit",
+                ToyTitle = listing.Title,
+                ToyImageUrl = PrimaryImageUrl(listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = $"/my-listings/{listing.Id}/edit",
+                CreatedAt = DateTime.UtcNow
+            };
         }, cancellationToken);
 
-    // The one emit site whose copy is rendered per-recipient rather than in English only: it is the
-    // first notification a renter can receive about something the OWNER did to a booking already in
-    // flight, and it names a place. Rendered at emit time in booking.Renter.PreferredLanguage (with
-    // the English fallback) from NotificationCopy — see that file for why the language is frozen
-    // here rather than resolved at read time.
+    // Rendered per-recipient in booking.Renter.PreferredLanguage (with the English fallback) from
+    // NotificationCopy — see that file for why the language is frozen here rather than resolved at
+    // read time.
     //
-    // It is also the only emit site that does real work BEFORE handing a finished Notification to
-    // EmitAsync — resolving a language, rendering copy, reading booking.Listing.Title. EmitAsync's
-    // try/catch cannot cover any of that, so a booking whose Listing navigation is not loaded (or
-    // whose row has since been deleted) threw straight out of this method, past HomePointService's
-    // fan-out loop, and cost EVERY remaining renter their notification with nothing logged. The
-    // whole body is therefore guarded here, which is what makes the callers' "the emitter logs its
-    // own failures" contract actually true rather than aspirational.
-    public async Task PickupAreaChangedAsync(Booking booking, User owner, District? newDistrict, CancellationToken cancellationToken = default)
-    {
-        Notification notification;
-        try
+    // The copy is built inside EmitAsync's guard (see the builder overload): rendering touches
+    // navigations that may be unloaded (a booking whose Listing is missing used to throw straight out
+    // of this method, past HomePointService's fan-out loop, and cost EVERY remaining renter their
+    // notification with nothing logged). The callers' "the emitter logs its own failures" contract
+    // depends on that.
+    public Task PickupAreaChangedAsync(Booking booking, User owner, District? newDistrict, CancellationToken cancellationToken = default) =>
+        EmitAsync(NotificationKind.Pickup, booking.Id, booking.RenterId, () =>
         {
             var language = NotificationCopy.ResolveLanguage(booking.Renter?.PreferredLanguage);
             var districtName = newDistrict is null ? null : NotificationCopy.DistrictName(newDistrict, language);
             var copy = NotificationCopy.PickupAreaChanged(language, booking.Listing.Title, districtName);
 
-            notification = new Notification
+            return new Notification
             {
                 Id = Guid.NewGuid(),
                 RecipientId = booking.RenterId,
@@ -198,19 +225,26 @@ public sealed class NotificationEmitter : INotificationEmitter
                 PrimaryActionDeepLink = $"/bookings/{booking.Id}",
                 CreatedAt = DateTime.UtcNow
             };
+        }, cancellationToken);
+
+    // Builds inside the guard: a throw while rendering is logged, not propagated to the
+    // booking/moderation action that triggered the notification.
+    private async Task EmitAsync(
+        NotificationKind kind, Guid entityId, Guid recipientId, Func<Notification> build, CancellationToken cancellationToken)
+    {
+        Notification notification;
+        try
+        {
+            notification = build();
         }
         catch (Exception exception)
         {
-            // Logged, not rethrown: same contract as EmitAsync below. The identifiers come off the
-            // booking row itself, so they are readable even when its navigations are not — which is
-            // the failure this catch exists for, and the one detail that makes the log line
-            // actionable (it names the booking to go and look at).
             _logger.LogError(
                 exception,
-                "Failed to build the {Kind} notification for booking {BookingId} (recipient {RecipientId}) — it was not sent.",
-                NotificationKind.Pickup,
-                booking.Id,
-                booking.RenterId);
+                "Failed to build the {Kind} notification for entity {EntityId} (recipient {RecipientId}) — it was not sent.",
+                kind,
+                entityId,
+                recipientId);
             return;
         }
 
@@ -237,26 +271,17 @@ public sealed class NotificationEmitter : INotificationEmitter
 
     private static string FullName(User user) => $"{user.FirstName} {user.LastName}".Trim();
 
-    private static string FormatRange(Booking booking)
-    {
-        var start = booking.StartDate.ToString("d MMM");
-        var end = booking.EndDate.ToString("d MMM");
-        return start == end ? start : $"{start}–{end}";
-    }
+    private static string Range(Booking booking, string language) =>
+        NotificationCopy.FormatRange(booking.StartDate, booking.EndDate, language);
 
     /// <summary>
     /// DoRent is single-currency (AMD), so the ֏ symbol is a constant here rather than
-    /// read from the listing/booking. This format is deliberately kept identical to
-    /// DramCurrencyPipe in the Angular app (Rental-Ui/src/app/shared/utils/dram-currency.pipe.ts)
-    /// — the two must be changed together.
+    /// read from the listing/booking. The amount format (see <see cref="NotificationCopy.BookingMeta"/>)
+    /// is deliberately kept identical to DramCurrencyPipe in the Angular app
+    /// (Rental-Ui/src/app/shared/utils/dram-currency.pipe.ts) — the two must be changed together.
     /// </summary>
-    private static string BuildMeta(Booking booking)
-    {
-        var days = RentalPeriod.Days(booking.StartDate, booking.EndDate);
-        var dayLabel = days == 1 ? "day" : "days";
-        var amount = booking.TotalPrice.ToString("#,##0", CultureInfo.InvariantCulture);
-        return $"{days} {dayLabel} · {amount}\u00A0֏";
-    }
+    private static string Meta(Booking booking, string language) =>
+        NotificationCopy.BookingMeta(language, RentalPeriod.Days(booking.StartDate, booking.EndDate), booking.TotalPrice);
 
     private static string? PrimaryImageUrl(Listing listing) =>
         listing.Images?

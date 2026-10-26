@@ -105,7 +105,7 @@ public sealed class AdminListingsServiceTests
         Assert.Equal(AdminId, call.ModeratorId);
         Assert.Equal(OwnerId, call.MemberId);
         Assert.Equal("LEGO Duplo Starter Set", call.ListingTitle);
-        Assert.Equal("Unsafe item", call.ReasonLabel);
+        Assert.Equal("unsafeItem", call.ReasonCode);
         Assert.Equal("Small parts.", call.Note);
     }
 

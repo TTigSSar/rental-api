@@ -219,6 +219,12 @@ public sealed class BookingsServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("booking.not_pending", result.Error!.Code);
+
+        // Refused without any state change: the row is still Pending, never half-approved.
+        await using var verify = db.CreateContext();
+        var stored = await verify.Bookings.FindAsync(pendingId);
+        Assert.Equal(BookingStatus.Pending, stored!.Status);
+        Assert.Null(stored.ApprovedAt);
     }
 
     [Fact]

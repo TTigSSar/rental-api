@@ -41,6 +41,12 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
             .HasForeignKey(message => message.SenderId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Null for system/timer lines and pre-RC-5 rows; no navigation, same shape as Sender.
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(message => message.ActorUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         // Paged thread reads: newest-per-conversation.
         builder.HasIndex(message => new { message.ConversationId, message.CreatedAt });
     }

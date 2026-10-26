@@ -16,6 +16,7 @@ namespace RentalPlatform.Tests.Infrastructure;
 // outcome is deterministic rather than lucky.
 //
 // [SqlServerFact]: SKIPPED with a reason when no local SQL Server is reachable.
+[Collection(RentalPlatform.Tests.TestSupport.SqlServerConcurrencyCollection.Name)]
 public sealed class ExternalSignInConcurrencyTests
 {
     private const string Password = "Sufficient1Password";

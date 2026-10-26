@@ -13,7 +13,7 @@ public sealed class ConversationsStore : IConversationsStore
 
     // Projection-only shape for ListForUserAsync's last-message lookup (sender + type),
     // resolved query-time since Conversation only denormalises the snippet/timestamp.
-    private sealed record LastMessageInfo(Guid Id, Guid? SenderId, MessageType Type);
+    private sealed record LastMessageInfo(Guid Id, Guid? SenderId, MessageType Type, ChatSystemKind? SystemKind);
 
     // Projection-only shape for BuildModerationThreadRowsAsync's per-conversation message scan.
     // Type/NoteSubject are carried so the last message's row can expose LastMessageType and (for a
@@ -162,6 +162,9 @@ public sealed class ConversationsStore : IConversationsStore
             where participant.UserId == userId
                 && conversationIds.Contains(message.ConversationId)
                 && message.SenderId != userId
+                // RC-5: a system line is not unread for the user whose action caused it.
+                // Null ActorUserId (system/timer, pre-RC-5) counts for both parties.
+                && (message.ActorUserId == null || message.ActorUserId != userId)
                 && (participant.LastReadAt == null || message.CreatedAt > participant.LastReadAt)
             group message by message.ConversationId into grouped
             select new { ConversationId = grouped.Key, Count = grouped.Count() })
@@ -180,7 +183,7 @@ public sealed class ConversationsStore : IConversationsStore
             : await _dbContext.ChatMessages
                 .AsNoTracking()
                 .Where(message => lastMessageIds.Contains(message.Id))
-                .Select(message => new LastMessageInfo(message.Id, message.SenderId, message.Type))
+                .Select(message => new LastMessageInfo(message.Id, message.SenderId, message.Type, message.SystemKind))
                 .ToDictionaryAsync(info => info.Id, cancellationToken);
 
         return conversations
@@ -198,7 +201,8 @@ public sealed class ConversationsStore : IConversationsStore
                     conversation.Booking,
                     unread,
                     lastMessageInfo?.SenderId,
-                    lastMessageInfo?.Type);
+                    lastMessageInfo?.Type,
+                    lastMessageInfo?.Type == MessageType.System ? lastMessageInfo.SystemKind : null);
             })
             .ToList();
     }
@@ -324,6 +328,7 @@ public sealed class ConversationsStore : IConversationsStore
         Guid conversationId,
         ChatSystemKind kind,
         string body,
+        Guid? actorUserId,
         CancellationToken cancellationToken = default)
     {
         // Idempotency: a booking transition fires once, but guard against a retry re-inserting
@@ -346,6 +351,7 @@ public sealed class ConversationsStore : IConversationsStore
             Id = Guid.NewGuid(),
             ConversationId = conversationId,
             SenderId = null,
+            ActorUserId = actorUserId,
             Type = MessageType.System,
             SystemKind = kind,
             Body = body,

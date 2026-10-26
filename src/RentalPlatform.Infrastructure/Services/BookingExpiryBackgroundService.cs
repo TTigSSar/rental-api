@@ -36,13 +36,45 @@ public sealed class BookingExpiryBackgroundService : BackgroundService
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
+    // Expires stale pending bookings, then drops one "expired" chat line (no actor, so unread for
+    // both parties) per booking. Each announcement runs in its own DI scope (own DbContext) so a
+    // failed SaveChanges for one booking cannot leave a tracked entity that poisons the next
+    // booking's emit; a per-booking failure is logged and the sweep continues. The per-kind
+    // idempotency in AddSystemMessageAsync keeps a repeated sweep from duplicating a line.
+    public static async Task ExpireAndAnnounceAsync(
+        IBookingsStore bookingsStore,
+        IServiceScopeFactory scopeFactory,
+        ILogger logger,
+        DateTime utcNow,
+        CancellationToken cancellationToken)
+    {
+        var expired = await bookingsStore.ExpirePendingAsync(utcNow, cancellationToken);
+        foreach (var booking in expired)
+        {
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var chatEmitter = scope.ServiceProvider.GetRequiredService<IChatSystemMessageEmitter>();
+                await chatEmitter.BookingExpiredAsync(booking, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to announce expiry of booking {BookingId}; continuing sweep.", booking.Id);
+            }
+        }
+    }
+
     private async Task SweepAsync(CancellationToken cancellationToken)
     {
         try
         {
             await using var scope = _scopeFactory.CreateAsyncScope();
             var bookingsStore = scope.ServiceProvider.GetRequiredService<IBookingsStore>();
-            await bookingsStore.ExpirePendingAsync(DateTime.UtcNow, cancellationToken);
+            await ExpireAndAnnounceAsync(bookingsStore, _scopeFactory, _logger, DateTime.UtcNow, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

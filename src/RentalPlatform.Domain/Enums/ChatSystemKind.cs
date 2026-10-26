@@ -10,5 +10,6 @@ public enum ChatSystemKind
     Return = 3,    // return due
     Closed = 4,    // rental complete + both reviews in → conversation read-only
     Rejected = 5,  // owner declined the request (body may carry the optional reason)
-    Cancelled = 6  // renter cancelled the booking
+    Cancelled = 6, // renter cancelled the booking
+    Expired = 7    // pending request timed out unanswered (system/timer, no actor)
 }

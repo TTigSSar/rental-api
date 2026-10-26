@@ -16,20 +16,41 @@ public sealed class BookingsStore : IBookingsStore
         _dbContext = dbContext;
     }
 
-    public async Task ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Booking>> ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default)
     {
-        await _dbContext.Bookings
+        var expiring = await _dbContext.Bookings
+            .AsNoTracking()
             .Where(booking => booking.Status == BookingStatus.Pending && booking.ExpiresAt <= utcNow)
+            .ToListAsync(cancellationToken);
+        if (expiring.Count == 0)
+        {
+            return expiring;
+        }
+
+        var ids = expiring.Select(booking => booking.Id).ToList();
+        // Status re-checked so a row that left Pending between the read and the update is skipped.
+        await _dbContext.Bookings
+            .Where(booking => ids.Contains(booking.Id) && booking.Status == BookingStatus.Pending)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(booking => booking.Status, BookingStatus.Expired)
                 .SetProperty(booking => booking.UpdatedAt, utcNow), cancellationToken);
+
+        // Return only the rows this sweep really moved: a row cancelled/approved in the window
+        // between the read and the update was skipped and must not get an "expired" line.
+        // (Status == Expired with UpdatedAt == utcNow is the marker the update just wrote.)
+        return await _dbContext.Bookings
+            .AsNoTracking()
+            .Where(booking => ids.Contains(booking.Id)
+                && booking.Status == BookingStatus.Expired
+                && booking.UpdatedAt == utcNow)
+            .ToListAsync(cancellationToken);
     }
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 
     public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
-        _dbContext.Listings.FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
+        _dbContext.Listings.Include(listing => listing.Owner).FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
 
     public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
     {

@@ -48,6 +48,6 @@ public sealed class FakeNotificationEmitter : INotificationEmitter
     public Task ListingApprovedAsync(Listing listing, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task ListingRejectedAsync(Listing listing, string? reason, CancellationToken cancellationToken = default) =>
+    public Task ListingRejectedAsync(Listing listing, string? reasonCode, string? note, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

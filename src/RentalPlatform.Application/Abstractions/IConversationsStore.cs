@@ -15,13 +15,17 @@ namespace RentalPlatform.Application.Abstractions;
 /// <param name="LastMessageType">
 /// Type of the conversation's last message. Null when there is no last message yet.
 /// </param>
+/// <param name="LastMessageSystemKind">
+/// SystemKind of the last message when it is a system line; null otherwise.
+/// </param>
 public sealed record ChatConversationListItem(
     Conversation Conversation,
     User Counterpart,
     Booking? Booking,
     int UnreadCount,
     Guid? LastMessageSenderId,
-    MessageType? LastMessageType = null);
+    MessageType? LastMessageType = null,
+    ChatSystemKind? LastMessageSystemKind = null);
 
 /// <summary>
 /// Full conversation view: the thread, its context, and a page of messages.
@@ -146,7 +150,7 @@ public interface IConversationsStore
     /// this conversation — a booking transition fires once, but the emit is made idempotent against
     /// retries. Returns null when skipped as a duplicate.
     /// </summary>
-    Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, CancellationToken cancellationToken = default);
+    Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, Guid? actorUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Advances this participant's read cursor to the latest message. False when not a participant.</summary>
     Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default);

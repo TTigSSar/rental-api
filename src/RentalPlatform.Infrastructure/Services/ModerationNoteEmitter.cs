@@ -31,29 +31,44 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
     public Task ListingRejectedAsync(
         Guid moderatorId,
         Guid memberId,
+        string? memberLanguage,
         string listingTitle,
-        string reasonLabel,
+        string reasonCode,
         string? note,
         CancellationToken cancellationToken = default)
     {
+        var language = NotificationCopy.ResolveLanguage(memberLanguage);
+        var label = RejectionReasonCatalog.LabelFor(reasonCode, language);
         var body = string.IsNullOrWhiteSpace(note)
-            ? $"Your listing \"{listingTitle}\" was rejected: {reasonLabel}."
+            ? language switch
+            {
+                "ru" => $"Объявление «{listingTitle}» отклонено: {label}.",
+                "hy" => $"«{listingTitle}» հայտարարությունը մերժվել է՝ {label}։",
+                _ => $"Your listing \"{listingTitle}\" was rejected: {label}."
+            }
             : note.Trim();
 
         return EmitAsync(
-            moderatorId, memberId, ModerationNoteKind.Reject, subject: listingTitle, reason: reasonLabel, body, cancellationToken);
+            moderatorId, memberId, ModerationNoteKind.Reject, subject: listingTitle, reason: label, body, cancellationToken);
     }
 
     public Task ListingRecategorisedAsync(
         Guid moderatorId,
         Guid memberId,
+        string? memberLanguage,
         string listingTitle,
         string fromCategoryName,
         string toCategoryName,
         CancellationToken cancellationToken = default)
     {
+        var language = NotificationCopy.ResolveLanguage(memberLanguage);
         var reason = $"{fromCategoryName} → {toCategoryName}";
-        var body = $"Your listing \"{listingTitle}\" was moved to a different category: {reason}.";
+        var body = language switch
+        {
+            "ru" => $"Объявление «{listingTitle}» перенесено в другую категорию: {reason}.",
+            "hy" => $"«{listingTitle}» հայտարարությունը տեղափոխվել է այլ կատեգորիա՝ {reason}։",
+            _ => $"Your listing \"{listingTitle}\" was moved to a different category: {reason}."
+        };
 
         return EmitAsync(
             moderatorId, memberId, ModerationNoteKind.Category, subject: listingTitle, reason, body, cancellationToken);
@@ -62,13 +77,25 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
     public Task AccountSuspendedAsync(
         Guid moderatorId,
         Guid memberId,
+        string? memberLanguage,
         string? reason,
         CancellationToken cancellationToken = default)
     {
+        var language = NotificationCopy.ResolveLanguage(memberLanguage);
         var trimmedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
         var body = trimmedReason is null
-            ? "Your account has been suspended."
-            : $"Your account has been suspended. Reason: {trimmedReason}.";
+            ? language switch
+            {
+                "ru" => "Ваш аккаунт заблокирован.",
+                "hy" => "Ձեր հաշիվը կասեցվել է։",
+                _ => "Your account has been suspended."
+            }
+            : language switch
+            {
+                "ru" => $"Ваш аккаунт заблокирован. Причина: {NotificationCopy.CloseSentence(trimmedReason, language)}",
+                "hy" => $"Ձեր հաշիվը կասեցվել է։ Պատճառը՝ {NotificationCopy.CloseSentence(trimmedReason, language)}",
+                _ => $"Your account has been suspended. Reason: {NotificationCopy.CloseSentence(trimmedReason, language)}"
+            };
 
         return EmitAsync(
             moderatorId, memberId, ModerationNoteKind.Suspend, subject: null, trimmedReason, body, cancellationToken);

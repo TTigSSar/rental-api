@@ -7,7 +7,7 @@ namespace RentalPlatform.Tests.TestSupport;
 // Failure-injection test double for IConversationsStore: every member throws. Used to prove
 // ModerationNoteEmitter's try/catch-swallow doctrine — a note failure must never propagate to
 // (and so never fail) the moderation action that triggered it.
-public sealed class ThrowingConversationsStore : IConversationsStore
+public class ThrowingConversationsStore : IConversationsStore
 {
     private static InvalidOperationException Fail() => new("Simulated store failure.");
 
@@ -27,13 +27,13 @@ public sealed class ThrowingConversationsStore : IConversationsStore
 
     public Task<ChatMessage> AddImageMessageAsync(Guid conversationId, Guid senderId, string? caption, string attachmentUrl, CancellationToken cancellationToken = default) => throw Fail();
 
-    public Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, CancellationToken cancellationToken = default) => throw Fail();
+    public Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, Guid? actorUserId, CancellationToken cancellationToken = default) => throw Fail();
 
     public Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default) => throw Fail();
 
-    public Task<Conversation> GetOrCreateForModerationAsync(Guid moderatorId, Guid memberId, CancellationToken cancellationToken = default) => throw Fail();
+    public virtual Task<Conversation> GetOrCreateForModerationAsync(Guid moderatorId, Guid memberId, CancellationToken cancellationToken = default) => throw Fail();
 
-    public Task<ChatMessage> AddModerationNoteAsync(Guid conversationId, Guid moderatorId, ModerationNoteKind kind, string? subject, string? reason, string body, CancellationToken cancellationToken = default) => throw Fail();
+    public virtual Task<ChatMessage> AddModerationNoteAsync(Guid conversationId, Guid moderatorId, ModerationNoteKind kind, string? subject, string? reason, string body, CancellationToken cancellationToken = default) => throw Fail();
 
     public Task<ModerationThreadsPage> ListModerationThreadsAsync(ModerationThreadFilter filter, string? search, int page, int pageSize, CancellationToken cancellationToken = default) => throw Fail();
 

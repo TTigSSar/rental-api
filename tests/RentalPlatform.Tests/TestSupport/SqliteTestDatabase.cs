@@ -51,6 +51,14 @@ public sealed class SqliteTestDatabase : IDisposable
             .UseSqlite(_connection)
             .Options);
 
+    // Same as CreateContext() but with EF interceptors, e.g. to simulate a concurrent writer
+    // acting between two commands of the code under test.
+    public AppDbContext CreateContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .AddInterceptors(interceptors)
+            .Options);
+
     // Persists the supplied entities through a dedicated context so the acting
     // context starts with an empty change tracker.
     public async Task SeedAsync(params object[] entities)

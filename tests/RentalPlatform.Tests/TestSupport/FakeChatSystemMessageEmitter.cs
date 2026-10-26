@@ -9,27 +9,33 @@ public sealed class FakeChatSystemMessageEmitter : IChatSystemMessageEmitter
 {
     public List<string> Calls { get; } = new();
 
-    public Task BookingRejectedAsync(Booking booking, CancellationToken cancellationToken = default)
+    public Task BookingRejectedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default)
     {
         Calls.Add("rejected");
         return Task.CompletedTask;
     }
 
-    public Task BookingCancelledAsync(Booking booking, CancellationToken cancellationToken = default)
+    public Task BookingCancelledAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default)
     {
         Calls.Add("cancelled");
         return Task.CompletedTask;
     }
 
-    public Task BookingRequestedAsync(Booking booking, CancellationToken cancellationToken = default) =>
+    public Task BookingExpiredAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("expired");
+        return Task.CompletedTask;
+    }
+
+    public Task BookingRequestedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task BookingApprovedAsync(Booking booking, CancellationToken cancellationToken = default) =>
+    public Task BookingApprovedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task BookingHandedOverAsync(Booking booking, CancellationToken cancellationToken = default) =>
+    public Task BookingHandedOverAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task BookingCompletedAsync(Booking booking, CancellationToken cancellationToken = default) =>
+    public Task BookingCompletedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

@@ -21,6 +21,7 @@ namespace RentalPlatform.Tests.Infrastructure;
 //
 // Requires a local SQL Server reachable at "Server=.;Trusted_Connection=True" (same instance
 // CLAUDE.md's "Running locally" section assumes for RentalPlatformDbDev).
+[Collection(RentalPlatform.Tests.TestSupport.SqlServerConcurrencyCollection.Name)]
 public sealed class ConversationsStoreModerationConcurrencyTests
 {
     // The migration immediately before DeduplicateModerationConversations — no column changes
@@ -154,14 +155,17 @@ public sealed class ConversationsStoreModerationConcurrencyTests
         await db.SeedAsync(
             keeperConversation,
             loserConversation,
-            keeperMessage,
-            loserMessage,
             new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = keeperId, UserId = moderatorOneId },
             // Same member participant shape on both threads — exercises the "already present on
             // the keeper, drop the duplicate" branch.
             new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = keeperId, UserId = memberId },
             new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = loserId, UserId = moderatorTwoId },
             new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = loserId, UserId = memberId });
+
+        // Messages via raw SQL: ChatMessages gained ActorUserId (RC-5) after this schema state.
+        await db.SeedLegacyTextMessagesAsync(
+            (keeperMessage.Id, keeperId, moderatorOneId, keeperMessage.Body!, keeperMessage.CreatedAt),
+            (loserMessage.Id, loserId, moderatorTwoId, loserMessage.Body!, loserMessage.CreatedAt));
 
         db.MigrateToLatest();
 

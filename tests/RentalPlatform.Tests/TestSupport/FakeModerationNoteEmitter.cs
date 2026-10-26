@@ -8,28 +8,28 @@ namespace RentalPlatform.Tests.TestSupport;
 // note fired with the right kind/subject/reason.
 public sealed class FakeModerationNoteEmitter : IModerationNoteEmitter
 {
-    public List<(Guid ModeratorId, Guid MemberId, string ListingTitle, string ReasonLabel, string? Note)> ListingRejectedCalls { get; } = new();
-    public List<(Guid ModeratorId, Guid MemberId, string ListingTitle, string FromCategoryName, string ToCategoryName)> ListingRecategorisedCalls { get; } = new();
-    public List<(Guid ModeratorId, Guid MemberId, string? Reason)> AccountSuspendedCalls { get; } = new();
+    public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string ListingTitle, string ReasonCode, string? Note)> ListingRejectedCalls { get; } = new();
+    public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string ListingTitle, string FromCategoryName, string ToCategoryName)> ListingRecategorisedCalls { get; } = new();
+    public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string? Reason)> AccountSuspendedCalls { get; } = new();
 
     public Task ListingRejectedAsync(
-        Guid moderatorId, Guid memberId, string listingTitle, string reasonLabel, string? note, CancellationToken cancellationToken = default)
+        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string reasonCode, string? note, CancellationToken cancellationToken = default)
     {
-        ListingRejectedCalls.Add((moderatorId, memberId, listingTitle, reasonLabel, note));
+        ListingRejectedCalls.Add((moderatorId, memberId, memberLanguage, listingTitle, reasonCode, note));
         return Task.CompletedTask;
     }
 
     public Task ListingRecategorisedAsync(
-        Guid moderatorId, Guid memberId, string listingTitle, string fromCategoryName, string toCategoryName, CancellationToken cancellationToken = default)
+        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string fromCategoryName, string toCategoryName, CancellationToken cancellationToken = default)
     {
-        ListingRecategorisedCalls.Add((moderatorId, memberId, listingTitle, fromCategoryName, toCategoryName));
+        ListingRecategorisedCalls.Add((moderatorId, memberId, memberLanguage, listingTitle, fromCategoryName, toCategoryName));
         return Task.CompletedTask;
     }
 
     public Task AccountSuspendedAsync(
-        Guid moderatorId, Guid memberId, string? reason, CancellationToken cancellationToken = default)
+        Guid moderatorId, Guid memberId, string? memberLanguage, string? reason, CancellationToken cancellationToken = default)
     {
-        AccountSuspendedCalls.Add((moderatorId, memberId, reason));
+        AccountSuspendedCalls.Add((moderatorId, memberId, memberLanguage, reason));
         return Task.CompletedTask;
     }
 }

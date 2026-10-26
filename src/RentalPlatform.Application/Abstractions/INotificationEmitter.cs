@@ -22,7 +22,8 @@ public interface INotificationEmitter
     Task ListingApprovedAsync(Listing listing, CancellationToken cancellationToken = default);
 
     /// <summary>A listing was sent back by moderation → notify the owner.</summary>
-    Task ListingRejectedAsync(Listing listing, string? reason, CancellationToken cancellationToken = default);
+    /// <remarks>Reason is passed as code + note so the label is rendered in the recipient's language.</remarks>
+    Task ListingRejectedAsync(Listing listing, string? reasonCode, string? note, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// An owner moved their home point while this booking is Pending/Approved/Active (home-point model) →

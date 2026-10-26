@@ -330,15 +330,31 @@ public sealed class BookingNotificationCopyTests
     public async Task ListingChanges_Renders_The_Reason_Label_In_The_Recipient_Language(string code, string en, string ru, string hy)
     {
         var ruBody = (await ListingChanges("ru", "Админская заметка", code)).Body;
-        Assert.StartsWith($"{ru}: Админская заметка ", ruBody, StringComparison.Ordinal);
+        Assert.StartsWith($"{ru}: Админская заметка. ", ruBody, StringComparison.Ordinal);
         Assert.DoesNotContain(en, ruBody, StringComparison.Ordinal);
 
         var hyBody = (await ListingChanges("hy", "note", code)).Body;
-        Assert.StartsWith($"{hy}: note ", hyBody, StringComparison.Ordinal);
+        Assert.StartsWith($"{hy}: note։ ", hyBody, StringComparison.Ordinal);
         Assert.DoesNotContain(en, hyBody, StringComparison.Ordinal);
 
         var deBody = (await ListingChanges("de", null, code)).Body;
-        Assert.StartsWith($"{en} ", deBody, StringComparison.Ordinal);
+        Assert.StartsWith($"{en}. ", deBody, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("en", "Poor images: test", "Poor images: test. Fix the issues")]
+    [InlineData("ru", "Плохие фото: test", "Плохие фото: test. Исправьте замечания")]
+    [InlineData("hy", "Վատ լուսանկարներ: test", "Վատ լուսանկարներ: test։ Ուղղեք")]
+    [InlineData("en", "Blurry.", "Blurry. Fix the issues")]
+    [InlineData("en", "Blurry!", "Blurry! Fix the issues")]
+    [InlineData("ru", "Размыто.", "Размыто. Исправьте")]
+    [InlineData("ru", "Размыто!", "Размыто! Исправьте")]
+    [InlineData("hy", "Մթագնած։", "Մթագնած։ Ուղղեք")]
+    [InlineData("hy", "Մթագնած!", "Մթագնած! Ուղղեք")]
+    public async Task ListingChanges_Ends_The_Reason_With_A_Stop_Without_Doubling(string language, string note, string expectedStart)
+    {
+        var body = (await ListingChanges(language, note)).Body;
+        Assert.StartsWith(expectedStart, body, StringComparison.Ordinal);
     }
 
     // ---- Fallback ------------------------------------------------------------------------------

@@ -299,6 +299,13 @@ internal static class NotificationCopy
     public static Rendered ListingChanges(string language, string toyTitle, string? reason)
     {
         var hasReason = !string.IsNullOrWhiteSpace(reason);
+        if (hasReason)
+        {
+            // The composed reason ("<label>" or "<label>: <note>") carries no closing punctuation of its own.
+            reason = reason!.Trim();
+            if (Array.IndexOf(TerminalPunctuation, reason[^1]) < 0)
+                reason += language == "hy" ? "։" : ".";
+        }
         return language switch
         {
             "hy" => new Rendered(
@@ -321,6 +328,8 @@ internal static class NotificationCopy
                 "Edit & resubmit")
         };
     }
+
+    private static readonly char[] TerminalPunctuation = { '.', '!', '?', '…', '։' };
 
     private static string Fallback(string value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;

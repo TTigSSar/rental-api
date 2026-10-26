@@ -370,7 +370,7 @@ public sealed class AdminListingsService : IAdminListingsService
             cancellationToken);
 
         // Best-effort: notify the owner that changes are needed.
-        await _notificationEmitter.ListingRejectedAsync(listing, trimmedReason, cancellationToken);
+        await _notificationEmitter.ListingRejectedAsync(listing, trimmedCode, trimmedNote, cancellationToken);
 
         // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this rejection.
         await _moderationNoteEmitter.ListingRejectedAsync(

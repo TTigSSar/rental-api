@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
@@ -152,10 +153,13 @@ public sealed class NotificationEmitter : INotificationEmitter
             };
         }, cancellationToken);
 
-    public Task ListingRejectedAsync(Listing listing, string? reason, CancellationToken cancellationToken = default) =>
+    public Task ListingRejectedAsync(Listing listing, string? reasonCode, string? note, CancellationToken cancellationToken = default) =>
         EmitAsync(NotificationKind.ListingChanges, listing.Id, listing.OwnerId, () =>
         {
             var language = NotificationCopy.ResolveLanguage(listing.Owner?.PreferredLanguage);
+            var reason = string.IsNullOrWhiteSpace(reasonCode)
+                ? note
+                : RejectionReasonCatalog.Compose(reasonCode, note, language);
             var copy = NotificationCopy.ListingChanges(language, listing.Title, reason);
             return new Notification
             {

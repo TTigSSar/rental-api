@@ -79,10 +79,10 @@ public sealed class BookingNotificationCopyTests
         return Emit(s, e => e.ListingApprovedAsync(s.Listing), OwnerId);
     }
 
-    private static Task<Notification> ListingChanges(string? ownerLanguage, string? reason)
+    private static Task<Notification> ListingChanges(string? ownerLanguage, string? note, string? code = null)
     {
         var s = Build(ownerLanguage, "en");
-        return Emit(s, e => e.ListingRejectedAsync(s.Listing, reason), OwnerId);
+        return Emit(s, e => e.ListingRejectedAsync(s.Listing, code, note), OwnerId);
     }
 
     private static readonly Regex Latin = new("[A-Za-z]", RegexOptions.Compiled);
@@ -296,6 +296,49 @@ public sealed class BookingNotificationCopyTests
         var n = await ListingChanges("hy", null);
         Assert.Matches(Armenian, n.Title);
         Assert.Matches(Armenian, n.Body);
+    }
+
+    // ---- Moderation rejection reason label (code -> recipient language) ---------------------------
+
+    public static IEnumerable<object[]> ReasonLabels => new[]
+    {
+        new object[] { "poorImages", "Poor or missing images", "Плохие фото", "Վատ լուսանկարներ" },
+        new object[] { "missingInfo", "Missing or incomplete information", "Недостаточно информации", "Բացակայող տեղեկատվություն" },
+        new object[] { "duplicate", "Duplicate listing", "Дублирующее объявление", "Կրկնվող հայտարարություն" },
+        new object[] { "inappropriate", "Inappropriate content", "Неподходящий контент", "Անպատշաճ բովանդակություն" },
+        new object[] { "wrongCategory", "Listed under incorrect category", "Неверная категория", "Սխալ կատեգորիա" },
+        new object[] { "unsafeItem", "Unsafe item", "Небезопасный предмет", "Անվտանգ չէ" },
+        new object[] { "hygiene", "No cleaning or hygiene details", "Гигиена", "Հիգիենա" },
+        new object[] { "pricing", "Unrealistic pricing", "Цена", "Գնագոյացում" },
+        new object[] { "other", "Other", "Другое", "Այլ" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ReasonLabels))]
+    public void Reason_Label_Is_Localized_Per_Code(string code, string en, string ru, string hy)
+    {
+        Assert.Equal(en, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code, "en"));
+        Assert.Equal(ru, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code, "ru"));
+        Assert.Equal(hy, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code, "hy"));
+        Assert.Equal(en, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code, "de"));
+        Assert.Equal(en, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code, null));
+        Assert.Equal(en, RentalPlatform.Application.Common.RejectionReasonCatalog.LabelFor(code));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReasonLabels))]
+    public async Task ListingChanges_Renders_The_Reason_Label_In_The_Recipient_Language(string code, string en, string ru, string hy)
+    {
+        var ruBody = (await ListingChanges("ru", "Админская заметка", code)).Body;
+        Assert.StartsWith($"{ru}: Админская заметка ", ruBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(en, ruBody, StringComparison.Ordinal);
+
+        var hyBody = (await ListingChanges("hy", "note", code)).Body;
+        Assert.StartsWith($"{hy}: note ", hyBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(en, hyBody, StringComparison.Ordinal);
+
+        var deBody = (await ListingChanges("de", null, code)).Body;
+        Assert.StartsWith($"{en} ", deBody, StringComparison.Ordinal);
     }
 
     // ---- Fallback ------------------------------------------------------------------------------

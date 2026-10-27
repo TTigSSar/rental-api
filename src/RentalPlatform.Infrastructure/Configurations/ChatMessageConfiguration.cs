@@ -27,6 +27,12 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
         builder.Property(message => message.NoteReason)
             .HasMaxLength(200);
 
+        builder.Property(message => message.MeetingPointLatitude)
+            .HasColumnType("decimal(9,6)");
+
+        builder.Property(message => message.MeetingPointLongitude)
+            .HasColumnType("decimal(9,6)");
+
         builder.Property(message => message.CreatedAt)
             .IsRequired();
 

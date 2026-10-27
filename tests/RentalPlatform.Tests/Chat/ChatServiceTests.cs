@@ -51,7 +51,8 @@ public sealed class ChatServiceTests
             new BookingsStore(context),
             new ReviewsStore(context),
             realtimeNotifier ?? new FakeChatRealtimeNotifier(),
-            fileStorageService ?? new FakeFileStorageService());
+            fileStorageService ?? new FakeFileStorageService(),
+            new RentalPlatform.Infrastructure.Services.DistrictBoundaryProvider());
 
     // Seeds a Completed booking + its conversation (ClosedAt still null, as if the M-010 close
     // event was missed by an older build) plus 0/1/2 of the party reviews that gate the ADR-001

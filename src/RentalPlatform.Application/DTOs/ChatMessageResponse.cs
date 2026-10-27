@@ -12,7 +12,7 @@ public sealed class ChatMessageResponse
     /// <summary>Author display name. Null for System messages.</summary>
     public string? SenderName { get; init; }
 
-    /// <summary>"text" | "image" | "system" | "moderationNote".</summary>
+    /// <summary>"text" | "image" | "system" | "moderationNote" | "location".</summary>
     public string Type { get; init; } = string.Empty;
 
     /// <summary>Booking-event token for System lines (see <c>ChatTokens.SystemKindToken</c>).</summary>
@@ -26,6 +26,15 @@ public sealed class ChatMessageResponse
 
     /// <summary>Reason of a ModerationNote (e.g. the rejection reason label). Null otherwise.</summary>
     public string? NoteReason { get; init; }
+
+    /// <summary>Exact latitude of a shared meeting point. Only for Type == "location".</summary>
+    public decimal? Latitude { get; init; }
+
+    /// <summary>Exact longitude of a shared meeting point. Only for Type == "location".</summary>
+    public decimal? Longitude { get; init; }
+
+    /// <summary>"home" | "other". Only for Type == "location".</summary>
+    public string? MeetingPointKind { get; init; }
 
     public string? Body { get; init; }
     public string? AttachmentUrl { get; init; }

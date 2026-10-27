@@ -45,6 +45,11 @@ public sealed class ChatService : IChatService
         public const string MessageTooLong = "chat.message_too_long";
         public const string AttachmentTooLarge = "chat.attachment_too_large";
         public const string AttachmentInvalidType = "chat.attachment_invalid_type";
+        public const string MeetingPointOwnerOnly = "chat.meeting_point_owner_only";
+        public const string MeetingPointUnavailable = "chat.meeting_point_unavailable";
+        public const string HomePointRequired = "chat.home_point_required";
+        public const string MeetingPointInvalid = "chat.meeting_point_invalid";
+        public const string MeetingPointOutsideYerevan = "chat.meeting_point_outside_yerevan";
     }
 
     private readonly ICurrentUserContext _currentUserContext;
@@ -53,6 +58,7 @@ public sealed class ChatService : IChatService
     private readonly IReviewsStore _reviewsStore;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
     private readonly IFileStorageService _fileStorageService;
+    private readonly IDistrictBoundaryProvider _districtBoundaryProvider;
 
     public ChatService(
         ICurrentUserContext currentUserContext,
@@ -60,7 +66,8 @@ public sealed class ChatService : IChatService
         IBookingsStore bookingsStore,
         IReviewsStore reviewsStore,
         IChatRealtimeNotifier realtimeNotifier,
-        IFileStorageService fileStorageService)
+        IFileStorageService fileStorageService,
+        IDistrictBoundaryProvider districtBoundaryProvider)
     {
         _currentUserContext = currentUserContext;
         _store = store;
@@ -68,6 +75,7 @@ public sealed class ChatService : IChatService
         _reviewsStore = reviewsStore;
         _realtimeNotifier = realtimeNotifier;
         _fileStorageService = fileStorageService;
+        _districtBoundaryProvider = districtBoundaryProvider;
     }
 
     // Note: this inbox list intentionally does NOT run the TryLazyCloseAsync self-heal per row —
@@ -360,6 +368,118 @@ public sealed class ChatService : IChatService
         }
     }
 
+    public async Task<ServiceResult<ChatMessageResponse>> ShareMeetingPointAsync(
+        Guid conversationId,
+        ShareMeetingPointRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
+        }
+
+        var user = await _store.FindUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.Unauthenticated, "Current user is not authenticated.");
+        }
+
+        if (user.IsBlocked)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.UserBlocked, "Blocked users cannot send messages.");
+        }
+
+        // 1. Existence / participation - same outcomes as SendMessageAsync.
+        var conversation = await _store.FindByIdAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.ConversationNotFound, "Conversation was not found.");
+        }
+
+        if (!await IsParticipantAsync(conversation, userId, user, cancellationToken))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
+        }
+
+        // 2. Booking-scoped thread, and only the listing owner (booking conversations pin OwnerId
+        // to the listing owner).
+        if (conversation.Kind != ConversationKind.Booking
+            || conversation.BookingId is not { } bookingId
+            || conversation.OwnerId != userId)
+        {
+            return Failure<ChatMessageResponse>(
+                ErrorCodes.MeetingPointOwnerOnly, "Only the listing owner can share a meeting point.");
+        }
+
+        // 3. Read-only thread (explicit close, or the booking is Completed).
+        if (conversation.ClosedAt is not null || await IsLockedForSendAsync(conversation, cancellationToken))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
+        }
+
+        // 4. Only while the handover is ahead: Approved or Active.
+        var booking = await _bookingsStore.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
+        if (booking is null || booking.Status is not (BookingStatus.Approved or BookingStatus.Active))
+        {
+            return Failure<ChatMessageResponse>(
+                ErrorCodes.MeetingPointUnavailable, "A meeting point can only be shared for an approved or active booking.");
+        }
+
+        decimal latitude;
+        decimal longitude;
+        MeetingPointKind kind;
+
+        var kindToken = request.Kind?.Trim().ToLowerInvariant();
+        if (kindToken == "home")
+        {
+            // 5. The server reads the owner's exact pair; any body coordinates are ignored.
+            if (user.HomeLatitude is not { } homeLatitude || user.HomeLongitude is not { } homeLongitude)
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.HomePointRequired, "Set your home point first.");
+            }
+
+            latitude = homeLatitude;
+            longitude = homeLongitude;
+            kind = MeetingPointKind.Home;
+        }
+        else if (kindToken == "other")
+        {
+            // 6. Both coordinates, in range, inside a Yerevan district (same lookup as the home point).
+            if (request.Latitude is not { } requestedLatitude
+                || request.Longitude is not { } requestedLongitude
+                || requestedLatitude < -90m || requestedLatitude > 90m
+                || requestedLongitude < -180m || requestedLongitude > 180m)
+            {
+                return Failure<ChatMessageResponse>(
+                    ErrorCodes.MeetingPointInvalid, "Latitude and longitude are required and must be valid.");
+            }
+
+            if (_districtBoundaryProvider.FindDistrictCode((double)requestedLatitude, (double)requestedLongitude) is null)
+            {
+                return Failure<ChatMessageResponse>(
+                    ErrorCodes.MeetingPointOutsideYerevan, "For now DoRent works only in Yerevan.");
+            }
+
+            latitude = Math.Round(requestedLatitude, 6, MidpointRounding.AwayFromZero);
+            longitude = Math.Round(requestedLongitude, 6, MidpointRounding.AwayFromZero);
+            kind = MeetingPointKind.Other;
+        }
+        else
+        {
+            // 7. Unknown kind.
+            return Failure<ChatMessageResponse>(ErrorCodes.MeetingPointInvalid, "Kind must be home or other.");
+        }
+
+        var message = await _store.AddMeetingPointMessageAsync(conversationId, userId, latitude, longitude, kind, cancellationToken);
+
+        var response = MapMessage(message, userId, user, counterpartLastReadAt: null);
+
+        var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
+        await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+
+        return ServiceResult<ChatMessageResponse>.Success(response);
+    }
+
     public async Task<ServiceResult<bool>> MarkReadAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         if (_currentUserContext.UserId is not { } userId)
@@ -572,6 +692,9 @@ public sealed class ChatService : IChatService
             NoteReason = message.NoteReason,
             Body = message.Body,
             AttachmentUrl = message.AttachmentUrl,
+            Latitude = message.MeetingPointLatitude,
+            Longitude = message.MeetingPointLongitude,
+            MeetingPointKind = ChatTokens.MeetingPointKindToken(message.MeetingPointKind),
             SentAt = message.CreatedAt,
             IsMine = isMine,
             Seen = seen
@@ -593,6 +716,9 @@ public sealed class ChatService : IChatService
         NoteReason = message.NoteReason,
         Body = message.Body,
         AttachmentUrl = message.AttachmentUrl,
+        Latitude = message.MeetingPointLatitude,
+        Longitude = message.MeetingPointLongitude,
+        MeetingPointKind = ChatTokens.MeetingPointKindToken(message.MeetingPointKind),
         SentAt = message.CreatedAt
     };
 

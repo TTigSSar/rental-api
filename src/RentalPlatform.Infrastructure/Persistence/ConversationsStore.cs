@@ -324,6 +324,41 @@ public sealed class ConversationsStore : IConversationsStore
         return message;
     }
 
+    public async Task<ChatMessage> AddMeetingPointMessageAsync(
+        Guid conversationId,
+        Guid senderId,
+        decimal latitude,
+        decimal longitude,
+        MeetingPointKind kind,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var message = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            SenderId = senderId,
+            Type = MessageType.Location,
+            MeetingPointLatitude = latitude,
+            MeetingPointLongitude = longitude,
+            MeetingPointKind = kind,
+            CreatedAt = now
+        };
+
+        await _dbContext.ChatMessages.AddAsync(message, cancellationToken);
+
+        var conversation = await _dbContext.Conversations
+            .FirstAsync(entity => entity.Id == conversationId, cancellationToken);
+        conversation.LastMessageId = message.Id;
+        // No user data in stored text (ADR-051): the client localizes off LastMessageType.
+        conversation.LastMessageSnippet = null;
+        conversation.LastMessageAt = now;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return message;
+    }
+
     public async Task<ChatMessage?> AddSystemMessageAsync(
         Guid conversationId,
         ChatSystemKind kind,

@@ -177,6 +177,15 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("MeetingPointKind")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("MeetingPointLatitude")
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<decimal?>("MeetingPointLongitude")
+                        .HasColumnType("decimal(9,6)");
+
                     b.Property<int?>("NoteKind")
                         .HasColumnType("int");
 

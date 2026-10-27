@@ -26,7 +26,15 @@ public static class ChatTokens
         MessageType.Image => "image",
         MessageType.System => "system",
         MessageType.ModerationNote => "moderationNote",
+        MessageType.Location => "location",
         _ => "text"
+    };
+
+    public static string? MeetingPointKindToken(MeetingPointKind? kind) => kind switch
+    {
+        MeetingPointKind.Home => "home",
+        MeetingPointKind.Other => "other",
+        _ => null
     };
 
     public static string? SystemKindToken(ChatSystemKind? kind) => kind switch

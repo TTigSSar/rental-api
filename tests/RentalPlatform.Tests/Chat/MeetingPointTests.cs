@@ -185,6 +185,26 @@ public sealed class MeetingPointTests
     }
 
     [Fact]
+    public async Task Blocked_Owner_Cannot_Share()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAsync(db);
+        await using (var ctx = db.CreateContext())
+        {
+            (await ctx.Users.SingleAsync(u => u.Id == OwnerId)).IsBlocked = true;
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ShareMeetingPointAsync(
+            ConversationId, new ShareMeetingPointRequest { Kind = "home" });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("chat.user_blocked", result.Error!.Code);
+        Assert.Empty(await db.CreateContext().ChatMessages.ToListAsync());
+    }
+
+    [Fact]
     public async Task Non_Participant_Gets_Not_Participant()
     {
         using var db = new SqliteTestDatabase();

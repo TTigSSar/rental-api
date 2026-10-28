@@ -31,7 +31,8 @@ public sealed class ModerationChatServiceTests
             new BookingsStore(context),
             new ReviewsStore(context),
             realtimeNotifier ?? new FakeChatRealtimeNotifier(),
-            new FakeFileStorageService());
+            new FakeFileStorageService(),
+            new RentalPlatform.Infrastructure.Services.DistrictBoundaryProvider());
 
     [Fact]
     public async Task Moderation_Thread_Appears_In_Members_Own_Conversation_List()

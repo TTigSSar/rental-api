@@ -45,6 +45,15 @@ public sealed class ChatMessage
     /// <summary>Reason of the note, e.g. the rejection reason label (Type == ModerationNote). Max 200 chars.</summary>
     public string? NoteReason { get; set; }
 
+    /// <summary>Exact latitude of the shared meeting point (Type == Location). Null otherwise.</summary>
+    public decimal? MeetingPointLatitude { get; set; }
+
+    /// <summary>Exact longitude of the shared meeting point (Type == Location). Null otherwise.</summary>
+    public decimal? MeetingPointLongitude { get; set; }
+
+    /// <summary>Whether the point is the owner's home or another Yerevan point (Type == Location).</summary>
+    public MeetingPointKind? MeetingPointKind { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public Conversation Conversation { get; set; } = null!;

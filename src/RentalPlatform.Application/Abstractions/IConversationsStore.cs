@@ -145,6 +145,19 @@ public interface IConversationsStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Inserts a Location message (exact coordinates + kind, no body) and refreshes the
+    /// conversation's denormalised preview fields. <c>LastMessageSnippet</c> is set to null so the
+    /// client renders its own localized placeholder off <c>LastMessageType</c>.
+    /// </summary>
+    Task<ChatMessage> AddMeetingPointMessageAsync(
+        Guid conversationId,
+        Guid senderId,
+        decimal latitude,
+        decimal longitude,
+        MeetingPointKind kind,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Inserts a System message (null sender) for the given kind and refreshes the conversation's
     /// denormalised preview fields, unless a System message of that same kind already exists in
     /// this conversation — a booking transition fires once, but the emit is made idempotent against

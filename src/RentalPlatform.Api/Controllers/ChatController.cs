@@ -145,6 +145,27 @@ public sealed class ChatController : ControllerBase
         }
     }
 
+    [HttpPost("conversations/{id:guid}/meeting-point")]
+    [ProducesResponseType(typeof(ChatMessageResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ShareMeetingPoint(
+        Guid id,
+        [FromBody] ShareMeetingPointRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _chatService.ShareMeetingPointAsync(id, request, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     [HttpPost("conversations/{id:guid}/read")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -176,6 +197,11 @@ public sealed class ChatController : ControllerBase
             "chat.conversation_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "chat.booking_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "chat.conversation_closed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "chat.meeting_point_owner_only" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "chat.meeting_point_unavailable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "chat.home_point_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "chat.meeting_point_invalid" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "chat.meeting_point_outside_yerevan" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "chat.message_too_long" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "chat.attachment_too_large" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "chat.attachment_invalid_type" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),

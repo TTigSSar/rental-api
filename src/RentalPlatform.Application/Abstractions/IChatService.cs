@@ -31,5 +31,11 @@ public interface IChatService
         SendChatImageMessageRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Owner shares a meeting point (home or another Yerevan point) into a booking conversation.</summary>
+    Task<ServiceResult<ChatMessageResponse>> ShareMeetingPointAsync(
+        Guid conversationId,
+        ShareMeetingPointRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<ServiceResult<bool>> MarkReadAsync(Guid conversationId, CancellationToken cancellationToken = default);
 }

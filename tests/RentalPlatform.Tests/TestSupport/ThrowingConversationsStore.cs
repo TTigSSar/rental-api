@@ -27,6 +27,8 @@ public class ThrowingConversationsStore : IConversationsStore
 
     public Task<ChatMessage> AddImageMessageAsync(Guid conversationId, Guid senderId, string? caption, string attachmentUrl, CancellationToken cancellationToken = default) => throw Fail();
 
+    public Task<ChatMessage> AddMeetingPointMessageAsync(Guid conversationId, Guid senderId, decimal latitude, decimal longitude, MeetingPointKind kind, CancellationToken cancellationToken = default) => throw Fail();
+
     public Task<ChatMessage?> AddSystemMessageAsync(Guid conversationId, ChatSystemKind kind, string body, Guid? actorUserId, CancellationToken cancellationToken = default) => throw Fail();
 
     public Task<bool> MarkReadAsync(Guid conversationId, Guid userId, CancellationToken cancellationToken = default) => throw Fail();

@@ -418,7 +418,8 @@ public sealed class ReviewsServiceTests
             new BookingsStore(read),
             new ReviewsStore(read),
             new FakeChatRealtimeNotifier(),
-            new FakeFileStorageService());
+            new FakeFileStorageService(),
+            new RentalPlatform.Infrastructure.Services.DistrictBoundaryProvider());
         var details = await chatService.GetConversationAsync(conversationId, page: null, pageSize: null);
 
         Assert.True(details.IsSuccess);

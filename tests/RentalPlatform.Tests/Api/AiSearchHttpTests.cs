@@ -25,7 +25,7 @@ namespace RentalPlatform.Tests.Api;
 public sealed class AiSearchHttpTests
 {
     private const string Url = "/api/listings/ai-search";
-    private static readonly Guid ShengavitDistrictId = new("d0000012-0000-4000-9000-000000000012");
+    private static readonly Guid ShengavitDistrictId = new("d000000c-0000-4000-9000-00000000000c");
 
     private readonly RentalPlatformWebAppFactory _factory;
 

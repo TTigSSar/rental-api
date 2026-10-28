@@ -81,6 +81,26 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOptions<EmailOptions>>().Value.IsResend
                 ? sp.GetRequiredService<ResendEmailSender>()
                 : sp.GetRequiredService<LoggingEmailSender>());
+
+        // AI search (ADR-054). A missing key is "unavailable", never a startup failure. Local dev falls
+        // back to ANTHROPIC_API_KEY so a developer machine works without extra configuration.
+        services.AddOptions<AiSearchOptions>()
+            .Bind(configuration.GetSection(AiSearchOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.ApiKey))
+                {
+                    options.ApiKey = Environment.GetEnvironmentVariable(AiSearchOptions.ApiKeyFallbackEnvironmentVariable);
+                }
+            })
+            .Validate(AiSearchOptions.IsValid, "AiSearch options are out of range.")
+            .ValidateOnStart();
+        services.AddSingleton<IAiSearchSettings, AiSearchSettings>();
+        services.AddHttpClient<IAiSearchModel, AnthropicAiSearchModel>();
+        services.AddScoped<IAiSearchLogStore, AiSearchLogStore>();
+        services.AddScoped<IAiSearchService, AiSearchService>();
+        services.AddHostedService<AiSearchLogCleanupService>();
+
         services.AddScoped<IListingsOwnerService, ListingsOwnerService>();
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();

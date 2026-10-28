@@ -18,6 +18,9 @@ public sealed class ListingsQueryService : IListingsQueryService
     // dropped rather than passed through to an unbounded SQL IN (...).
     private const int MaxDistrictIds = 12;
 
+    // AI search continuation (ADR-054): ids already shown, left out of the next page.
+    private const int MaxExcludeIds = 500;
+
     // Maps P2-1: cap on map-pin results. IsTruncated is derived by requesting one extra row and
     // checking whether it came back, so truncation is exact without a second COUNT query.
     private const int MaxMapPins = 500;
@@ -78,6 +81,13 @@ public sealed class ListingsQueryService : IListingsQueryService
         {
             var districtIds = filter.DistrictIds.Distinct().Take(MaxDistrictIds).ToList();
             query = query.Where(listing => listing.DistrictId != null && districtIds.Contains(listing.DistrictId.Value));
+        }
+
+        if (filter.ExcludeIds is { Count: > 0 })
+        {
+            // AI search continuation: bounded like DistrictIds — the list is caller-influenced input.
+            var excludeIds = filter.ExcludeIds.Distinct().Take(MaxExcludeIds).ToList();
+            query = query.Where(listing => !excludeIds.Contains(listing.Id));
         }
 
         if (filter.MinPrice.HasValue)
@@ -278,6 +288,40 @@ public sealed class ListingsQueryService : IListingsQueryService
             HasMore = (page * pageSize) < totalCount,
             Items = items
         };
+    }
+
+    public async Task<IReadOnlyList<AiRankCandidate>> GetAiRankCandidatesAsync(
+        ListingsQueryFilter filter,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        // Same Approved-only chain and default order as the public search, so these are exactly the
+        // listings page 1 shows first. Public fields only: no owner, no coordinates, no address.
+        var rows = await BuildApprovedListingsQuery(filter)
+            .OrderByDescending(listing => listing.CreatedAt)
+            .Take(Math.Max(0, limit))
+            .Select(listing => new
+            {
+                listing.Id,
+                listing.Title,
+                CategoryName = listing.Category.Name,
+                listing.PricePerDay,
+                listing.AgeFromMonths,
+                listing.AgeToMonths,
+                listing.Description
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(r => new AiRankCandidate(
+                r.Id,
+                r.Title,
+                r.CategoryName,
+                r.PricePerDay,
+                r.AgeFromMonths,
+                r.AgeToMonths,
+                r.Description.Length > 200 ? r.Description[..200] : r.Description))
+            .ToList();
     }
 
     public async Task<ListingMapPinsResponse> GetMapPinsAsync(

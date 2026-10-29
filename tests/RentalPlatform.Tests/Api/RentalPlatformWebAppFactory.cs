@@ -73,7 +73,7 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
 
         // AI search is "configured" (a key is present) so the seam is exercised; no real call is ever made
         // because the model is replaced by FakeAiSearchModel below. Pinned explicitly so a developer's
-        // ANTHROPIC_API_KEY never changes what the tests see.
+        // OPENAI_API_KEY never changes what the tests see.
         Environment.SetEnvironmentVariable("AiSearch__ApiKey", "xunit-fake-key");
 
         // Google sign-in is "configured" in the test host; one test blanks it to prove the 503.

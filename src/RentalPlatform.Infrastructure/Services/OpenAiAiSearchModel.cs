@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,7 +9,8 @@ using RentalPlatform.Application.Abstractions;
 
 namespace RentalPlatform.Infrastructure.Services;
 
-// Claude over plain HttpClient, no SDK (ADR-029 pattern, ADR-054). Contract:
+// OpenAI GPT-6 Luna over plain HttpClient, no SDK (ADR-029 pattern, ADR-054). Plain chat completions, so
+// the same code runs against api.openai.com and, in dev, OpenRouter (AiSearch:BaseUrl). Contract:
 //  - never throws: any failure (no key, non-2xx, timeout, refusal, unusable JSON) is a null result and
 //    the caller degrades to a plain catalogue search;
 //  - an 8 s timeout on this class's OWN token, no retry;
@@ -16,24 +18,23 @@ namespace RentalPlatform.Infrastructure.Services;
 //  - sends only the description, the catalogue reference lists and public listing fields - never user
 //    identity, contacts or coordinates (ADR-008, ADR-053).
 // Prompts and schemas are the ones validated by tools/ai-search-eval (categories/districts come from the DB).
-public sealed class AnthropicAiSearchModel : IAiSearchModel
+public sealed class OpenAiAiSearchModel : IAiSearchModel
 {
-    public static readonly Uri Endpoint = new("https://api.anthropic.com/v1/messages");
     public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(8);
-    private const string ApiVersion = "2023-06-01";
-    private const int ParseMaxTokens = 1024;
-    private const int RankMaxTokens = 2048;
+    // Reasoning tokens count against max_completion_tokens, so these leave generous headroom.
+    private const int ParseMaxTokens = 4096;
+    private const int RankMaxTokens = 8192;
 
     private readonly HttpClient _httpClient;
     private readonly AiSearchOptions _options;
-    private readonly ILogger<AnthropicAiSearchModel> _logger;
+    private readonly ILogger<OpenAiAiSearchModel> _logger;
     private readonly TimeSpan _timeout;
 
     // timeout exists so a test can prove the timeout path without waiting eight seconds.
-    public AnthropicAiSearchModel(
+    public OpenAiAiSearchModel(
         HttpClient httpClient,
         IOptions<AiSearchOptions> options,
-        ILogger<AnthropicAiSearchModel> logger,
+        ILogger<OpenAiAiSearchModel> logger,
         TimeSpan? timeout = null)
     {
         _httpClient = httpClient;
@@ -147,22 +148,28 @@ public sealed class AnthropicAiSearchModel : IAiSearchModel
             var body = new JsonObject
             {
                 ["model"] = model,
-                ["max_tokens"] = maxTokens,
-                ["system"] = system,
-                ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = user }),
-                ["output_config"] = new JsonObject
+                ["max_completion_tokens"] = maxTokens,
+                ["reasoning_effort"] = "low",
+                ["messages"] = new JsonArray(
+                    new JsonObject { ["role"] = "system", ["content"] = system },
+                    new JsonObject { ["role"] = "user", ["content"] = user }),
+                ["response_format"] = new JsonObject
                 {
-                    ["effort"] = "low",
-                    ["format"] = new JsonObject { ["type"] = "json_schema", ["schema"] = schema.DeepClone() }
+                    ["type"] = "json_schema",
+                    ["json_schema"] = new JsonObject
+                    {
+                        ["name"] = "result",
+                        ["strict"] = true,
+                        ["schema"] = schema.DeepClone()
+                    }
                 }
             };
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint)
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_options.BaseUrl.TrimEnd('/')}/chat/completions")
             {
                 Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
             };
-            request.Headers.Add("x-api-key", _options.ApiKey!.Trim());
-            request.Headers.Add("anthropic-version", ApiVersion);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey!.Trim());
 
             using var response = await _httpClient.SendAsync(request, timeout.Token);
             if (!response.IsSuccessStatusCode)
@@ -177,32 +184,28 @@ public sealed class AnthropicAiSearchModel : IAiSearchModel
                 return null;
             }
 
-            if ((string?)answer["stop_reason"] == "refusal")
+            var message = answer["choices"] is JsonArray { Count: > 0 } choices ? choices[0]?["message"] : null;
+            if (message?["refusal"] is JsonValue refusal && !string.IsNullOrEmpty((string?)refusal))
             {
                 _logger.LogWarning("AI search model {Model} refused.", model);
                 return null;
             }
 
-            var text = new StringBuilder();
-            if (answer["content"] is JsonArray blocks)
+            var text = (string?)message?["content"];
+            if (string.IsNullOrWhiteSpace(text))
             {
-                foreach (var block in blocks)
-                {
-                    if ((string?)block?["type"] == "text")
-                    {
-                        text.Append((string?)block["text"]);
-                    }
-                }
+                _logger.LogWarning("AI search model {Model} returned no content.", model);
+                return null;
             }
 
-            var json = JsonNode.Parse(text.ToString());
+            var json = JsonNode.Parse(text);
             if (json is null)
             {
                 return null;
             }
 
-            var inputTokens = (int?)answer["usage"]?["input_tokens"] ?? 0;
-            var outputTokens = (int?)answer["usage"]?["output_tokens"] ?? 0;
+            var inputTokens = (int?)answer["usage"]?["prompt_tokens"] ?? 0;
+            var outputTokens = (int?)answer["usage"]?["completion_tokens"] ?? 0;
             var cost = (inputTokens * inputUsdPerMTok + outputTokens * outputUsdPerMTok) / 1_000_000m;
 
             _logger.LogInformation(

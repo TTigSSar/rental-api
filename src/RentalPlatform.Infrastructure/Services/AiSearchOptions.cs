@@ -8,13 +8,19 @@ public sealed class AiSearchOptions
 {
     public const string SectionName = "AiSearch";
 
-    /// <summary>Local-dev fallback when AiSearch:ApiKey is empty, so a developer machine works unconfigured.</summary>
-    public const string ApiKeyFallbackEnvironmentVariable = "ANTHROPIC_API_KEY";
+    public const string DefaultBaseUrl = "https://api.openai.com/v1";
+    public const string DefaultApiKeyEnvironmentVariable = "OPENAI_API_KEY";
+
+    /// <summary>OpenAI-compatible root; dev points it at OpenRouter. Chat completions are POSTed under it.</summary>
+    public string BaseUrl { get; set; } = DefaultBaseUrl;
+
+    /// <summary>Name of the env var read when AiSearch:ApiKey is empty, so a developer machine works unconfigured.</summary>
+    public string ApiKeyEnvironmentVariable { get; set; } = DefaultApiKeyEnvironmentVariable;
 
     public string? ApiKey { get; set; }
 
-    public string ParseModel { get; init; } = "claude-haiku-5-5";
-    public string RankModel { get; init; } = "claude-sonnet-5-5";
+    public string ParseModel { get; init; } = "gpt-6-luna";
+    public string RankModel { get; init; } = "gpt-6-luna";
 
     public decimal DailyBudgetUsd { get; init; } = 1m;
     public int PerUserPerMinute { get; init; } = 5;
@@ -24,8 +30,8 @@ public sealed class AiSearchOptions
     // is a deploy-time edit, not a code change.
     public decimal ParseInputUsdPerMTok { get; init; } = 0.10m;
     public decimal ParseOutputUsdPerMTok { get; init; } = 0.50m;
-    public decimal RankInputUsdPerMTok { get; init; } = 2.00m;
-    public decimal RankOutputUsdPerMTok { get; init; } = 10.00m;
+    public decimal RankInputUsdPerMTok { get; init; } = 0.10m;
+    public decimal RankOutputUsdPerMTok { get; init; } = 0.50m;
 
     public bool HasApiKey => !string.IsNullOrWhiteSpace(ApiKey);
 
@@ -35,6 +41,7 @@ public sealed class AiSearchOptions
         && options.NearMeRadiusKm is >= 0.2 and <= 20
         && options.ParseInputUsdPerMTok >= 0 && options.ParseOutputUsdPerMTok >= 0
         && options.RankInputUsdPerMTok >= 0 && options.RankOutputUsdPerMTok >= 0
+        && Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _)
         && !string.IsNullOrWhiteSpace(options.ParseModel)
         && !string.IsNullOrWhiteSpace(options.RankModel);
 }

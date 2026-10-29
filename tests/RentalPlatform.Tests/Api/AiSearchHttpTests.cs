@@ -481,6 +481,48 @@ public sealed class AiSearchHttpTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Rerank_With_Filters_Is_Also_Limited_And_Makes_No_Model_Call()
+    {
+        var cat = await SeedCatalogueAsync(3);
+        var (client, userId) = await NewUserAsync();
+        Model.OnRank = (_, candidates) => candidates.Select(c => c.Id).ToList();
+        await SeedLogsAsync(userId, 50, "ok", DateTime.UtcNow);
+
+        var response = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryId = cat.CategoryId }
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal("ai_search.daily_limit", (await ReadAsync(response)).GetProperty("errorCode").GetString());
+        Assert.Equal(0, Model.ParseCalls);
+        Assert.Equal(0, Model.RankCalls);
+    }
+
+    [Fact]
+    public async Task A_Failed_Parse_Does_Not_Count_Toward_The_Daily_Limit()
+    {
+        var cat = await SeedCatalogueAsync(1);
+        var (client, userId) = await NewUserAsync();
+        await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
+
+        Model.OnParse = (_, _, _) => null;
+        var failed = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+        Assert.True((await ReadAsync(failed)).GetProperty("aiUnavailable").GetBoolean());
+
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        var fiftieth = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.OK, fiftieth.StatusCode);
+        Assert.False((await ReadAsync(fiftieth)).GetProperty("aiUnavailable").GetBoolean());
+
+        var rejected = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Equal("ai_search.daily_limit", (await ReadAsync(rejected)).GetProperty("errorCode").GetString());
+    }
+
     // ---- widening ----------------------------------------------------------------------------------------
 
     [Fact]

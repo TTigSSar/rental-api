@@ -22,6 +22,56 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.AiSearchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("CostUsd")
+                        .HasColumnType("decimal(10,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LatencyMs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("OutputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ParseModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("RankModel")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AiSearchLogs", (string)null);
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.Booking", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1185,6 +1235,16 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                         .HasFilter("[ConsumedAt] IS NULL");
 
                     b.ToTable("UserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.AiSearchLog", b =>
+                {
+                    b.HasOne("RentalPlatform.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("RentalPlatform.Domain.Entities.Booking", b =>

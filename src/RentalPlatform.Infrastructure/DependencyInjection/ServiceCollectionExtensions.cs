@@ -81,6 +81,37 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOptions<EmailOptions>>().Value.IsResend
                 ? sp.GetRequiredService<ResendEmailSender>()
                 : sp.GetRequiredService<LoggingEmailSender>());
+
+        // AI search (ADR-054). A missing key is "unavailable", never a startup failure. Local dev falls
+        // back to the env var named by AiSearch:ApiKeyEnvironmentVariable so a developer machine works without extra configuration.
+        services.AddOptions<AiSearchOptions>()
+            .Bind(configuration.GetSection(AiSearchOptions.SectionName))
+            .PostConfigure(options =>
+            {
+                // Compose turns an unset variable into "" (M-016): an empty value means "not configured".
+                if (string.IsNullOrWhiteSpace(options.BaseUrl))
+                {
+                    options.BaseUrl = AiSearchOptions.DefaultBaseUrl;
+                }
+
+                if (string.IsNullOrWhiteSpace(options.ApiKeyEnvironmentVariable))
+                {
+                    options.ApiKeyEnvironmentVariable = AiSearchOptions.DefaultApiKeyEnvironmentVariable;
+                }
+
+                if (string.IsNullOrWhiteSpace(options.ApiKey))
+                {
+                    options.ApiKey = Environment.GetEnvironmentVariable(options.ApiKeyEnvironmentVariable);
+                }
+            })
+            .Validate(AiSearchOptions.IsValid, "AiSearch options are out of range.")
+            .ValidateOnStart();
+        services.AddSingleton<IAiSearchSettings, AiSearchSettings>();
+        services.AddHttpClient<IAiSearchModel, OpenAiAiSearchModel>();
+        services.AddScoped<IAiSearchLogStore, AiSearchLogStore>();
+        services.AddScoped<IAiSearchService, AiSearchService>();
+        services.AddHostedService<AiSearchLogCleanupService>();
+
         services.AddScoped<IListingsOwnerService, ListingsOwnerService>();
         services.AddScoped<IListingImagesOwnerService, ListingImagesOwnerService>();
         services.AddScoped<ICategoriesQueryService, CategoriesQueryService>();

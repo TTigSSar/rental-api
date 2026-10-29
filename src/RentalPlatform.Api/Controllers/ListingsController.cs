@@ -22,12 +22,15 @@ public sealed class ListingsController : ControllerBase
     private readonly IListingsQueryService _listingsQueryService;
     private readonly IListingsOwnerService _listingsOwnerService;
     private readonly IListingImagesOwnerService _listingImagesOwnerService;
+    private readonly IAiSearchService _aiSearchService;
 
     public ListingsController(
         IListingsQueryService listingsQueryService,
         IListingsOwnerService listingsOwnerService,
-        IListingImagesOwnerService listingImagesOwnerService)
+        IListingImagesOwnerService listingImagesOwnerService,
+        IAiSearchService aiSearchService)
     {
+        _aiSearchService = aiSearchService;
         _listingsQueryService = listingsQueryService;
         _listingsOwnerService = listingsOwnerService;
         _listingImagesOwnerService = listingImagesOwnerService;
@@ -55,6 +58,47 @@ public sealed class ListingsController : ControllerBase
     {
         var result = await _listingsQueryService.GetMapPinsAsync(filter, cancellationToken);
         return Ok(result);
+    }
+
+    // AI search (ADR-054). Failure of the model is never an error status: it is a 200 with
+    // aiUnavailable = true. Declared before the {id:guid} route; the literal segment wins anyway.
+    [HttpPost("ai-search")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.AiSearchPolicy)]
+    [ProducesResponseType(typeof(AiSearchResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<AiSearchResponse>> AiSearch(
+        [FromBody] AiSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _aiSearchService.SearchAsync(request, ResolveUiLanguage(), cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        var error = result.Error;
+        if (error is null)
+        {
+            return Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Unexpected error.");
+        }
+
+        return error.Code switch
+        {
+            AiSearchErrorCodes.Unauthenticated => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            AiSearchErrorCodes.DailyLimit => StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
+            _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
+        };
+    }
+
+    [HttpGet("ai-search/status")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AiSearchStatusResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AiSearchStatusResponse>> GetAiSearchStatus(CancellationToken cancellationToken)
+    {
+        return Ok(new AiSearchStatusResponse { Available = await _aiSearchService.IsAvailableAsync(cancellationToken) });
     }
 
     [HttpGet("{id:guid}")]
@@ -333,6 +377,25 @@ public sealed class ListingsController : ControllerBase
         }
 
         return FromOwnerError(result.Error);
+    }
+
+    // UI language for the AI intent line: the first en|ru|hy tag in Accept-Language, English otherwise.
+    private string ResolveUiLanguage()
+    {
+        foreach (var value in Request.Headers.AcceptLanguage)
+        {
+            foreach (var part in (value ?? string.Empty).Split(','))
+            {
+                var tag = part.Split(';')[0].Trim().ToLowerInvariant();
+                var primary = tag.Split('-')[0];
+                if (primary is "en" or "ru" or "hy")
+                {
+                    return primary;
+                }
+            }
+        }
+
+        return "en";
     }
 
     private ActionResult FromOwnerError(ServiceError? error)

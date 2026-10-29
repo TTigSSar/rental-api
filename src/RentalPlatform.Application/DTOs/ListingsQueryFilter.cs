@@ -27,6 +27,10 @@ public sealed class ListingsQueryFilter : IValidatableObject
     public decimal? MinLng { get; init; }
     public decimal? MaxLng { get; init; }
 
+    // AI search continuation (ADR-054): ids already shown, left out of the result. Set only by
+    // AiSearchService; the API layer refuses to bind it from the public query string.
+    public IReadOnlyList<Guid>? ExcludeIds { get; init; }
+
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 20;
 

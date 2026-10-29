@@ -4,6 +4,9 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
+using RentalPlatform.Application.Common;
+using RentalPlatform.Infrastructure.Services;
 
 namespace RentalPlatform.Api.Extensions;
 
@@ -48,11 +51,44 @@ public static class RateLimiterExtensions
     // (the client debounces), tight enough that it is not a free point-in-polygon service.
     public const string DistrictLookupPolicy = "district-lookup";
 
+    // AI search (ADR-054): per ACCOUNT (each search costs real money), PerUserPerMinute (default 5) from
+    // AiSearch options. The only policy with a response body on rejection (errorCode ai_search.rate_limited).
+    public const string AiSearchPolicy = "ai-search";
+
     public static IServiceCollection AddApiRateLimiting(this IServiceCollection services)
     {
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            // Other policies keep the bare 429 they have always had; only AiSearchPolicy writes a body.
+            options.OnRejected = async (context, cancellationToken) =>
+            {
+                var policy = context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
+                if (policy != AiSearchPolicy)
+                {
+                    return;
+                }
+
+                var retryAfterSeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+                    ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+                    : 60;
+
+                context.HttpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                var error = new ServiceError
+                {
+                    Code = AiSearchErrorCodes.RateLimited,
+                    Message = "Too many AI searches. Try again in a moment.",
+                    RetryAfterSeconds = retryAfterSeconds
+                };
+                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await context.HttpContext.Response.WriteAsJsonAsync(
+                    error.ToProblemDetails(StatusCodes.Status429TooManyRequests),
+                    options: null,
+                    contentType: "application/problem+json",
+                    cancellationToken: cancellationToken);
+            };
 
             options.AddPolicy(AuthPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: ResolveClientKey(context),
@@ -160,6 +196,16 @@ public static class RateLimiterExtensions
                 {
                     PermitLimit = 10,
                     Window = TimeSpan.FromHours(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(AiSearchPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveUserKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = context.RequestServices.GetRequiredService<IOptions<AiSearchOptions>>().Value.PerUserPerMinute,
+                    Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true
                 }));

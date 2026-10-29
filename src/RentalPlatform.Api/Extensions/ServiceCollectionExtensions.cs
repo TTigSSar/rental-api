@@ -28,7 +28,14 @@ public static class ServiceCollectionExtensions
             ?? throw new InvalidOperationException("JWT settings are not configured.");
         ValidateJwtOptions(jwtSettings, environment);
 
-        services.AddControllers()
+        services.AddControllers(options =>
+            {
+                // ExcludeIds is an AI-search continuation detail set by the service, not a public
+                // catalogue filter: never bound from the query string of GET /api/listings or map-pins.
+                options.ModelMetadataDetailsProviders.Add(new PropertyBindingExclusion(
+                    typeof(RentalPlatform.Application.DTOs.ListingsQueryFilter),
+                    nameof(RentalPlatform.Application.DTOs.ListingsQueryFilter.ExcludeIds)));
+            })
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -90,6 +97,30 @@ public static class ServiceCollectionExtensions
                         }
 
                         return Task.CompletedTask;
+                    },
+
+                    // AI search is the one endpoint whose 401 carries an errorCode (ADR-045,
+                    // ai_search.unauthenticated); every other endpoint keeps the default bare 401.
+                    OnChallenge = async context =>
+                    {
+                        var policy = context.HttpContext.GetEndpoint()?.Metadata
+                            .GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName;
+                        if (policy != RateLimiterExtensions.AiSearchPolicy)
+                        {
+                            return;
+                        }
+
+                        context.HandleResponse();
+                        var error = new ServiceError
+                        {
+                            Code = AiSearchErrorCodes.Unauthenticated,
+                            Message = "Sign in to use AI search."
+                        };
+                        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        await context.Response.WriteAsJsonAsync(
+                            error.ToProblemDetails(StatusCodes.Status401Unauthorized),
+                            options: null,
+                            contentType: "application/problem+json");
                     }
                 };
             });

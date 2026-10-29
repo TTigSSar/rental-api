@@ -46,6 +46,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
     // The client id the test host reports as configured; ExternalAuthOptions rejects placeholders.
     internal const string GoogleClientId = "123456789-xunit.apps.googleusercontent.com";
 
+    // Stands in for the LLM provider (ADR-054 seam). Tests script it and read its call counters.
+    public FakeAiSearchModel AiModel { get; } = new();
+
     public RentalPlatformWebAppFactory()
     {
         _connection.Open();
@@ -68,6 +71,11 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
         // FileStorage options ValidateOnStart check.
         Environment.SetEnvironmentVariable("FileStorage__ListingsImagesPath", "uploads/listings");
 
+        // AI search is "configured" (a key is present) so the seam is exercised; no real call is ever made
+        // because the model is replaced by FakeAiSearchModel below. Pinned explicitly so a developer's
+        // ANTHROPIC_API_KEY never changes what the tests see.
+        Environment.SetEnvironmentVariable("AiSearch__ApiKey", "xunit-fake-key");
+
         // Google sign-in is "configured" in the test host; one test blanks it to prove the 503.
         Environment.SetEnvironmentVariable("ExternalAuth__Google__ValidAudiences__0", GoogleClientId);
     }
@@ -89,6 +97,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
             // Capture-fake transport (ADR-029 seam): the real LoggingEmailSender would only log.
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(EmailSender);
+
+            services.RemoveAll<IAiSearchModel>();
+            services.AddSingleton<IAiSearchModel>(AiModel);
 
             services.RemoveAll<IGoogleIdTokenVerifier>();
             services.AddSingleton<IGoogleIdTokenVerifier>(GoogleVerifier);

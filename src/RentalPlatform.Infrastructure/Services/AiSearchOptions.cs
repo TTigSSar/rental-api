@@ -24,6 +24,7 @@ public sealed class AiSearchOptions
 
     public decimal DailyBudgetUsd { get; init; } = 1m;
     public int PerUserPerMinute { get; init; } = 5;
+    public int PerUserPerDay { get; init; } = 50;
     public double NearMeRadiusKm { get; init; } = 1;
 
     // USD per million tokens (provider price list; ADR-054 amendment). Config values so a price change
@@ -38,6 +39,7 @@ public sealed class AiSearchOptions
     public static bool IsValid(AiSearchOptions options) =>
         options.DailyBudgetUsd >= 0
         && options.PerUserPerMinute is >= 1 and <= 600
+        && options.PerUserPerDay is >= 1 and <= 10000
         && options.NearMeRadiusKm is >= 0.2 and <= 20
         && options.ParseInputUsdPerMTok >= 0 && options.ParseOutputUsdPerMTok >= 0
         && options.RankInputUsdPerMTok >= 0 && options.RankOutputUsdPerMTok >= 0

@@ -12,4 +12,5 @@ public sealed class AiSearchSettings : IAiSearchSettings
     public bool IsConfigured => _options.HasApiKey;
     public decimal DailyBudgetUsd => _options.DailyBudgetUsd;
     public double NearMeRadiusKm => _options.NearMeRadiusKm;
+    public int PerUserPerDay => _options.PerUserPerDay;
 }

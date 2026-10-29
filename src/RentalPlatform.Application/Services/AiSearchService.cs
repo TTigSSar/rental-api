@@ -92,8 +92,10 @@ public sealed class AiSearchService : IAiSearchService
                 await ContinueAsync(userId.Value, request.Filters, page, pageSize, excludeIds, cancellationToken));
         }
 
-        return ServiceResult<AiSearchResponse>.Success(
-            await FirstPageAsync(userId.Value, description, language, request.Filters, pageSize, excludeIds, cancellationToken));
+        var first = await FirstPageAsync(userId.Value, description, language, request.Filters, pageSize, excludeIds, cancellationToken);
+        return first is null
+            ? Fail(AiSearchErrorCodes.DailyLimit, "The daily AI search limit is reached. Try again tomorrow.")
+            : ServiceResult<AiSearchResponse>.Success(first);
     }
 
     // ---- Page 2+: no model call of any kind ------------------------------------------------------
@@ -125,7 +127,8 @@ public sealed class AiSearchService : IAiSearchService
 
     // ---- Page 1 ----------------------------------------------------------------------------------
 
-    private async Task<AiSearchResponse> FirstPageAsync(
+    // Returns null when the user's daily AI search limit is reached (no search runs, nothing is logged).
+    private async Task<AiSearchResponse?> FirstPageAsync(
         Guid userId,
         string description,
         string language,
@@ -147,6 +150,15 @@ public sealed class AiSearchService : IAiSearchService
         {
             return await FinishUnavailableAsync(
                 userId, description, pageSize, excludeIds, AiSearchOutcomes.BudgetExhausted, clock, usage, cancellationToken);
+        }
+
+        // Per-user daily cap (ADR-054): only searches that reached the model count, and only when AI
+        // would otherwise run. A refused search is not logged, so it does not count either.
+        var usedToday = await _logStore.CountModelSearchesSinceAsync(
+            userId, YerevanCalendar.StartOfTodayUtc(_time.GetUtcNow()), cancellationToken);
+        if (usedToday >= _settings.PerUserPerDay)
+        {
+            return null;
         }
 
         var catalogs = await LoadCatalogsAsync(cancellationToken);

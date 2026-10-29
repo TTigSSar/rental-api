@@ -6,4 +6,5 @@ public interface IAiSearchSettings
     bool IsConfigured { get; }
     decimal DailyBudgetUsd { get; }
     double NearMeRadiusKm { get; }
+    int PerUserPerDay { get; }
 }

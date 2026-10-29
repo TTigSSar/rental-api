@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Infrastructure.Persistence;
 using RentalPlatform.Infrastructure.Services;
@@ -392,6 +393,92 @@ public sealed class AiSearchHttpTests
         var (other, _) = await NewUserAsync();
         other.DefaultRequestHeaders.Add(TestRemoteIpStartupFilter.HeaderName, "198.51.100.77");
         Assert.Equal(HttpStatusCode.OK, (await other.PostAsJsonAsync(Url, new { description = "blocks" })).StatusCode);
+    }
+
+    // ---- per-user daily limit (ADR-054) -----------------------------------------------------------------
+
+    private async Task SeedLogsAsync(Guid userId, int count, string outcome, DateTime createdAt)
+    {
+        var rows = Enumerable.Range(0, count)
+            .Select(_ => new AiSearchLog { Id = Guid.NewGuid(), UserId = userId, CreatedAt = createdAt, Outcome = outcome })
+            .Cast<object>()
+            .ToArray();
+        await _factory.SeedAsync(rows);
+    }
+
+    private static DateTime YerevanMidnightUtc() => YerevanCalendar.StartOfTodayUtc(DateTimeOffset.UtcNow);
+
+    [Fact]
+    public async Task The_50th_Search_Of_The_Day_Is_Allowed_And_The_51st_Is_429_Daily_Limit_Without_Retry_After()
+    {
+        var cat = await SeedCatalogueAsync(1);
+        var (client, userId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
+
+        var fiftieth = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.OK, fiftieth.StatusCode);
+        var parseCallsAfter50th = Model.ParseCalls;
+
+        var rejected = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Equal("ai_search.daily_limit", (await ReadAsync(rejected)).GetProperty("errorCode").GetString());
+        Assert.False(rejected.Headers.Contains("Retry-After"));
+        Assert.Equal(parseCallsAfter50th, Model.ParseCalls);
+        Assert.Equal(1, parseCallsAfter50th);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(50, await db.AiSearchLogs.CountAsync(l => l.UserId == userId));
+    }
+
+    [Fact]
+    public async Task Ranking_Failed_Counts_Toward_The_Daily_Limit()
+    {
+        var (client, userId) = await NewUserAsync();
+        await SeedLogsAsync(userId, 25, "ok", DateTime.UtcNow);
+        await SeedLogsAsync(userId, 25, "ranking_failed", DateTime.UtcNow);
+
+        var response = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Fallback_Rows_Other_Users_And_Rows_Before_Yerevan_Midnight_Do_Not_Count()
+    {
+        var cat = await SeedCatalogueAsync(1);
+        var (client, userId) = await NewUserAsync();
+        var (_, otherId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        await SeedLogsAsync(userId, 30, "ai_unavailable", DateTime.UtcNow);
+        await SeedLogsAsync(userId, 30, "budget_exhausted", DateTime.UtcNow);
+        await SeedLogsAsync(otherId, 60, "ok", DateTime.UtcNow);
+        await SeedLogsAsync(userId, 60, "ok", YerevanMidnightUtc().AddMinutes(-1));
+
+        var response = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False((await ReadAsync(response)).GetProperty("aiUnavailable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Page_2_Is_Never_Limited()
+    {
+        var cat = await SeedCatalogueAsync(3);
+        var (client, userId) = await NewUserAsync();
+        await SeedLogsAsync(userId, 50, "ok", DateTime.UtcNow);
+
+        var response = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryId = cat.CategoryId },
+            page = 2,
+            excludeIds = new[] { cat.Listings[0].Id }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     // ---- widening ----------------------------------------------------------------------------------------

@@ -88,6 +88,7 @@ public sealed class ListingsController : ControllerBase
         return error.Code switch
         {
             AiSearchErrorCodes.Unauthenticated => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            AiSearchErrorCodes.DailyLimit => StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }

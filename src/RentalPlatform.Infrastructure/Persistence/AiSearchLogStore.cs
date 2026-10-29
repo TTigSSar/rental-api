@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Entities;
 
 namespace RentalPlatform.Infrastructure.Persistence;
@@ -21,6 +22,15 @@ public sealed class AiSearchLogStore : IAiSearchLogStore
 
         return (decimal)spent;
     }
+
+    public async Task<int> CountModelSearchesSinceAsync(Guid userId, DateTime sinceUtc, CancellationToken cancellationToken = default) =>
+        await _dbContext.AiSearchLogs
+            .AsNoTracking()
+            .CountAsync(
+                log => log.UserId == userId
+                    && log.CreatedAt >= sinceUtc
+                    && (log.Outcome == AiSearchOutcomes.Ok || log.Outcome == AiSearchOutcomes.RankingFailed),
+                cancellationToken);
 
     public async Task AddAsync(AiSearchLog entry, CancellationToken cancellationToken = default)
     {

@@ -6,6 +6,7 @@ public static class AiSearchErrorCodes
     public const string Unauthenticated = "ai_search.unauthenticated";
     public const string InvalidDescription = "ai_search.invalid_description";
     public const string RateLimited = "ai_search.rate_limited";
+    public const string DailyLimit = "ai_search.daily_limit";
 }
 
 public static class AiSearchOutcomes

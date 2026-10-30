@@ -97,7 +97,7 @@ public sealed class ListingsController : ControllerBase
         {
             AiSearchErrorCodes.Unauthenticated => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
             AiSearchErrorCodes.UserBlocked => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
-            AiSearchErrorCodes.DailyLimit =>StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
+            AiSearchErrorCodes.DailyLimit => StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }

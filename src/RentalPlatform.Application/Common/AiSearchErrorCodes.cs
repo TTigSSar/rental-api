@@ -7,6 +7,9 @@ public static class AiSearchErrorCodes
     public const string InvalidDescription = "ai_search.invalid_description";
     public const string RateLimited = "ai_search.rate_limited";
     public const string DailyLimit = "ai_search.daily_limit";
+
+    // Not a new code: the platform-wide auth.user_blocked (same value as HomePointService.ErrorCodes.UserBlocked).
+    public const string UserBlocked = "auth.user_blocked";
 }
 
 public static class AiSearchOutcomes

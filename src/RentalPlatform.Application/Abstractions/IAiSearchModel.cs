@@ -1,7 +1,8 @@
 namespace RentalPlatform.Application.Abstractions;
 
 // The seam to the LLM provider (ADR-054). Implementations never throw: any failure (no key, non-2xx,
-// timeout, refusal, unusable JSON) is a null result and the service degrades to a plain search.
+// timeout, refusal, unusable JSON) is a null result, or a Failed result when money was spent anyway,
+// and the service degrades to a plain search.
 // Nothing here carries user identity or coordinates; callers pass only the description, the catalogue
 // reference lists and public listing fields.
 public interface IAiSearchModel
@@ -19,7 +20,18 @@ public interface IAiSearchModel
         CancellationToken cancellationToken = default);
 }
 
-public sealed record AiModelResult<T>(T Value, string Model, int InputTokens, int OutputTokens, decimal CostUsd);
+/// <summary>
+/// A model call that was (or may have been) billed. <see cref="IsFailed"/> means the provider was paid but the
+/// answer is unusable (or the call timed out / was aborted: then the cost is a pessimistic estimate); Value
+/// must not be read. A plain null from the seam means nothing was spent.
+/// </summary>
+public sealed record AiModelResult<T>(T Value, string Model, int InputTokens, int OutputTokens, decimal CostUsd)
+{
+    public bool IsFailed { get; init; }
+
+    public static AiModelResult<T> Failed(string model, int inputTokens, int outputTokens, decimal costUsd) =>
+        new(default!, model, inputTokens, outputTokens, costUsd) { IsFailed = true };
+}
 
 public sealed record AiCatalogCategory(string Slug, string Name);
 

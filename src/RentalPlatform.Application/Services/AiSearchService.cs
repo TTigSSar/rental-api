@@ -8,7 +8,7 @@ using RentalPlatform.Domain.Entities;
 namespace RentalPlatform.Application.Services;
 
 // AI search (ADR-054). A model turns the description into the EXISTING catalogue filters; the normal
-// Approved-only catalogue query runs; a model re-ranks at most 20 candidates. The model never picks
+// Approved-only catalogue query runs; a model re-ranks at most 10 candidates. The model never picks
 // listings, never sees who is asking, and never sees an exact coordinate. Any model failure degrades
 // to a plain catalogue search.
 //
@@ -16,7 +16,7 @@ namespace RentalPlatform.Application.Services;
 public sealed class AiSearchService : IAiSearchService
 {
     public const int MaxDescriptionLength = 500;
-    public const int MaxRankCandidates = 20;
+    public const int MaxRankCandidates = 10;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 50;
     private const int MaxExcludeIds = 500;
@@ -72,6 +72,19 @@ public sealed class AiSearchService : IAiSearchService
         if (userId is null)
         {
             return Fail(AiSearchErrorCodes.Unauthenticated, "Sign in to use AI search.");
+        }
+
+        // A blocked (or deleted) account gets nothing: checked before any model call, budget or limit
+        // work, and for every page, so no spend and no log row (security review, Major 3).
+        var user = await _homePoints.FindUserByIdAsync(userId.Value, cancellationToken);
+        if (user is null)
+        {
+            return Fail(AiSearchErrorCodes.Unauthenticated, "Sign in to use AI search.");
+        }
+
+        if (user.IsBlocked)
+        {
+            return Fail(AiSearchErrorCodes.UserBlocked, "Blocked users cannot use AI search.");
         }
 
         var description = (request.Description ?? string.Empty).Trim();
@@ -140,6 +153,47 @@ public sealed class AiSearchService : IAiSearchService
         var clock = Stopwatch.StartNew();
         var usage = new Usage();
 
+        // Once a model call has been paid for, a log row is ALWAYS written - even when the request is
+        // aborted or a later step throws - so the daily budget sees the spend. (A pre-model refusal has
+        // no spend and writes its own row or none.)
+        Exception? original = null;
+        try
+        {
+            return await FirstPageCoreAsync(
+                userId, description, language, givenFilters, pageSize, excludeIds, clock, usage, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            original = ex;
+            throw;
+        }
+        finally
+        {
+            if (usage.HasSpend && !usage.Logged)
+            {
+                try
+                {
+                    await WriteLogAsync(userId, description, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
+                }
+                // A failed log write must not replace the exception already propagating (wrong root cause).
+                catch when (original is not null)
+                {
+                }
+            }
+        }
+    }
+
+    private async Task<AiSearchResponse?> FirstPageCoreAsync(
+        Guid userId,
+        string description,
+        string language,
+        AiSearchFilters? givenFilters,
+        int pageSize,
+        IReadOnlyList<Guid> excludeIds,
+        Stopwatch clock,
+        Usage usage,
+        CancellationToken cancellationToken)
+    {
         if (!_settings.IsConfigured)
         {
             return await FinishUnavailableAsync(
@@ -152,8 +206,8 @@ public sealed class AiSearchService : IAiSearchService
                 userId, description, pageSize, excludeIds, AiSearchOutcomes.BudgetExhausted, clock, usage, cancellationToken);
         }
 
-        // Per-user daily cap (ADR-054): only searches that reached the model count, and only when AI
-        // would otherwise run. A refused search is not logged, so it does not count either.
+        // Per-user daily cap (ADR-054): every paid search counts (a log row with CostUsd > 0), whatever
+        // its outcome; free fallbacks and page 2+ write no cost, so they do not.
         var usedToday = await _logStore.CountModelSearchesSinceAsync(
             userId, YerevanCalendar.StartOfTodayUtc(_time.GetUtcNow()), cancellationToken);
         if (usedToday >= _settings.PerUserPerDay)
@@ -176,13 +230,17 @@ public sealed class AiSearchService : IAiSearchService
         if (givenFilters is null)
         {
             var parseCall = await _model.ParseAsync(description, NormalizeLanguage(language), catalogs, cancellationToken);
-            if (parseCall is null)
+            if (parseCall is not null)
+            {
+                usage.AddParse(parseCall); // billed even when the answer is unusable
+            }
+
+            if (parseCall is null || parseCall.IsFailed)
             {
                 return await FinishUnavailableAsync(
                     userId, description, pageSize, excludeIds, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
             }
 
-            usage.AddParse(parseCall);
             parsed = parseCall.Value;
             datesMentioned = parsed.DatesMentioned;
             filters = MapParsedToFilters(parsed, catalogs, _settings.NearMeRadiusKm);
@@ -241,7 +299,7 @@ public sealed class AiSearchService : IAiSearchService
             result = await QueryAsync(catalogueFilter, 1, pageSize, excludeIds, cancellationToken);
         }
 
-        // ---- Rank the first <= 20 ------------------------------------------------------------------
+        // ---- Rank the first <= 10 ------------------------------------------------------------------
         var items = result.Items.ToList();
         var ranked = false;
         var outcome = AiSearchOutcomes.Ok;
@@ -259,13 +317,17 @@ public sealed class AiSearchService : IAiSearchService
                 .ToList();
 
             var rankCall = await _model.RankAsync(description, candidates, cancellationToken);
-            if (rankCall is null)
+            if (rankCall is not null)
+            {
+                usage.AddRank(rankCall);
+            }
+
+            if (rankCall is null || rankCall.IsFailed)
             {
                 outcome = AiSearchOutcomes.RankingFailed;
             }
             else
             {
-                usage.AddRank(rankCall);
                 var rankedCandidateIds = AiSearchRankValidator.Merge(
                     candidates.Select(candidate => candidate.Id).ToList(), rankCall.Value);
                 var rest = items.Select(item => item.Id).Where(id => !rankedCandidateIds.Contains(id));
@@ -524,6 +586,10 @@ public sealed class AiSearchService : IAiSearchService
         Usage usage,
         CancellationToken cancellationToken)
     {
+        // A paid-for call must reach the log even if the request was aborted meanwhile.
+        var token = usage.HasSpend ? CancellationToken.None : cancellationToken;
+        usage.Logged = true;
+
         await _logStore.AddAsync(
             new AiSearchLog
             {
@@ -539,7 +605,7 @@ public sealed class AiSearchService : IAiSearchService
                 LatencyMs = (int)clock.ElapsedMilliseconds,
                 Outcome = outcome
             },
-            cancellationToken);
+            token);
     }
 
     private static ServiceResult<AiSearchResponse> Fail(string code, string message) =>
@@ -552,6 +618,10 @@ public sealed class AiSearchService : IAiSearchService
         public int InputTokens { get; private set; }
         public int OutputTokens { get; private set; }
         public decimal CostUsd { get; private set; }
+
+        // A model call was made (billed or estimated), successful or not.
+        public bool HasSpend { get; private set; }
+        public bool Logged { get; set; }
 
         public void AddParse<T>(AiModelResult<T> call)
         {
@@ -567,6 +637,7 @@ public sealed class AiSearchService : IAiSearchService
 
         private void Add(int input, int output, decimal cost)
         {
+            HasSpend = true;
             InputTokens += input;
             OutputTokens += output;
             CostUsd += cost;

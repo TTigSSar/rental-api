@@ -1,5 +1,6 @@
 using Xunit;
 using System.Net;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -183,7 +184,7 @@ public sealed class OpenAiAiSearchModelTests
             RankOutputUsdPerMTok = 2m
         });
         handler.Respond = _ => Task.FromResult(Completion(
-            new JsonObject { ["orderedIds"] = new JsonArray(b.ToString(), a.ToString()) }, 500_000, 250_000));
+            new JsonObject { ["orderedIds"] = new JsonArray(2, 1) }, 500_000, 250_000));
 
         var result = await model.RankAsync(
             "something quiet",
@@ -201,9 +202,40 @@ public sealed class OpenAiAiSearchModelTests
         Assert.Equal("rank-model", (string?)handler.Body!["model"]);
         var user = (string)handler.Body["messages"]![1]!["content"]!;
         Assert.Contains("something quiet", user);
-        Assert.Contains(a.ToString(), user);
-        Assert.Contains(b.ToString(), user);
-        AssertStrict(handler.Body["response_format"]!["json_schema"]!["schema"]!);
+        Assert.DoesNotContain(a.ToString(), user);
+        Assert.DoesNotContain(b.ToString(), user);
+        var lines = user.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => l.StartsWith('{')).Select(l => JsonNode.Parse(l)!).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(JsonValueKind.Number, lines[0]["id"]!.GetValueKind());
+        Assert.Equal(1, (int)lines[0]["id"]!);
+        Assert.Equal(2, (int)lines[1]["id"]!);
+
+        var schema = handler.Body["response_format"]!["json_schema"]!["schema"]!;
+        AssertStrict(schema);
+        Assert.Equal("integer", (string?)schema["properties"]!["orderedIds"]!["items"]!["type"]);
+    }
+
+    [Fact]
+    public async Task Rank_MapsNumbersToGuids_DroppingOutOfRangeAndDuplicates()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var (model, handler) = Create();
+        handler.Respond = _ => Task.FromResult(Completion(
+            new JsonObject { ["orderedIds"] = new JsonArray(3, 0, 4, -1, 3, 1, 1) }));
+
+        var result = await model.RankAsync(
+            "x",
+            new[]
+            {
+                new AiRankCandidate(a, "A", "cat", 1m, null, null, "a"),
+                new AiRankCandidate(b, "B", "cat", 1m, null, null, "b"),
+                new AiRankCandidate(c, "C", "cat", 1m, null, null, "c")
+            });
+
+        Assert.Equal(new[] { c, a }, result!.Value);
     }
 
     [Fact]
@@ -217,15 +249,76 @@ public sealed class OpenAiAiSearchModelTests
     }
 
     [Fact]
-    public async Task Timeout_ReturnsNull()
+    public async Task Timeout_IsChargedAPessimisticEstimate()
+    {
+        var slow = new SlowHandler();
+        var model = new OpenAiAiSearchModel(
+            new HttpClient(slow),
+            Options.Create(new AiSearchOptions { ApiKey = Key, ParseInputUsdPerMTok = 1m, ParseOutputUsdPerMTok = 2m }),
+            NullLogger<OpenAiAiSearchModel>.Instance, TimeSpan.FromMilliseconds(50));
+
+        var result = await model.ParseAsync("puzzle", "en", Catalogs);
+
+        Assert.Equal(1, slow.Calls);
+        Assert.NotNull(result);
+        Assert.True(result!.IsFailed);
+        Assert.Equal(4096, result.OutputTokens); // the full max_completion_tokens allowance
+        Assert.True(result.InputTokens > 0);
+        Assert.Equal((result.InputTokens * 1m + 4096 * 2m) / 1_000_000m, result.CostUsd);
+    }
+
+    [Fact]
+    public async Task CallerAbort_StopsTheProviderCall_AndIsChargedAPessimisticEstimate()
     {
         var slow = new SlowHandler();
         var model = new OpenAiAiSearchModel(
             new HttpClient(slow), Options.Create(new AiSearchOptions { ApiKey = Key }),
-            NullLogger<OpenAiAiSearchModel>.Instance, TimeSpan.FromMilliseconds(50));
+            NullLogger<OpenAiAiSearchModel>.Instance);
+        using var abort = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
-        Assert.Null(await model.ParseAsync("puzzle", "en", Catalogs));
-        Assert.Equal(1, slow.Calls);
+        var result = await model.ParseAsync("puzzle", "en", Catalogs, abort.Token);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsFailed);
+        Assert.True(result.CostUsd > 0m);
+    }
+
+    [Fact]
+    public async Task UsageWithUnusableContent_KeepsTheBilledCost()
+    {
+        var (model, handler) = Create(new AiSearchOptions { ApiKey = Key, ParseInputUsdPerMTok = 1m, ParseOutputUsdPerMTok = 2m });
+        // finish_reason=length: reasoning ate the budget, content is empty, but tokens were billed.
+        handler.Respond = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(new JsonObject
+            {
+                ["choices"] = new JsonArray(new JsonObject
+                {
+                    ["finish_reason"] = "length",
+                    ["message"] = new JsonObject { ["content"] = "" }
+                }),
+                ["usage"] = new JsonObject { ["prompt_tokens"] = 1_000_000, ["completion_tokens"] = 500_000 }
+            }.ToJsonString())
+        });
+
+        var result = await model.ParseAsync("puzzle", "en", Catalogs);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsFailed);
+        Assert.Equal(2.0m, result.CostUsd); // 1 M x 1 + 0.5 M x 2
+    }
+
+    [Fact]
+    public async Task UsageWithUnreadableShape_KeepsTheBilledCost()
+    {
+        var (model, handler) = Create(new AiSearchOptions { ApiKey = Key, RankInputUsdPerMTok = 1m, RankOutputUsdPerMTok = 1m });
+        handler.Respond = _ => Task.FromResult(Completion(new JsonObject { ["nope"] = 1 }, 1_000_000, 1_000_000));
+
+        var result = await model.RankAsync("x", new[] { new AiRankCandidate(Guid.NewGuid(), "A", "c", 1m, null, null, "a") });
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsFailed);
+        Assert.Equal(2.0m, result.CostUsd);
     }
 
     private sealed class SlowHandler : HttpMessageHandler

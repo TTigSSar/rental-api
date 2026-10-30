@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Caching.Memory;
 using RentalPlatform.Api.Controllers.Requests;
 using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
@@ -23,13 +24,19 @@ public sealed class ListingsController : ControllerBase
     private readonly IListingsOwnerService _listingsOwnerService;
     private readonly IListingImagesOwnerService _listingImagesOwnerService;
     private readonly IAiSearchService _aiSearchService;
+    private readonly IMemoryCache _cache;
+
+    public const string AiSearchStatusCacheKey = "ai-search:status";
+    private static readonly TimeSpan AiSearchStatusTtl = TimeSpan.FromSeconds(30);
 
     public ListingsController(
         IListingsQueryService listingsQueryService,
         IListingsOwnerService listingsOwnerService,
         IListingImagesOwnerService listingImagesOwnerService,
-        IAiSearchService aiSearchService)
+        IAiSearchService aiSearchService,
+        IMemoryCache cache)
     {
+        _cache = cache;
         _aiSearchService = aiSearchService;
         _listingsQueryService = listingsQueryService;
         _listingsOwnerService = listingsOwnerService;
@@ -68,6 +75,7 @@ public sealed class ListingsController : ControllerBase
     [ProducesResponseType(typeof(AiSearchResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<AiSearchResponse>> AiSearch(
         [FromBody] AiSearchRequest request,
@@ -88,6 +96,7 @@ public sealed class ListingsController : ControllerBase
         return error.Code switch
         {
             AiSearchErrorCodes.Unauthenticated => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
+            AiSearchErrorCodes.UserBlocked => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             AiSearchErrorCodes.DailyLimit => StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
@@ -98,7 +107,14 @@ public sealed class ListingsController : ControllerBase
     [ProducesResponseType(typeof(AiSearchStatusResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<AiSearchStatusResponse>> GetAiSearchStatus(CancellationToken cancellationToken)
     {
-        return Ok(new AiSearchStatusResponse { Available = await _aiSearchService.IsAvailableAsync(cancellationToken) });
+        // Anonymous and polled by every page that shows the AI box: the answer (a budget SUM) is cached 30 s.
+        if (!_cache.TryGetValue(AiSearchStatusCacheKey, out bool available))
+        {
+            available = await _aiSearchService.IsAvailableAsync(cancellationToken);
+            _cache.Set(AiSearchStatusCacheKey, available, AiSearchStatusTtl);
+        }
+
+        return Ok(new AiSearchStatusResponse { Available = available });
     }
 
     [HttpGet("{id:guid}")]

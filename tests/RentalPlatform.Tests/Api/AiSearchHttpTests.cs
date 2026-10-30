@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RentalPlatform.Api.Controllers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Services;
 using RentalPlatform.Domain;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Infrastructure.Persistence;
@@ -956,5 +957,77 @@ public sealed class AiSearchHttpTests
         Assert.Null(oldRow.Description);
         Assert.Equal(0.001m, oldRow.CostUsd);
         Assert.Equal("recent text", (await db.AiSearchLogs.AsNoTracking().SingleAsync(l => l.Id == recent.Id)).Description);
+    }
+
+    // ---- a failed log write must not mask the real failure ---------------------------------------------
+
+    private sealed class ThrowingLogStore : IAiSearchLogStore
+    {
+        private readonly IAiSearchLogStore _inner;
+        public ThrowingLogStore(IAiSearchLogStore inner) => _inner = inner;
+        public int AddCalls { get; private set; }
+
+        public Task<decimal> GetSpentSinceAsync(DateTime sinceUtc, CancellationToken cancellationToken = default) =>
+            _inner.GetSpentSinceAsync(sinceUtc, cancellationToken);
+
+        public Task<int> CountModelSearchesSinceAsync(Guid userId, DateTime sinceUtc, CancellationToken cancellationToken = default) =>
+            _inner.CountModelSearchesSinceAsync(userId, sinceUtc, cancellationToken);
+
+        public Task AddAsync(AiSearchLog entry, CancellationToken cancellationToken = default)
+        {
+            AddCalls++;
+            throw new TimeoutException("log store down");
+        }
+    }
+
+    private sealed class FixedUser : ICurrentUserContext
+    {
+        public FixedUser(Guid id) => UserId = id;
+        public Guid? UserId { get; }
+    }
+
+    private static AiSearchService BuildService(IServiceProvider sp, Guid userId, IAiSearchLogStore logStore, IAiSearchModel model) =>
+        new(new FixedUser(userId),
+            sp.GetRequiredService<IListingsQueryService>(),
+            sp.GetRequiredService<ICategoriesQueryService>(),
+            sp.GetRequiredService<IDistrictsQueryService>(),
+            sp.GetRequiredService<IHomePointStore>(),
+            model,
+            logStore,
+            sp.GetRequiredService<IAiSearchSettings>(),
+            TimeProvider.System);
+
+    [Fact]
+    public async Task A_Failed_Log_Write_Does_Not_Replace_The_Exception_Already_Propagating()
+    {
+        var cat = await SeedCatalogueAsync(3);
+        var (_, userId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.OnRank = (_, _) => throw new InvalidOperationException("rank step failed");
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var store = new ThrowingLogStore(scope.ServiceProvider.GetRequiredService<IAiSearchLogStore>());
+        var service = BuildService(scope.ServiceProvider, userId, store, Model);
+
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(
+            () => service.SearchAsync(new RentalPlatform.Application.DTOs.AiSearchRequest { Description = "blocks" }, "en"));
+
+        Assert.IsType<InvalidOperationException>(thrown);
+        Assert.Equal(1, store.AddCalls); // the write was attempted
+    }
+
+    [Fact]
+    public async Task A_Failed_Log_Write_Still_Propagates_When_Nothing_Else_Failed()
+    {
+        var cat = await SeedCatalogueAsync(1); // one item: no rank call, then the normal write throws
+        var (_, userId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var store = new ThrowingLogStore(scope.ServiceProvider.GetRequiredService<IAiSearchLogStore>());
+        var service = BuildService(scope.ServiceProvider, userId, store, Model);
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => service.SearchAsync(new RentalPlatform.Application.DTOs.AiSearchRequest { Description = "blocks" }, "en"));
     }
 }

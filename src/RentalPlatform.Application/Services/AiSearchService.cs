@@ -156,16 +156,29 @@ public sealed class AiSearchService : IAiSearchService
         // Once a model call has been paid for, a log row is ALWAYS written - even when the request is
         // aborted or a later step throws - so the daily budget sees the spend. (A pre-model refusal has
         // no spend and writes its own row or none.)
+        Exception? original = null;
         try
         {
             return await FirstPageCoreAsync(
                 userId, description, language, givenFilters, pageSize, excludeIds, clock, usage, cancellationToken);
         }
+        catch (Exception ex)
+        {
+            original = ex;
+            throw;
+        }
         finally
         {
             if (usage.HasSpend && !usage.Logged)
             {
-                await WriteLogAsync(userId, description, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
+                try
+                {
+                    await WriteLogAsync(userId, description, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
+                }
+                // A failed log write must not replace the exception already propagating (wrong root cause).
+                catch when (original is not null)
+                {
+                }
             }
         }
     }

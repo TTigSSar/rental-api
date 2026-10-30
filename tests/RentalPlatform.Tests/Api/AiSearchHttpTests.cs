@@ -150,6 +150,22 @@ public sealed class AiSearchHttpTests
     }
 
     [Fact]
+    public async Task Only_The_First_10_Of_A_20_Item_Page_Are_Ranked_The_Rest_Keep_Catalogue_Order()
+    {
+        var cat = await SeedCatalogueAsync(20);
+        var (client, _) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        IReadOnlyList<AiRankCandidate>? seen = null;
+        Model.OnRank = (_, candidates) => { seen = candidates; return candidates.Select(c => c.Id).Reverse().ToList(); };
+
+        var body = await ReadAsync(await client.PostAsJsonAsync(Url, new { description = "blocks" }));
+
+        Assert.Equal(10, seen!.Count);
+        var catalogue = cat.Listings.Select(l => l.Id).ToList();
+        Assert.Equal(catalogue.Take(10).Reverse().Concat(catalogue.Skip(10)), Ids(body));
+    }
+
+    [Fact]
     public async Task Page2_With_ExcludeIds_Makes_No_Model_Call_And_Continues_In_CreatedAt_Order()
     {
         var cat = await SeedCatalogueAsync(25);

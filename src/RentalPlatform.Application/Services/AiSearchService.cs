@@ -8,7 +8,7 @@ using RentalPlatform.Domain.Entities;
 namespace RentalPlatform.Application.Services;
 
 // AI search (ADR-054). A model turns the description into the EXISTING catalogue filters; the normal
-// Approved-only catalogue query runs; a model re-ranks at most 20 candidates. The model never picks
+// Approved-only catalogue query runs; a model re-ranks at most 10 candidates. The model never picks
 // listings, never sees who is asking, and never sees an exact coordinate. Any model failure degrades
 // to a plain catalogue search.
 //
@@ -16,7 +16,7 @@ namespace RentalPlatform.Application.Services;
 public sealed class AiSearchService : IAiSearchService
 {
     public const int MaxDescriptionLength = 500;
-    public const int MaxRankCandidates = 20;
+    public const int MaxRankCandidates = 10;
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 50;
     private const int MaxExcludeIds = 500;
@@ -241,7 +241,7 @@ public sealed class AiSearchService : IAiSearchService
             result = await QueryAsync(catalogueFilter, 1, pageSize, excludeIds, cancellationToken);
         }
 
-        // ---- Rank the first <= 20 ------------------------------------------------------------------
+        // ---- Rank the first <= 10 ------------------------------------------------------------------
         var items = result.Items.ToList();
         var ranked = false;
         var outcome = AiSearchOutcomes.Ok;

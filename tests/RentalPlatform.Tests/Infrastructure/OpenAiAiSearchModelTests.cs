@@ -1,5 +1,6 @@
 using Xunit;
 using System.Net;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -183,7 +184,7 @@ public sealed class OpenAiAiSearchModelTests
             RankOutputUsdPerMTok = 2m
         });
         handler.Respond = _ => Task.FromResult(Completion(
-            new JsonObject { ["orderedIds"] = new JsonArray(b.ToString(), a.ToString()) }, 500_000, 250_000));
+            new JsonObject { ["orderedIds"] = new JsonArray(2, 1) }, 500_000, 250_000));
 
         var result = await model.RankAsync(
             "something quiet",
@@ -201,9 +202,40 @@ public sealed class OpenAiAiSearchModelTests
         Assert.Equal("rank-model", (string?)handler.Body!["model"]);
         var user = (string)handler.Body["messages"]![1]!["content"]!;
         Assert.Contains("something quiet", user);
-        Assert.Contains(a.ToString(), user);
-        Assert.Contains(b.ToString(), user);
-        AssertStrict(handler.Body["response_format"]!["json_schema"]!["schema"]!);
+        Assert.DoesNotContain(a.ToString(), user);
+        Assert.DoesNotContain(b.ToString(), user);
+        var lines = user.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => l.StartsWith('{')).Select(l => JsonNode.Parse(l)!).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(JsonValueKind.Number, lines[0]["id"]!.GetValueKind());
+        Assert.Equal(1, (int)lines[0]["id"]!);
+        Assert.Equal(2, (int)lines[1]["id"]!);
+
+        var schema = handler.Body["response_format"]!["json_schema"]!["schema"]!;
+        AssertStrict(schema);
+        Assert.Equal("integer", (string?)schema["properties"]!["orderedIds"]!["items"]!["type"]);
+    }
+
+    [Fact]
+    public async Task Rank_MapsNumbersToGuids_DroppingOutOfRangeAndDuplicates()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var (model, handler) = Create();
+        handler.Respond = _ => Task.FromResult(Completion(
+            new JsonObject { ["orderedIds"] = new JsonArray(3, 0, 4, -1, 3, 1, 1) }));
+
+        var result = await model.RankAsync(
+            "x",
+            new[]
+            {
+                new AiRankCandidate(a, "A", "cat", 1m, null, null, "a"),
+                new AiRankCandidate(b, "B", "cat", 1m, null, null, "b"),
+                new AiRankCandidate(c, "C", "cat", 1m, null, null, "c")
+            });
+
+        Assert.Equal(new[] { c, a }, result!.Value);
     }
 
     [Fact]

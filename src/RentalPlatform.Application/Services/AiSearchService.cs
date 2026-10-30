@@ -140,6 +140,34 @@ public sealed class AiSearchService : IAiSearchService
         var clock = Stopwatch.StartNew();
         var usage = new Usage();
 
+        // Once a model call has been paid for, a log row is ALWAYS written - even when the request is
+        // aborted or a later step throws - so the daily budget sees the spend. (A pre-model refusal has
+        // no spend and writes its own row or none.)
+        try
+        {
+            return await FirstPageCoreAsync(
+                userId, description, language, givenFilters, pageSize, excludeIds, clock, usage, cancellationToken);
+        }
+        finally
+        {
+            if (usage.HasSpend && !usage.Logged)
+            {
+                await WriteLogAsync(userId, description, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
+            }
+        }
+    }
+
+    private async Task<AiSearchResponse?> FirstPageCoreAsync(
+        Guid userId,
+        string description,
+        string language,
+        AiSearchFilters? givenFilters,
+        int pageSize,
+        IReadOnlyList<Guid> excludeIds,
+        Stopwatch clock,
+        Usage usage,
+        CancellationToken cancellationToken)
+    {
         if (!_settings.IsConfigured)
         {
             return await FinishUnavailableAsync(
@@ -176,13 +204,17 @@ public sealed class AiSearchService : IAiSearchService
         if (givenFilters is null)
         {
             var parseCall = await _model.ParseAsync(description, NormalizeLanguage(language), catalogs, cancellationToken);
-            if (parseCall is null)
+            if (parseCall is not null)
+            {
+                usage.AddParse(parseCall); // billed even when the answer is unusable
+            }
+
+            if (parseCall is null || parseCall.IsFailed)
             {
                 return await FinishUnavailableAsync(
                     userId, description, pageSize, excludeIds, AiSearchOutcomes.AiUnavailable, clock, usage, cancellationToken);
             }
 
-            usage.AddParse(parseCall);
             parsed = parseCall.Value;
             datesMentioned = parsed.DatesMentioned;
             filters = MapParsedToFilters(parsed, catalogs, _settings.NearMeRadiusKm);
@@ -259,13 +291,17 @@ public sealed class AiSearchService : IAiSearchService
                 .ToList();
 
             var rankCall = await _model.RankAsync(description, candidates, cancellationToken);
-            if (rankCall is null)
+            if (rankCall is not null)
+            {
+                usage.AddRank(rankCall);
+            }
+
+            if (rankCall is null || rankCall.IsFailed)
             {
                 outcome = AiSearchOutcomes.RankingFailed;
             }
             else
             {
-                usage.AddRank(rankCall);
                 var rankedCandidateIds = AiSearchRankValidator.Merge(
                     candidates.Select(candidate => candidate.Id).ToList(), rankCall.Value);
                 var rest = items.Select(item => item.Id).Where(id => !rankedCandidateIds.Contains(id));
@@ -524,6 +560,10 @@ public sealed class AiSearchService : IAiSearchService
         Usage usage,
         CancellationToken cancellationToken)
     {
+        // A paid-for call must reach the log even if the request was aborted meanwhile.
+        var token = usage.HasSpend ? CancellationToken.None : cancellationToken;
+        usage.Logged = true;
+
         await _logStore.AddAsync(
             new AiSearchLog
             {
@@ -539,7 +579,7 @@ public sealed class AiSearchService : IAiSearchService
                 LatencyMs = (int)clock.ElapsedMilliseconds,
                 Outcome = outcome
             },
-            cancellationToken);
+            token);
     }
 
     private static ServiceResult<AiSearchResponse> Fail(string code, string message) =>
@@ -552,6 +592,10 @@ public sealed class AiSearchService : IAiSearchService
         public int InputTokens { get; private set; }
         public int OutputTokens { get; private set; }
         public decimal CostUsd { get; private set; }
+
+        // A model call was made (billed or estimated), successful or not.
+        public bool HasSpend { get; private set; }
+        public bool Logged { get; set; }
 
         public void AddParse<T>(AiModelResult<T> call)
         {
@@ -567,6 +611,7 @@ public sealed class AiSearchService : IAiSearchService
 
         private void Add(int input, int output, decimal cost)
         {
+            HasSpend = true;
             InputTokens += input;
             OutputTokens += output;
             CostUsd += cost;

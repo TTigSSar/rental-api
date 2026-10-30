@@ -291,6 +291,89 @@ public sealed class AiSearchHttpTests
         Assert.Equal("ai_unavailable", (await db.AiSearchLogs.AsNoTracking().SingleAsync(l => l.UserId == userId)).Outcome);
     }
 
+    private async Task<decimal> SpentTodayAsync()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAiSearchLogStore>();
+        return await store.GetSpentSinceAsync(YerevanMidnightUtc());
+    }
+
+    [Fact]
+    public async Task A_Client_Abort_After_The_Model_Call_Still_Logs_The_Spend_And_The_Budget_Sees_It()
+    {
+        var cat = await SeedCatalogueAsync(2);
+        var (client, userId) = await NewUserAsync();
+        using var abort = new CancellationTokenSource();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.ParseCostUsd = 0.004m;
+        Model.OnParseCalled = abort.Cancel; // the client disconnects while the provider call is in flight
+        var before = await SpentTodayAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.PostAsJsonAsync(Url, new { description = "blocks" }, abort.Token));
+
+        // The server side finishes on its own; wait for the row instead of racing it.
+        AiSearchLog? log = null;
+        for (var attempt = 0; attempt < 100 && log is null; attempt++)
+        {
+            await using var scope = _factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            log = await db.AiSearchLogs.AsNoTracking().SingleOrDefaultAsync(l => l.UserId == userId);
+            if (log is null)
+            {
+                await Task.Delay(50);
+            }
+        }
+
+        Assert.NotNull(log);
+        Assert.Equal(0.004m, log!.CostUsd);
+        Assert.Equal("fake-parse", log.ParseModel);
+        Assert.Equal(1, Model.ParseCalls);
+        // (d) the next budget check sees that spend.
+        Assert.True(await SpentTodayAsync() - before >= 0.004m);
+    }
+
+    [Fact]
+    public async Task A_Billed_But_Unusable_Parse_Is_Logged_With_Its_Cost()
+    {
+        var (client, userId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => null;
+        Model.ParseFailedCostUsd = 0.003m;
+        var before = await SpentTodayAsync();
+
+        var response = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True((await ReadAsync(response)).GetProperty("aiUnavailable").GetBoolean());
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var log = await db.AiSearchLogs.AsNoTracking().SingleAsync(l => l.UserId == userId);
+        Assert.Equal(0.003m, log.CostUsd);
+        Assert.Equal("ai_unavailable", log.Outcome);
+        Assert.True(await SpentTodayAsync() - before >= 0.003m);
+    }
+
+    [Fact]
+    public async Task A_Billed_But_Unusable_Rank_Is_Logged_As_RankingFailed_With_Parse_Plus_Rank_Cost()
+    {
+        var cat = await SeedCatalogueAsync(3);
+        var (client, userId) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.OnRank = (_, _) => null;
+        Model.ParseCostUsd = 0.002m;
+        Model.RankFailedCostUsd = 0.005m;
+
+        var response = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var log = await db.AiSearchLogs.AsNoTracking().SingleAsync(l => l.UserId == userId);
+        Assert.Equal("ranking_failed", log.Outcome);
+        Assert.Equal(0.007m, log.CostUsd);
+    }
+
     [Fact]
     public async Task A_Spent_Budget_Turns_Status_Off_And_Posts_Never_Reach_The_Model()
     {

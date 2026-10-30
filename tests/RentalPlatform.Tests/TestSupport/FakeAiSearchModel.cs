@@ -20,8 +20,18 @@ public sealed class FakeAiSearchModel : IAiSearchModel
     public decimal ParseCostUsd { get; set; }
     public decimal RankCostUsd { get; set; }
 
+    /// <summary>When set, a scripted null is a billed-but-unusable call (a Failed result with this cost), not a free failure.</summary>
+    public decimal? ParseFailedCostUsd { get; set; }
+    public decimal? RankFailedCostUsd { get; set; }
+
+    /// <summary>Runs inside the model call, after it is recorded (e.g. to abort the request mid-call).</summary>
+    public Action? OnParseCalled { get; set; }
+
     public void Reset()
     {
+        ParseFailedCostUsd = null;
+        RankFailedCostUsd = null;
+        OnParseCalled = null;
         ParseCalls = 0;
         RankCalls = 0;
         Inputs.Clear();
@@ -38,8 +48,11 @@ public sealed class FakeAiSearchModel : IAiSearchModel
         Inputs.Add(JsonSerializer.Serialize(new { description, language, catalogs.Categories, catalogs.Districts }));
 
         var parsed = OnParse(description, language, catalogs);
+        OnParseCalled?.Invoke();
         return Task.FromResult<AiModelResult<AiParsedQuery>?>(
-            parsed is null ? null : new AiModelResult<AiParsedQuery>(parsed, "fake-parse", 100, 20, ParseCostUsd));
+            parsed is not null ? new AiModelResult<AiParsedQuery>(parsed, "fake-parse", 100, 20, ParseCostUsd)
+            : ParseFailedCostUsd is { } failed ? AiModelResult<AiParsedQuery>.Failed("fake-parse", 100, 20, failed)
+            : null);
     }
 
     public Task<AiModelResult<IReadOnlyList<Guid>>?> RankAsync(
@@ -50,7 +63,9 @@ public sealed class FakeAiSearchModel : IAiSearchModel
 
         var order = OnRank(description, candidates);
         return Task.FromResult<AiModelResult<IReadOnlyList<Guid>>?>(
-            order is null ? null : new AiModelResult<IReadOnlyList<Guid>>(order, "fake-rank", 200, 40, RankCostUsd));
+            order is not null ? new AiModelResult<IReadOnlyList<Guid>>(order, "fake-rank", 200, 40, RankCostUsd)
+            : RankFailedCostUsd is { } failed ? AiModelResult<IReadOnlyList<Guid>>.Failed("fake-rank", 200, 40, failed)
+            : null);
     }
 
     public static AiParsedQuery Parsed(

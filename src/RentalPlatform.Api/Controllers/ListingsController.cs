@@ -68,6 +68,7 @@ public sealed class ListingsController : ControllerBase
     [ProducesResponseType(typeof(AiSearchResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<AiSearchResponse>> AiSearch(
         [FromBody] AiSearchRequest request,
@@ -88,7 +89,8 @@ public sealed class ListingsController : ControllerBase
         return error.Code switch
         {
             AiSearchErrorCodes.Unauthenticated => Unauthorized(error.ToProblemDetails(StatusCodes.Status401Unauthorized)),
-            AiSearchErrorCodes.DailyLimit => StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
+            AiSearchErrorCodes.UserBlocked => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            AiSearchErrorCodes.DailyLimit =>StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests)),
             _ => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest))
         };
     }

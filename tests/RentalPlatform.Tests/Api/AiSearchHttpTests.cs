@@ -68,11 +68,13 @@ public sealed class AiSearchHttpTests
         return new Catalogue(categoryId, category.Slug, ownerId, listings);
     }
 
-    private async Task<(HttpClient Client, Guid UserId)> NewUserAsync(bool withHome = false)
+    private async Task<(HttpClient Client, Guid UserId)> NewUserAsync(bool withHome = false, bool isBlocked = false)
     {
         var userId = Guid.NewGuid();
         var email = $"{userId:N}@ai-search.local";
-        var user = withHome ? TestData.OwnerWithHome(userId, email) : TestData.User(userId, email);
+        var user = withHome
+            ? TestData.OwnerWithHome(userId, email, isBlocked: isBlocked)
+            : TestData.User(userId, email, isBlocked: isBlocked);
         await _factory.SeedAsync(user);
 
         var client = _factory.CreateClient();
@@ -440,6 +442,46 @@ public sealed class AiSearchHttpTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Empty(await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_Blocked_User_Is_403_On_Page_1_Rerank_And_Page_2_With_No_Model_Call_And_No_Log_Row()
+    {
+        var cat = await SeedCatalogueAsync(3);
+        var (client, userId) = await NewUserAsync(isBlocked: true);
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.OnRank = (_, candidates) => candidates.Select(c => c.Id).ToList();
+
+        var bodies = new object[]
+        {
+            new { description = "blocks" },
+            new { description = "blocks", filters = new { categoryId = cat.CategoryId } },
+            new { description = "blocks", filters = new { categoryId = cat.CategoryId }, page = 2, excludeIds = new[] { cat.Listings[0].Id } }
+        };
+
+        foreach (var payload in bodies)
+        {
+            var response = await client.PostAsJsonAsync(Url, payload);
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            Assert.Equal("auth.user_blocked", (await ReadAsync(response)).GetProperty("errorCode").GetString());
+        }
+
+        Assert.Equal(0, Model.ParseCalls);
+        Assert.Equal(0, Model.RankCalls);
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.AiSearchLogs.AnyAsync(l => l.UserId == userId));
+    }
+
+    [Fact]
+    public async Task A_Normal_User_Is_Still_200()
+    {
+        var cat = await SeedCatalogueAsync(1);
+        var (client, _) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(Url, new { description = "blocks" })).StatusCode);
     }
 
     [Theory]

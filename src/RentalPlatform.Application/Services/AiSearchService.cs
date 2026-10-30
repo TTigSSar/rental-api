@@ -74,6 +74,19 @@ public sealed class AiSearchService : IAiSearchService
             return Fail(AiSearchErrorCodes.Unauthenticated, "Sign in to use AI search.");
         }
 
+        // A blocked (or deleted) account gets nothing: checked before any model call, budget or limit
+        // work, and for every page, so no spend and no log row (security review, Major 3).
+        var user = await _homePoints.FindUserByIdAsync(userId.Value, cancellationToken);
+        if (user is null)
+        {
+            return Fail(AiSearchErrorCodes.Unauthenticated, "Sign in to use AI search.");
+        }
+
+        if (user.IsBlocked)
+        {
+            return Fail(AiSearchErrorCodes.UserBlocked, "Blocked users cannot use AI search.");
+        }
+
         var description = (request.Description ?? string.Empty).Trim();
         if (description.Length == 0 || description.Length > MaxDescriptionLength)
         {

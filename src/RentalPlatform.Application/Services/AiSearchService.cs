@@ -193,8 +193,8 @@ public sealed class AiSearchService : IAiSearchService
                 userId, description, pageSize, excludeIds, AiSearchOutcomes.BudgetExhausted, clock, usage, cancellationToken);
         }
 
-        // Per-user daily cap (ADR-054): only searches that reached the model count, and only when AI
-        // would otherwise run. A refused search is not logged, so it does not count either.
+        // Per-user daily cap (ADR-054): every paid search counts (a log row with CostUsd > 0), whatever
+        // its outcome; free fallbacks and page 2+ write no cost, so they do not.
         var usedToday = await _logStore.CountModelSearchesSinceAsync(
             userId, YerevanCalendar.StartOfTodayUtc(_time.GetUtcNow()), cancellationToken);
         if (usedToday >= _settings.PerUserPerDay)

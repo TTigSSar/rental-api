@@ -28,6 +28,8 @@ public static class ServiceCollectionExtensions
             ?? throw new InvalidOperationException("JWT settings are not configured.");
         ValidateJwtOptions(jwtSettings, environment);
 
+        services.AddMemoryCache(); // AI-search status answer (30 s)
+
         services.AddControllers(options =>
             {
                 // ExcludeIds is an AI-search continuation detail set by the service, not a public

@@ -4,7 +4,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using RentalPlatform.Api.Controllers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Domain;
@@ -380,6 +382,8 @@ public sealed class AiSearchHttpTests
     public async Task A_Spent_Budget_Turns_Status_Off_And_Posts_Never_Reach_The_Model()
     {
         var anonymous = _factory.CreateClient();
+        var cache = _factory.Services.GetRequiredService<IMemoryCache>();
+        cache.Remove(ListingsController.AiSearchStatusCacheKey);
         var before = await ReadAsync(await anonymous.GetAsync(Url + "/status"));
         Assert.True(before.GetProperty("available").GetBoolean());
 
@@ -394,6 +398,10 @@ public sealed class AiSearchHttpTests
 
         try
         {
+            // Within the 30 s window the first answer is served from the cache: the store is not asked again.
+            Assert.True((await ReadAsync(await anonymous.GetAsync(Url + "/status"))).GetProperty("available").GetBoolean());
+            cache.Remove(ListingsController.AiSearchStatusCacheKey);
+
             var status = await anonymous.GetAsync(Url + "/status");
             Assert.Equal(HttpStatusCode.OK, status.StatusCode);
             Assert.False((await ReadAsync(status)).GetProperty("available").GetBoolean());
@@ -419,6 +427,7 @@ public sealed class AiSearchHttpTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             // The budget is process-wide in this shared host: leave it as we found it.
             await db.AiSearchLogs.Where(l => l.Id == spent.Id).ExecuteDeleteAsync();
+            cache.Remove(ListingsController.AiSearchStatusCacheKey);
         }
     }
 
@@ -538,10 +547,10 @@ public sealed class AiSearchHttpTests
 
     // ---- per-user daily limit (ADR-054) -----------------------------------------------------------------
 
-    private async Task SeedLogsAsync(Guid userId, int count, string outcome, DateTime createdAt)
+    private async Task SeedLogsAsync(Guid userId, int count, string outcome, DateTime createdAt, decimal costUsd = 0.001m)
     {
         var rows = Enumerable.Range(0, count)
-            .Select(_ => new AiSearchLog { Id = Guid.NewGuid(), UserId = userId, CreatedAt = createdAt, Outcome = outcome })
+            .Select(_ => new AiSearchLog { Id = Guid.NewGuid(), UserId = userId, CreatedAt = createdAt, Outcome = outcome, CostUsd = costUsd })
             .Cast<object>()
             .ToArray();
         await _factory.SeedAsync(rows);
@@ -555,6 +564,7 @@ public sealed class AiSearchHttpTests
         var cat = await SeedCatalogueAsync(1);
         var (client, userId) = await NewUserAsync();
         Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.ParseCostUsd = 0.001m; // a paid search is what counts
         await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
 
         var fiftieth = await client.PostAsJsonAsync(Url, new { description = "blocks" });
@@ -593,8 +603,8 @@ public sealed class AiSearchHttpTests
         var (client, userId) = await NewUserAsync();
         var (_, otherId) = await NewUserAsync();
         Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
-        await SeedLogsAsync(userId, 30, "ai_unavailable", DateTime.UtcNow);
-        await SeedLogsAsync(userId, 30, "budget_exhausted", DateTime.UtcNow);
+        await SeedLogsAsync(userId, 30, "ai_unavailable", DateTime.UtcNow, costUsd: 0m);
+        await SeedLogsAsync(userId, 30, "budget_exhausted", DateTime.UtcNow, costUsd: 0m);
         await SeedLogsAsync(otherId, 60, "ok", DateTime.UtcNow);
         await SeedLogsAsync(userId, 60, "ok", YerevanMidnightUtc().AddMinutes(-1));
 
@@ -643,13 +653,13 @@ public sealed class AiSearchHttpTests
     }
 
     [Fact]
-    public async Task A_Failed_Parse_Does_Not_Count_Toward_The_Daily_Limit()
+    public async Task A_Zero_Cost_Fallback_Does_Not_Count_Toward_The_Daily_Limit()
     {
         var cat = await SeedCatalogueAsync(1);
         var (client, userId) = await NewUserAsync();
         await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
 
-        Model.OnParse = (_, _, _) => null;
+        Model.OnParse = (_, _, _) => null; // free failure: ParseFailedCostUsd stays 0
         var failed = await client.PostAsJsonAsync(Url, new { description = "blocks" });
         Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
         Assert.True((await ReadAsync(failed)).GetProperty("aiUnavailable").GetBoolean());
@@ -658,7 +668,53 @@ public sealed class AiSearchHttpTests
         var fiftieth = await client.PostAsJsonAsync(Url, new { description = "blocks" });
         Assert.Equal(HttpStatusCode.OK, fiftieth.StatusCode);
         Assert.False((await ReadAsync(fiftieth)).GetProperty("aiUnavailable").GetBoolean());
+    }
 
+    [Fact]
+    public async Task A_Paid_But_Unusable_Parse_Counts_Toward_The_Daily_Limit()
+    {
+        var (client, userId) = await NewUserAsync();
+        await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
+        Model.OnParse = (_, _, _) => null;
+        Model.ParseFailedCostUsd = 0.003m;
+
+        var paid = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.OK, paid.StatusCode);
+        Assert.True((await ReadAsync(paid)).GetProperty("aiUnavailable").GetBoolean());
+
+        var rejected = await client.PostAsJsonAsync(Url, new { description = "blocks" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Equal("ai_search.daily_limit", (await ReadAsync(rejected)).GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    public async Task An_Aborted_Paid_Search_Counts_Toward_The_Daily_Limit()
+    {
+        var cat = await SeedCatalogueAsync(2);
+        var (client, userId) = await NewUserAsync();
+        await SeedLogsAsync(userId, 49, "ok", DateTime.UtcNow);
+        using var abort = new CancellationTokenSource();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug);
+        Model.ParseCostUsd = 0.004m;
+        Model.OnParseCalled = abort.Cancel;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.PostAsJsonAsync(Url, new { description = "blocks" }, abort.Token));
+
+        // The server finishes on its own: wait for the 50th row, then the next search is refused.
+        var count = 0;
+        for (var attempt = 0; attempt < 100 && count < 50; attempt++)
+        {
+            await using var scope = _factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            count = await db.AiSearchLogs.CountAsync(l => l.UserId == userId);
+            if (count < 50)
+            {
+                await Task.Delay(50);
+            }
+        }
+
+        Model.OnParseCalled = null;
         var rejected = await client.PostAsJsonAsync(Url, new { description = "blocks" });
         Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
         Assert.Equal("ai_search.daily_limit", (await ReadAsync(rejected)).GetProperty("errorCode").GetString());

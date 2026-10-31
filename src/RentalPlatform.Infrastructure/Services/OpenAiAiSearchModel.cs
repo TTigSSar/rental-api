@@ -229,7 +229,20 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                     (inputTokens * inputUsdPerMTok + outputTokens * outputUsdPerMTok) / 1_000_000m);
             }
 
-            var message = answer["choices"] is JsonArray { Count: > 0 } choices ? choices[0]?["message"] : null;
+            var choice = answer["choices"] is JsonArray { Count: > 0 } choices ? choices[0] : null;
+            var message = choice?["message"];
+
+            // The cap was hit (reasoning tokens count against it): the content is empty or cut off, so it is
+            // unusable however it looks. Logged apart from "no content" so a cap problem is visible; counts only.
+            if (choice?["finish_reason"] is JsonValue finish && (string?)finish == "length")
+            {
+                var reasoning = (int?)answer["usage"]?["completion_tokens_details"]?["reasoning_tokens"];
+                _logger.LogWarning(
+                    "AI search model {Model} hit max_completion_tokens {Max} ({Reasoning} reasoning tokens).",
+                    model, maxTokens, reasoning);
+                return billed;
+            }
+
             if (message?["refusal"] is JsonValue refusal && !string.IsNullOrEmpty((string?)refusal))
             {
                 _logger.LogWarning("AI search model {Model} refused.", model);
@@ -402,7 +415,9 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                 ["districtCodes"] = new JsonObject
                 {
                     ["type"] = "array",
-                    ["items"] = StringEnum(catalogs.Districts.Select(d => d.Code))
+                    ["items"] = StringEnum(catalogs.Districts.Select(d => d.Code)),
+                    // No repeats can run away: at most one entry per district (strict mode has no maxLength).
+                    ["maxItems"] = Math.Max(1, catalogs.Districts.Count)
                 },
                 ["districtIsHard"] = Type("boolean"),
                 ["nearMe"] = Type("boolean"),

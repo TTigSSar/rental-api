@@ -2,6 +2,7 @@ using Xunit;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RentalPlatform.Application.Abstractions;
@@ -306,6 +307,68 @@ public sealed class OpenAiAiSearchModelTests
         Assert.NotNull(result);
         Assert.True(result!.IsFailed);
         Assert.Equal(2.0m, result.CostUsd); // 1 M x 1 + 0.5 M x 2
+    }
+
+    private sealed class CapturingLogger : ILogger<OpenAiAiSearchModel>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
+
+    [Fact]
+    public async Task FinishReasonLength_WithCutOffContent_IsABilledFailureLoggedApart()
+    {
+        var logger = new CapturingLogger();
+        var handler = new StubHandler();
+        var model = new OpenAiAiSearchModel(
+            new HttpClient(handler),
+            Options.Create(new AiSearchOptions { ApiKey = Key, ParseInputUsdPerMTok = 1m, ParseOutputUsdPerMTok = 2m }),
+            logger);
+        // Truncated mid-string: not valid JSON, and the secret-looking text must never reach the log.
+        handler.Respond = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(new JsonObject
+            {
+                ["choices"] = new JsonArray(new JsonObject
+                {
+                    ["finish_reason"] = "length",
+                    ["message"] = new JsonObject { ["content"] = "{\"ageMonths\":36,\"intent\":\"SECRET-DESCRIPTION" }
+                }),
+                ["usage"] = new JsonObject
+                {
+                    ["prompt_tokens"] = 1_000_000,
+                    ["completion_tokens"] = 4096,
+                    ["completion_tokens_details"] = new JsonObject { ["reasoning_tokens"] = 4000 }
+                }
+            }.ToJsonString())
+        });
+
+        var result = await model.ParseAsync("puzzle", "en", Catalogs);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsFailed);
+        Assert.Equal(4096, result.OutputTokens);
+        Assert.Equal((1_000_000m * 1m + 4096 * 2m) / 1_000_000m, result.CostUsd);
+        var line = Assert.Single(logger.Messages, m => m.Contains("max_completion_tokens"));
+        Assert.Contains("4000 reasoning", line);
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("SECRET") || m.Contains(Key));
+    }
+
+    [Fact]
+    public async Task Parse_BoundsDistrictCodesToTheCatalogue()
+    {
+        var (model, handler) = Create();
+        handler.Respond = _ => Task.FromResult(Completion(ParseAnswer()));
+
+        await model.ParseAsync("puzzle", "en", Catalogs);
+
+        var districts = handler.Body!["response_format"]!["json_schema"]!["schema"]!["properties"]!["districtCodes"]!;
+        Assert.Equal(Catalogs.Districts.Count, (int)districts["maxItems"]!);
     }
 
     [Fact]

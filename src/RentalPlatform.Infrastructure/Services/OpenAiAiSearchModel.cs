@@ -229,7 +229,20 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                     (inputTokens * inputUsdPerMTok + outputTokens * outputUsdPerMTok) / 1_000_000m);
             }
 
-            var message = answer["choices"] is JsonArray { Count: > 0 } choices ? choices[0]?["message"] : null;
+            var choice = answer["choices"] is JsonArray { Count: > 0 } choices ? choices[0] : null;
+            var message = choice?["message"];
+
+            // The cap was hit (reasoning tokens count against it): the content is empty or cut off, so it is
+            // unusable however it looks. Logged apart from "no content" so a cap problem is visible; counts only.
+            if (choice?["finish_reason"] is JsonValue finish && (string?)finish == "length")
+            {
+                var reasoning = (int?)answer["usage"]?["completion_tokens_details"]?["reasoning_tokens"];
+                _logger.LogWarning(
+                    "AI search model {Model} hit max_completion_tokens {Max} ({Reasoning} reasoning tokens).",
+                    model, maxTokens, reasoning);
+                return billed;
+            }
+
             if (message?["refusal"] is JsonValue refusal && !string.IsNullOrEmpty((string?)refusal))
             {
                 _logger.LogWarning("AI search model {Model} refused.", model);
@@ -303,7 +316,7 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                 DatesMentioned: ReadBool(o["datesMentioned"]),
                 ItemType: ReadString(o["itemType"]),
                 Purpose: ReadString(o["purpose"]),
-                Intent: ReadString(o["intent"]));
+                Intent: ReadString(o["intent"])?.TrimEnd().TrimEnd('.', '։'));
         }
         catch (Exception exception) when (exception is InvalidOperationException or FormatException)
         {
@@ -352,7 +365,7 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
             "- datesMentioned: true when rental dates or a time window are mentioned (weekend, Saturday, a date).\n" +
             "- itemType: the specific kind of item named (e.g. \"balance bike\"), in English, or null.\n" +
             "- purpose: the use or quality wanted (e.g. \"outdoor play\", \"educational\"), in English, or null.\n" +
-            $"- intent: one short line in {LanguageName(language)} saying what was looked for, by intent only. Never include ages, prices, districts or dates in it.";
+            $"- intent: a short noun phrase in {LanguageName(language)} naming what is looked for, by intent only. It has no verb and no subject (never \"looking for\", \"ищет\"/\"ищу\", \"փնտրում է\"), starts with a capital letter and has no trailing punctuation. Examples: English \"Balance bike for outdoor play\"; Russian \"Беговел для игр на улице\"; Armenian \"Առանց ոտնակների հեծանիվ բացօթյա խաղերի համար\". Never include ages, prices, districts or dates in it.";
     }
 
     private const string RankSystem =
@@ -402,7 +415,9 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                 ["districtCodes"] = new JsonObject
                 {
                     ["type"] = "array",
-                    ["items"] = StringEnum(catalogs.Districts.Select(d => d.Code))
+                    ["items"] = StringEnum(catalogs.Districts.Select(d => d.Code)),
+                    // No repeats can run away: at most one entry per district (strict mode has no maxLength).
+                    ["maxItems"] = Math.Max(1, catalogs.Districts.Count)
                 },
                 ["districtIsHard"] = Type("boolean"),
                 ["nearMe"] = Type("boolean"),

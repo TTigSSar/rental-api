@@ -303,7 +303,7 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
                 DatesMentioned: ReadBool(o["datesMentioned"]),
                 ItemType: ReadString(o["itemType"]),
                 Purpose: ReadString(o["purpose"]),
-                Intent: ReadString(o["intent"]));
+                Intent: ReadString(o["intent"])?.TrimEnd().TrimEnd('.', '։'));
         }
         catch (Exception exception) when (exception is InvalidOperationException or FormatException)
         {
@@ -352,7 +352,7 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
             "- datesMentioned: true when rental dates or a time window are mentioned (weekend, Saturday, a date).\n" +
             "- itemType: the specific kind of item named (e.g. \"balance bike\"), in English, or null.\n" +
             "- purpose: the use or quality wanted (e.g. \"outdoor play\", \"educational\"), in English, or null.\n" +
-            $"- intent: one short line in {LanguageName(language)} saying what was looked for, by intent only. Never include ages, prices, districts or dates in it.";
+            $"- intent: a short noun phrase in {LanguageName(language)} naming what is looked for, by intent only. It has no verb and no subject (never \"looking for\", \"ищет\"/\"ищу\", \"փնտրում է\"), starts with a capital letter and has no trailing punctuation. Examples: English \"Balance bike for outdoor play\"; Russian \"Беговел для игр на улице\"; Armenian \"Առանց ոտնակների հեծանիվ բացօթյա խաղերի համար\". Never include ages, prices, districts or dates in it.";
     }
 
     private const string RankSystem =

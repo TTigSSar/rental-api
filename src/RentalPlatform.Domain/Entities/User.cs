@@ -20,7 +20,8 @@ public sealed class User
     public bool IsEmailConfirmed { get; set; }
 
     // Session version (ADR-055), carried in the JWT as claim "tv". Bumped in the same UPDATE as a
-    // password change, a password reset or a block; a token whose "tv" differs is not authenticated.
+    // password change, a password reset or the dev seed's password reset; a token whose "tv" differs is not
+    // authenticated. A block does NOT rotate it (ADR-055 amendment, ADR-030 section 11).
     public int TokenVersion { get; set; }
 
     // When the mailbox was proven (ADR-028). NULL together with IsEmailConfirmed = true means the

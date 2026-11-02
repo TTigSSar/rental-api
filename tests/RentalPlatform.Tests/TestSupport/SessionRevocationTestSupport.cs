@@ -54,9 +54,9 @@ public static class SessionRevocationTestSupport
             await using var context = _createContext();
             var row = await context.Users.AsNoTracking()
                 .Where(user => user.Id == userId)
-                .Select(user => new { user.TokenVersion, user.IsBlocked })
+                .Select(user => new { user.TokenVersion })
                 .FirstOrDefaultAsync(cancellationToken);
-            return row is null ? null : new UserSecurityState(row.TokenVersion, row.IsBlocked);
+            return row is null ? null : new UserSecurityState(row.TokenVersion);
         }
     }
 

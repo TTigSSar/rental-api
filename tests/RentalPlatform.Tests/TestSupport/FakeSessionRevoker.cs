@@ -6,17 +6,10 @@ namespace RentalPlatform.Tests.TestSupport;
 public sealed class FakeSessionRevoker : ISessionRevoker
 {
     public List<Guid> Revoked { get; } = new();
-    public List<Guid> Invalidated { get; } = new();
 
     public Task RevokeAsync(Guid userId)
     {
         Revoked.Add(userId);
-        return Task.CompletedTask;
-    }
-
-    public Task InvalidateAsync(Guid userId)
-    {
-        Invalidated.Add(userId);
         return Task.CompletedTask;
     }
 }

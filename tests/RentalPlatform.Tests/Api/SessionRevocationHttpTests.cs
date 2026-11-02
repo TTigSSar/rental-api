@@ -163,32 +163,29 @@ public sealed class SessionRevocationHttpTests
         Assert.Equal(HttpStatusCode.OK, await MeAsync(other, newToken));
     }
 
+    // ADR-055 amendment / ADR-030 section 11: a block does NOT revoke. The pre-block token keeps
+    // authenticating (the moderation appeal depends on it) and the service-level guards answer 403.
     [Fact]
-    public async Task A_Suspension_Ends_The_Session_At_Once_And_A_Reactivated_User_Signs_In_And_Works_Immediately()
+    public async Task A_Suspension_Does_Not_Revoke_The_Session_It_Gets_The_Service_Level_403()
     {
-        var (id, email) = await SeedUserAsync();
+        var (id, _) = await SeedUserAsync();
         var adminId = Guid.NewGuid();
         var adminEmail = $"{adminId:N}@revocation-admin.local";
         await _factory.SeedAsync(TestData.User(adminId, adminEmail, role: UserRole.Admin, isIdConfirmed: true));
         var admin = WithToken(_factory.CreateClient(), TestJwtTokenHelper.GenerateToken(adminId, adminEmail, UserRole.Admin));
         var userToken = TokenFor(id, 0);
-        var anonymous = _factory.CreateClient();
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(anonymous, userToken));
+        var client = WithToken(_factory.CreateClient(), userToken);
+        Assert.Equal(HttpStatusCode.OK, await MeAsync(_factory.CreateClient(), userToken)); // warms the cache
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/admin/users/{id}/suspend", null)).StatusCode);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, await MeAsync(anonymous, userToken));
-        // The blocked state is now cached; it must not outlive the reactivation.
-        Assert.Equal(HttpStatusCode.Unauthorized, await MeAsync(anonymous, TokenFor(id, 1)));
+        var write = await client.PutAsJsonAsync("/api/auth/me/preferred-language", new { preferredLanguage = "ru" });
+        Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
+        using var doc = JsonDocument.Parse(await write.Content.ReadAsStringAsync());
+        Assert.Equal("auth.user_blocked", doc.RootElement.GetProperty("errorCode").GetString());
 
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/admin/users/{id}/reactivate", null)).StatusCode);
-
-        var login = await Pin(_factory.CreateClient()).PostAsJsonAsync("/api/auth/login", new { email, password = OldPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        var freshToken = await TokenFromAsync(login);
-        Assert.Equal(1, TokenVersionClaim(freshToken));
-        Assert.Equal(HttpStatusCode.OK, await MeAsync(anonymous, freshToken));
-        Assert.Equal(HttpStatusCode.Unauthorized, await MeAsync(anonymous, userToken)); // the pre-block session stays dead
+        Assert.Equal(HttpStatusCode.OK, await MeAsync(_factory.CreateClient(), userToken));
     }
 
     [Fact]

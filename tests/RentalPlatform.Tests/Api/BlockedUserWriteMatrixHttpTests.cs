@@ -15,11 +15,6 @@ namespace RentalPlatform.Tests.Api;
 // would break the moderation appeal and cost a DB hit per request), so every write path enforces
 // IsBlocked itself — and this matrix is what notices when a new or edited path forgets to.
 //
-// SINCE ADR-055 the JWT pipeline DOES reject a blocked user's token (401), which supersedes that
-// statement of F3 and makes these guards defence in depth. They stay reachable over HTTP because
-// RentalPlatformWebAppFactory.SeedAsync stores a blocked user with a warm "not blocked" security-state
-// cache entry, i.e. like a request that was already past authentication when the block landed.
-//
 // One request per write group, each asserting 403 AND the group's errorCode. Deliberately NOT in
 // the list: chat mark-read and notification mark-read (harmless, left open), and sending a message
 // in the blocked member's own Moderation thread (the appeal carve-out, pinned below as NOT 403).

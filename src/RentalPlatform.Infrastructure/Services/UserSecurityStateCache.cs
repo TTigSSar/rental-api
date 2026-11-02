@@ -5,8 +5,8 @@ using RentalPlatform.Infrastructure.Persistence;
 
 namespace RentalPlatform.Infrastructure.Services;
 
-/// <summary>What the JWT check needs from a user row (ADR-055).</summary>
-public readonly record struct UserSecurityState(int TokenVersion, bool IsBlocked);
+/// <summary>What the JWT check needs from a user row (ADR-055): the session version only; a block does not revoke.</summary>
+public readonly record struct UserSecurityState(int TokenVersion);
 
 /// <summary>The lean database read behind <see cref="UserSecurityStateCache"/>; a seam so a test can pause it.</summary>
 public interface IUserSecurityStateReader
@@ -33,15 +33,15 @@ public sealed class UserSecurityStateReader : IUserSecurityStateReader
         var row = await dbContext.Users
             .AsNoTracking()
             .Where(user => user.Id == userId)
-            .Select(user => new { user.TokenVersion, user.IsBlocked })
+            .Select(user => new { user.TokenVersion })
             .FirstOrDefaultAsync(cancellationToken);
 
-        return row is null ? null : new UserSecurityState(row.TokenVersion, row.IsBlocked);
+        return row is null ? null : new UserSecurityState(row.TokenVersion);
     }
 }
 
 /// <summary>
-/// In-process 60 s cache of <c>(TokenVersion, IsBlocked)</c> per user, the hot path of the JWT revocation
+/// In-process 60 s cache of the <c>TokenVersion</c> per user, the hot path of the JWT revocation
 /// check (ADR-055). Correct for ONE API instance only: another instance would not see this instance's
 /// invalidations. Scaling out reopens ADR-055.
 ///

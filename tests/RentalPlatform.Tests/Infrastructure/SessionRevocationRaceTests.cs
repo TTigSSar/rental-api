@@ -134,7 +134,7 @@ public sealed class SessionRevocationRaceTests
         var cache = NewCache(gated);
         var oldToken = TokenFor(UserId, 0);
 
-        var filling = cache.GetAsync(UserId);   // reads (0, not blocked), then pauses before storing it
+        var filling = cache.GetAsync(UserId);   // reads version 0, then pauses before storing it
         await gated.ReadCompleted;
 
         await using (var context = db.CreateContext())

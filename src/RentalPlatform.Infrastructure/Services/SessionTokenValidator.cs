@@ -11,8 +11,8 @@ namespace RentalPlatform.Infrastructure.Services;
 public static class SessionTokenValidator
 {
     /// <summary>
-    /// True only when the user exists, is not blocked and the token's <c>tv</c> equals the stored TokenVersion.
-    /// A token without a parseable <c>tv</c> (issued before ADR-055) is rejected. Throws if the state read fails.
+    /// True only when the user exists and the token's <c>tv</c> equals the stored TokenVersion.
+    /// A token without a parseable <c>tv</c> (issued before ADR-055) is rejected. A block does not revoke (ADR-055 amendment, ADR-030 section 11). Throws if the state read fails.
     /// </summary>
     public static async Task<bool> IsAcceptedAsync(
         ClaimsPrincipal principal, UserSecurityStateCache cache, CancellationToken cancellationToken)
@@ -36,6 +36,6 @@ public static class SessionTokenValidator
         }
 
         var state = await cache.GetAsync(userId, cancellationToken);
-        return state is { IsBlocked: false } current && current.TokenVersion == tokenVersion;
+        return state is { } current && current.TokenVersion == tokenVersion;
     }
 }

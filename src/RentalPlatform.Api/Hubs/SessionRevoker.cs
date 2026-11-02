@@ -25,10 +25,4 @@ public sealed class SessionRevoker : ISessionRevoker
         _registry.AbortUser(userId);
         return Task.CompletedTask;
     }
-
-    public Task InvalidateAsync(Guid userId)
-    {
-        _cache.Invalidate(userId);
-        return Task.CompletedTask;
-    }
 }

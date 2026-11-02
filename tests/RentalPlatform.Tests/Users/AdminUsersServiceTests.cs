@@ -30,7 +30,8 @@ public sealed class AdminUsersServiceTests
             new FakeCurrentUserContext(currentUserId),
             new AdminUsersStore(context),
             new ModerationLogStore(context, NullLogger<ModerationLogStore>.Instance),
-            moderationNoteEmitter);
+            moderationNoteEmitter,
+            new FakeSessionRevoker());
 
     private static async Task SeedAdminAsync(SqliteTestDatabase db) =>
         await db.SeedAsync(TestData.User(AdminId, "admin@test.local", role: UserRole.Admin, isIdConfirmed: true));

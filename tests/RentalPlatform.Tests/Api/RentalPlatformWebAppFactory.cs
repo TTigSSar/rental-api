@@ -114,7 +114,40 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
     // Seeds entities through a dedicated scope so no acting scope inherits a dirty
     // change tracker. Accessing Services on first call triggers the lazy host build
     // (Program.cs runs, ApplyMigrationsAsync → EnsureCreated for SQLite, schema ready).
+    //
+    // A seeded User with IsBlocked = true is persisted blocked, but its security state (ADR-055) is cached
+    // as it was just BEFORE the block, i.e. like a request that was already past authentication when the
+    // admin blocked the account. The pipeline rejects a really blocked user's token with 401, which would
+    // make the service-level IsBlocked guards (ADR-030 section 11, defence in depth) unreachable over HTTP;
+    // this keeps them tested through the real pipeline. SeedRawAsync seeds without that, for tests of the
+    // pipeline's own rejection.
     public async Task SeedAsync(params object[] entities)
+    {
+        var blocked = entities.OfType<RentalPlatform.Domain.Entities.User>().Where(user => user.IsBlocked).ToList();
+        foreach (var user in blocked)
+        {
+            user.IsBlocked = false;
+        }
+
+        await SeedRawAsync(entities);
+
+        if (blocked.Count == 0)
+        {
+            return;
+        }
+
+        var cache = Services.GetRequiredService<UserSecurityStateCache>();
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        foreach (var user in blocked)
+        {
+            await cache.GetAsync(user.Id); // warms (TokenVersion, IsBlocked = false)
+            user.IsBlocked = true;
+            await db.Users.Where(row => row.Id == user.Id).ExecuteUpdateAsync(set => set.SetProperty(row => row.IsBlocked, true));
+        }
+    }
+
+    public async Task SeedRawAsync(params object[] entities)
     {
         await using var scope = Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

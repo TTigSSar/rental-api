@@ -32,13 +32,16 @@ public sealed class AdminUsersService : IAdminUsersService
     private readonly IAdminUsersStore _store;
     private readonly IModerationLogStore _moderationLogStore;
     private readonly IModerationNoteEmitter _moderationNoteEmitter;
+    private readonly ISessionRevoker _sessionRevoker;
 
     public AdminUsersService(
         ICurrentUserContext currentUserContext,
         IAdminUsersStore store,
         IModerationLogStore moderationLogStore,
-        IModerationNoteEmitter moderationNoteEmitter)
+        IModerationNoteEmitter moderationNoteEmitter,
+        ISessionRevoker sessionRevoker)
     {
+        _sessionRevoker = sessionRevoker;
         _currentUserContext = currentUserContext;
         _store = store;
         _moderationLogStore = moderationLogStore;
@@ -174,10 +177,12 @@ public sealed class AdminUsersService : IAdminUsersService
 
         var trimmedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
 
-        if (!user.IsBlocked)
+        // Block and TokenVersion rotation are one conditional UPDATE (ADR-055); 0 rows is the idempotent
+        // no-op (already blocked), same as the old `if (!user.IsBlocked)`.
+        if (!user.IsBlocked && await _store.TryBlockAsync(user, cancellationToken))
         {
-            user.IsBlocked = true;
-            await _store.SaveChangesAsync(cancellationToken);
+            // Right after the commit, before the log and the note: the user's tokens and chat connections end now.
+            await _sessionRevoker.RevokeAsync(user.Id);
 
             await _moderationLogStore.AppendAsync(new ModerationLogEntry
             {
@@ -220,6 +225,9 @@ public sealed class AdminUsersService : IAdminUsersService
         {
             user.IsBlocked = false;
             await _store.SaveChangesAsync(cancellationToken);
+
+            // No rotation on unblock (ADR-055), but the cache may hold IsBlocked=true for up to 60 s.
+            await _sessionRevoker.InvalidateAsync(user.Id);
 
             await _moderationLogStore.AppendAsync(new ModerationLogEntry
             {

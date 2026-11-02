@@ -73,6 +73,7 @@ public sealed class ExternalSignInConcurrencyTests
         public Task AddAsync(User user, CancellationToken cancellationToken = default) => _inner.AddAsync(user, cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(cancellationToken);
         public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default) => _inner.TrySaveChangesAsync(cancellationToken);
+        public Task<bool> TryChangePasswordAsync(User user, string newPasswordHash, CancellationToken cancellationToken = default) => _inner.TryChangePasswordAsync(user, newPasswordHash, cancellationToken);
     }
 
     // Holds the verify-email racer after it has read the token (and the password hash it saw).

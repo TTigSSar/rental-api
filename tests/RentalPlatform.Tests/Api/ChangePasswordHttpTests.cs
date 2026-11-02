@@ -17,7 +17,7 @@ namespace RentalPlatform.Tests.Api;
 // and old passwords rather than trusting the in-memory entity the PUT handler mutated.
 //
 // NOTE on the shared "auth" rate-limit bucket: this class consumes exactly 2 of its 5
-// permits-per-minute, both in Put_Valid_CurrentPassword_..._Returns_204 — the one assertion that
+// permits-per-minute, both in Put_Valid_CurrentPassword_..._Returns_200 — the one assertion that
 // genuinely needs a real POST /api/auth/login (proving the new password now authenticates AND
 // the old one no longer does). Every other test either doesn't need a token at all, obtains one
 // via TestJwtTokenHelper (no HTTP call, no bucket cost), or proves non-persistence via a second
@@ -55,7 +55,7 @@ public sealed class ChangePasswordHttpTests
     }
 
     [Fact]
-    public async Task Put_Valid_CurrentPassword_Returns_204_And_New_Password_Replaces_Old_One_For_Login()
+    public async Task Put_Valid_CurrentPassword_Returns_200_With_Fresh_Session_And_New_Password_Replaces_Old_One_For_Login()
     {
         var (userId, email) = await SeedUserAsync();
         var client = ClientFor(userId, email);
@@ -66,7 +66,7 @@ public sealed class ChangePasswordHttpTests
             newPassword = NewPassword
         });
 
-        Assert.Equal(HttpStatusCode.NoContent, putResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
 
         // Real persistence proof: brand-new anonymous requests round-trip through
         // SaveChangesAsync and the DbContext again, not just the entity the PUT handler
@@ -101,13 +101,13 @@ public sealed class ChangePasswordHttpTests
         // Non-persistence proven via a second PUT (the "password-change" bucket) instead of a
         // real login against the shared "auth" bucket: if the wrong attempt above had somehow
         // persisted, OldPassword would no longer verify as the current password here either, and
-        // this would come back 400 auth.invalid_current_password instead of 204.
+        // this would come back 400 auth.invalid_current_password instead of 200.
         var confirmResponse = await client.PutAsJsonAsync("/api/auth/me/password", new
         {
             currentPassword = OldPassword,
             newPassword = NewPassword
         });
-        Assert.Equal(HttpStatusCode.NoContent, confirmResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
     }
 
     [Fact]

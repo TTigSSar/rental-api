@@ -460,6 +460,7 @@ public sealed class ExternalSignInResolutionTests
         public Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken = default) => _inner.FindByIdAsync(userId, cancellationToken);
         public Task AddAsync(User user, CancellationToken cancellationToken = default) => _inner.AddAsync(user, cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(cancellationToken);
+        public Task<bool> TryChangePasswordAsync(User user, string newPasswordHash, CancellationToken cancellationToken = default) => _inner.TryChangePasswordAsync(user, newPasswordHash, cancellationToken);
 
         public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
         {

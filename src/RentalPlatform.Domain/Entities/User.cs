@@ -19,6 +19,10 @@ public sealed class User
     public UserRole Role { get; set; }
     public bool IsEmailConfirmed { get; set; }
 
+    // Session version (ADR-055), carried in the JWT as claim "tv". Bumped in the same UPDATE as a
+    // password change, a password reset or a block; a token whose "tv" differs is not authenticated.
+    public int TokenVersion { get; set; }
+
     // When the mailbox was proven (ADR-028). NULL together with IsEmailConfirmed = true means the
     // account was grandfathered by the AddEmailVerification migration. Written only by the
     // conditional verification UPDATE, so it is never overwritten.

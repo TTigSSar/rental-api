@@ -35,6 +35,13 @@ public interface IAdminUsersStore
     Task<AdminUserStatusCounts> GetStatusCountsAsync(string? search, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Suspend (ADR-055): one conditional UPDATE, <c>SET IsBlocked=1, TokenVersion=TokenVersion+1 WHERE Id
+    /// AND IsBlocked=0 AND Role&lt;&gt;Admin</c>. True (one row): <paramref name="user"/> now reflects it.
+    /// False: already blocked, an admin, or gone - the caller's idempotent no-op path.
+    /// </summary>
+    Task<bool> TryBlockAsync(User user, CancellationToken cancellationToken = default);
 }
 
 public enum AdminUserSort

@@ -137,6 +137,32 @@ public sealed class AdminUsersStore : IAdminUsersStore
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _dbContext.SaveChangesAsync(cancellationToken);
 
+    public async Task<bool> TryBlockAsync(User user, CancellationToken cancellationToken = default)
+    {
+        var updated = await _dbContext.Users
+            .Where(candidate => candidate.Id == user.Id && !candidate.IsBlocked && candidate.Role != UserRole.Admin)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(candidate => candidate.IsBlocked, true)
+                // Rotation in the same UPDATE as the block (ADR-055): the user's tokens die with it.
+                .SetProperty(candidate => candidate.TokenVersion, candidate => candidate.TokenVersion + 1), cancellationToken);
+
+        var entry = _dbContext.Entry(user);
+        if (updated != 1)
+        {
+            entry.State = EntityState.Detached;
+            return false;
+        }
+
+        var version = user.TokenVersion + 1;
+        entry.Property(candidate => candidate.IsBlocked).CurrentValue = true;
+        entry.Property(candidate => candidate.IsBlocked).OriginalValue = true;
+        entry.Property(candidate => candidate.TokenVersion).CurrentValue = version;
+        entry.Property(candidate => candidate.TokenVersion).OriginalValue = version;
+        entry.Property(candidate => candidate.IsBlocked).IsModified = false;
+        entry.Property(candidate => candidate.TokenVersion).IsModified = false;
+        return true;
+    }
+
     private static IQueryable<User> ApplyStatus(IQueryable<User> query, UserAccountStatus? status) => status switch
     {
         UserAccountStatus.Suspended => query.Where(u => u.IsBlocked),

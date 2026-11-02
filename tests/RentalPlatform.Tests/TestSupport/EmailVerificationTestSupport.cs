@@ -192,7 +192,8 @@ public static class AuthServiceFactory
         Guid? currentUserId,
         IPasswordHasher? passwordHasher = null,
         IHomePointService? homePointService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ISessionRevoker? sessionRevoker = null)
     {
         passwordHasher ??= new FakePasswordHasher();
         homePointService ??= new FakeHomePointService(store);
@@ -218,7 +219,8 @@ public static class AuthServiceFactory
             verification,
             new FakeEmailVerificationStore(store),
             timeProvider,
-            new NotSupportedPasswordResetService());
+            new NotSupportedPasswordResetService(),
+            sessionRevoker ?? new FakeSessionRevoker());
     }
 }
 
@@ -247,7 +249,10 @@ public sealed class AuthHarness
         FakeTimeProvider? clock = null,
         CaptureEmailSender? sender = null,
         Func<IEmailVerificationStore, IEmailVerificationStore>? decorateStore = null,
-        Func<IUserAuthStore, IUserAuthStore>? decorateUserStore = null)
+        Func<IUserAuthStore, IUserAuthStore>? decorateUserStore = null,
+        ISessionRevoker? sessionRevoker = null,
+        IJwtTokenService? jwtTokenService = null,
+        Guid? currentUserId = null)
     {
         Context = context;
         Clock = clock ?? new FakeTimeProvider();
@@ -280,14 +285,15 @@ public sealed class AuthHarness
         Auth = new RentalPlatform.Application.Services.AuthService(
             authUserStore,
             PasswordHasher,
-            new FakeJwtTokenService(),
-            new FakeCurrentUserContext(null),
+            jwtTokenService ?? new FakeJwtTokenService(),
+            new FakeCurrentUserContext(currentUserId),
             External,
             homePoints,
             Verification,
             verificationStore,
             Clock,
-            PasswordReset);
+            PasswordReset,
+            sessionRevoker ?? new FakeSessionRevoker());
     }
 
     public RentalPlatform.Infrastructure.Persistence.AppDbContext Context { get; }

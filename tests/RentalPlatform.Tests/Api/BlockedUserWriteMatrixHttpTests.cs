@@ -15,6 +15,11 @@ namespace RentalPlatform.Tests.Api;
 // would break the moderation appeal and cost a DB hit per request), so every write path enforces
 // IsBlocked itself — and this matrix is what notices when a new or edited path forgets to.
 //
+// SINCE ADR-055 the JWT pipeline DOES reject a blocked user's token (401), which supersedes that
+// statement of F3 and makes these guards defence in depth. They stay reachable over HTTP because
+// RentalPlatformWebAppFactory.SeedAsync stores a blocked user with a warm "not blocked" security-state
+// cache entry, i.e. like a request that was already past authentication when the block landed.
+//
 // One request per write group, each asserting 403 AND the group's errorCode. Deliberately NOT in
 // the list: chat mark-read and notification mark-read (harmless, left open), and sending a message
 // in the blocked member's own Moderation thread (the appeal carve-out, pinned below as NOT 403).
@@ -172,8 +177,8 @@ public sealed class BlockedUserWriteMatrixHttpTests
         await AssertForbiddenAsync(response, "listing.user_blocked");
     }
 
-    // A valid JWT whose user row no longer exists is "not authenticated" (401), not "blocked" (403):
-    // pins ResolveActiveOwnerAsync's missing-user branch, same answer as CreateAsync/GetMineAsync.
+    // A valid JWT whose user row no longer exists is "not authenticated" (401), not "blocked" (403).
+    // Since ADR-055 the JWT pipeline itself answers this (bare 401, no errorCode) before the service runs.
     [Fact]
     public async Task Listing_Update_With_Valid_Jwt_But_No_User_Row_Returns_401()
     {
@@ -187,8 +192,6 @@ public sealed class BlockedUserWriteMatrixHttpTests
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Unauthorized, $"Expected 401, got {(int)response.StatusCode}: {body}");
-        using var doc = JsonDocument.Parse(body);
-        Assert.Equal("listing.unauthenticated", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     // ---- Bookings -------------------------------------------------------------------------------

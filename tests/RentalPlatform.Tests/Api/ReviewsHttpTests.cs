@@ -162,9 +162,8 @@ public sealed class ReviewsHttpTests
 
         var response = await client.PostAsJsonAsync("/api/reviews/toy", ToyBody(bookingId));
 
+        // Answered by the JWT pipeline itself since ADR-055 (the user row is gone), so a bare 401.
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("review.unauthenticated", doc.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]

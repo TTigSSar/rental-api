@@ -36,6 +36,38 @@ public sealed class UserAuthStore : IUserAuthStore
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+    public async Task<bool> TryChangePasswordAsync(User user, string newPasswordHash, CancellationToken cancellationToken = default)
+    {
+        var seenHash = user.PasswordHash;
+        var seenVersion = user.TokenVersion;
+
+        var updated = await _dbContext.Users
+            .Where(candidate => candidate.Id == user.Id
+                                && candidate.PasswordHash == seenHash
+                                && candidate.TokenVersion == seenVersion
+                                && !candidate.IsBlocked)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(candidate => candidate.PasswordHash, newPasswordHash)
+                .SetProperty(candidate => candidate.TokenVersion, candidate => candidate.TokenVersion + 1), cancellationToken);
+
+        var entry = _dbContext.Entry(user);
+        if (updated != 1)
+        {
+            // The tracked copy is stale; the caller's re-read must hit the database, not the tracker.
+            entry.State = EntityState.Detached;
+            return false;
+        }
+
+        // Mirror the saved values without leaving the entity Modified (a later SaveChanges must not re-send them).
+        entry.Property(candidate => candidate.PasswordHash).CurrentValue = newPasswordHash;
+        entry.Property(candidate => candidate.PasswordHash).OriginalValue = newPasswordHash;
+        entry.Property(candidate => candidate.TokenVersion).CurrentValue = seenVersion + 1;
+        entry.Property(candidate => candidate.TokenVersion).OriginalValue = seenVersion + 1;
+        entry.Property(candidate => candidate.PasswordHash).IsModified = false;
+        entry.Property(candidate => candidate.TokenVersion).IsModified = false;
+        return true;
+    }
+
     public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try

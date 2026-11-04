@@ -128,7 +128,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
-app.MapHub<ChatHub>("/hubs/chat");
+// CloseOnAuthenticationExpiration (ADR-055): a missed abort is bounded by the token lifetime.
+app.MapHub<ChatHub>("/hubs/chat", options => options.CloseOnAuthenticationExpiration = true);
 
 // Pure liveness probe for the docker healthcheck — anonymous, no DB access. A DB check
 // here would flap the healthcheck during SQL Server warmup / restarts, since the app

@@ -22,7 +22,7 @@ public interface IAuthService
     Task<ServiceResult<bool>> UpdateNameAsync(string firstName, string? lastName, CancellationToken cancellationToken = default);
     /// <summary>Sets or replaces the phone number of the current user; ADR-030 section 8.</summary>
     Task<ServiceResult<bool>> UpdatePhoneAsync(string phoneNumber, CancellationToken cancellationToken = default);
-    Task<ServiceResult<bool>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default);
+    Task<ServiceResult<AuthResponse>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default);
 
     // Home-point model: the home point is the only source of a user's listings' location.
     Task<ServiceResult<CurrentUserResponse>> UpdateHomePointAsync(decimal latitude, decimal longitude, CancellationToken cancellationToken = default);

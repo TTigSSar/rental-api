@@ -59,6 +59,11 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.Role)
             .IsRequired();
 
+        // Session version (ADR-055): existing rows start at 0.
+        builder.Property(user => user.TokenVersion)
+            .IsRequired()
+            .HasDefaultValue(0);
+
         // Home point (home-point model). Same precision/scale as the listing location columns (ADR-008).
         builder.Property(user => user.HomeLatitude)
             .HasPrecision(9, 6);

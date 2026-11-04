@@ -173,7 +173,8 @@ public sealed class HomePointCoordinatePrivacyTests
                 TimeProvider.System),
             new EmailVerificationStore(context),
             TimeProvider.System,
-            new NotSupportedPasswordResetService());
+            new NotSupportedPasswordResetService(),
+            new FakeSessionRevoker());
 
         var result = await service.GetCurrentUserAsync();
 

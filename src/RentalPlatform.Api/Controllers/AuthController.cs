@@ -288,19 +288,19 @@ public sealed class AuthController : ControllerBase
     [HttpPut("me/password")]
     [Authorize]
     [EnableRateLimiting(RateLimiterExtensions.PasswordChangePolicy)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
-    public async Task<ActionResult> ChangePassword(
+    public async Task<ActionResult<AuthResponse>> ChangePassword(
         [FromBody] ChangePasswordRequest request,
         CancellationToken cancellationToken)
     {
         var result = await _authService.ChangePasswordAsync(request.CurrentPassword, request.NewPassword, cancellationToken);
         if (result.IsSuccess)
         {
-            return NoContent();
+            return Ok(result.Value);
         }
 
         return FromError(result.Error);

@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using RentalPlatform.Infrastructure.Services;
 
 namespace RentalPlatform.Api.Hubs;
 
@@ -13,19 +15,63 @@ namespace RentalPlatform.Api.Hubs;
 public sealed class ChatHub : Hub
 {
     private readonly ILogger<ChatHub> _logger;
+    private readonly ChatConnectionRegistry _registry;
+    private readonly UserSecurityStateCache _securityState;
 
-    public ChatHub(ILogger<ChatHub> logger)
+    public ChatHub(ILogger<ChatHub> logger, ChatConnectionRegistry registry, UserSecurityStateCache securityState)
     {
         _logger = logger;
+        _registry = registry;
+        _securityState = securityState;
     }
 
-    public override Task OnConnectedAsync()
+    public override async Task OnConnectedAsync()
     {
+        if (!Guid.TryParse(Context.UserIdentifier, out var userId))
+        {
+            Context.Abort();
+            return;
+        }
+
+        // Register FIRST, then re-check the token's version (ADR-055): a rotation that committed between
+        // the handshake's authentication and now either snapshots this connection (and aborts it) or has
+        // already invalidated the cache, so this check sees the new version. Either way it cannot slip through.
+        _registry.Register(userId, Context);
+
+        bool accepted;
+        try
+        {
+            accepted = Context.User is { } principal
+                       && await SessionTokenValidator.IsAcceptedAsync(principal, _securityState, Context.ConnectionAborted);
+        }
+        catch (Exception exception)
+        {
+            // Fail closed, like the HTTP pipeline: no connection without a verified session.
+            _logger.LogError(exception, "Session re-check failed for chat connection {ConnectionId}", Context.ConnectionId);
+            accepted = false;
+        }
+
+        if (!accepted)
+        {
+            Context.Abort();
+            return;
+        }
+
         _logger.LogDebug(
             "Chat hub connection {ConnectionId} established for user {UserId}",
             Context.ConnectionId,
             Context.UserIdentifier);
 
-        return base.OnConnectedAsync();
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (Guid.TryParse(Context.UserIdentifier, out var userId))
+        {
+            _registry.Unregister(userId, Context.ConnectionId);
+        }
+
+        await base.OnDisconnectedAsync(exception);
     }
 }

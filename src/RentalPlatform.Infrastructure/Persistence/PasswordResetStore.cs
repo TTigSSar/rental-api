@@ -89,7 +89,10 @@ public sealed class PasswordResetStore : IPasswordResetStore
         // became so after the caller's read; a reset never verifies a pending account (ADR-035 section 4).
         var updated = await _dbContext.Users
             .Where(user => user.Id == userId && !user.IsBlocked && user.IsEmailConfirmed)
-            .ExecuteUpdateAsync(set => set.SetProperty(user => user.PasswordHash, newPasswordHash), cancellationToken);
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(user => user.PasswordHash, newPasswordHash)
+                // Same UPDATE, same transaction as the token consumption (ADR-055): every older JWT dies with it.
+                .SetProperty(user => user.TokenVersion, user => user.TokenVersion + 1), cancellationToken);
 
         if (updated != 1)
         {

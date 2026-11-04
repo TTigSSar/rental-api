@@ -217,4 +217,7 @@ public sealed class RacingUserAuthStore : IUserAuthStore
 
     public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default) =>
         _inner.TrySaveChangesAsync(cancellationToken);
+
+    public Task<bool> TryChangePasswordAsync(User user, string newPasswordHash, CancellationToken cancellationToken = default) =>
+        _inner.TryChangePasswordAsync(user, newPasswordHash, cancellationToken);
 }

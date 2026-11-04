@@ -113,14 +113,17 @@ public sealed class AuthServiceTests
     {
         var user = TestData.User(UserId, "user@test.local", passwordHash: "hashed:OldPass1");
         var store = new FakeUserAuthStore().Seed(user);
-        var service = CreateService(store, UserId);
+        var revoker = new FakeSessionRevoker();
+        var service = AuthServiceFactory.ForFakes(store, UserId, sessionRevoker: revoker);
 
         var result = await service.ChangePasswordAsync("OldPass1", "NewPass2");
 
         Assert.True(result.IsSuccess);
-        Assert.True(result.Value);
+        Assert.Equal("fake-token:" + UserId, result.Value!.AccessToken);
         Assert.Equal("hashed:NewPass2", user.PasswordHash);
-        Assert.Equal(1, store.SaveChangesCallCount);
+        Assert.Equal(1, user.TokenVersion);
+        Assert.Equal(1, store.TryChangePasswordCallCount);
+        Assert.Equal(new[] { UserId }, revoker.Revoked);
     }
 
     [Fact]

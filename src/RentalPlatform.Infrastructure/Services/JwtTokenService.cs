@@ -10,6 +10,9 @@ namespace RentalPlatform.Infrastructure.Services;
 
 public sealed class JwtTokenService : IJwtTokenService
 {
+    // Session version claim (ADR-055): checked against Users.TokenVersion on every request.
+    public const string TokenVersionClaim = "tv";
+
     private readonly JwtOptions _jwtOptions;
 
     public JwtTokenService(IOptions<JwtOptions> jwtOptions)
@@ -26,7 +29,8 @@ public sealed class JwtTokenService : IJwtTokenService
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(ClaimTypes.Email, user.Email),
             new Claim(ClaimTypes.Role, user.Role.ToString()),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(TokenVersionClaim, user.TokenVersion.ToString(System.Globalization.CultureInfo.InvariantCulture))
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecretKey));

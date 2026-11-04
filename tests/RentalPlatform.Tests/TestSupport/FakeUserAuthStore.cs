@@ -58,6 +58,24 @@ public sealed class FakeUserAuthStore : IUserAuthStore
         return Task.CompletedTask;
     }
 
+    public int TryChangePasswordCallCount { get; private set; }
+
+    // Mirrors the conditional UPDATE of UserAuthStore.TryChangePasswordAsync on the in-memory object:
+    // applies only while the user is not blocked, then rotates the version like the real one.
+    public Task<bool> TryChangePasswordAsync(User user, string newPasswordHash, CancellationToken cancellationToken = default)
+    {
+        TryChangePasswordCallCount++;
+        if (user.IsBlocked)
+        {
+            return Task.FromResult(false);
+        }
+
+        user.PasswordHash = newPasswordHash;
+        user.TokenVersion++;
+        SaveChangesCallCount++;
+        return Task.FromResult(true);
+    }
+
     // Set to simulate the unique index on (ExternalAuthProvider, ExternalProviderId) rejecting a link.
     public bool FailNextTrySaveWithUniqueViolation { get; set; }
 

@@ -35,7 +35,7 @@ public interface IPasswordResetStore
         Domain.Entities.UserToken token, DateTime now, TokenLimits limits, Func<bool> reserveSend, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The reset commit, one transaction: <c>UPDATE Users SET PasswordHash=@new WHERE Id AND
+    /// The reset commit, one transaction: <c>UPDATE Users SET PasswordHash=@new, TokenVersion=TokenVersion+1 WHERE Id AND
     /// IsBlocked=0 AND IsEmailConfirmed=1</c>, then <c>UPDATE UserTokens SET ConsumedAt WHERE Id AND
     /// Purpose=PasswordReset AND ConsumedAt IS NULL AND ExpiresAt&gt;@now</c>. Both must hit exactly one
     /// row or everything rolls back (false). After a commit the change tracker is cleared.

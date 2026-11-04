@@ -379,6 +379,7 @@ internal sealed class DevelopmentSeedRunner
                 if (!_passwordHasher.VerifyPassword(targetPassword, existing.PasswordHash))
                 {
                     existing.PasswordHash = _passwordHasher.HashPassword(targetPassword);
+                    existing.TokenVersion++; // a password change ends older sessions (ADR-055)
                     _logger.LogInformation("Demo seed: reset password hash for {Email}.", email);
                     updated++;
                 }

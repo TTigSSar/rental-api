@@ -58,6 +58,7 @@ public sealed class AuthService : IAuthService
     private readonly IEmailVerificationStore _emailVerificationStore;
     private readonly TimeProvider _timeProvider;
     private readonly IPasswordResetService _passwordReset;
+    private readonly ISessionRevoker _sessionRevoker;
 
     public AuthService(
         IUserAuthStore userAuthStore,
@@ -69,8 +70,10 @@ public sealed class AuthService : IAuthService
         IEmailVerificationService emailVerification,
         IEmailVerificationStore emailVerificationStore,
         TimeProvider timeProvider,
-        IPasswordResetService passwordReset)
+        IPasswordResetService passwordReset,
+        ISessionRevoker sessionRevoker)
     {
+        _sessionRevoker = sessionRevoker;
         _passwordReset = passwordReset;
         _emailVerification = emailVerification;
         _emailVerificationStore = emailVerificationStore;
@@ -252,6 +255,10 @@ public sealed class AuthService : IAuthService
         {
             return ServiceResult<AuthResponse>.Failure(reset.Error!);
         }
+
+        // Right after the commit and before anything else (ADR-055): drop the cached state of the old
+        // version and end the user's open chat connections. Never throws.
+        await _sessionRevoker.RevokeAsync(reset.Value);
 
         // Issued only after the commit, from a fresh read of the row (the store cleared the tracker),
         // exactly like verify-email.
@@ -484,11 +491,11 @@ public sealed class AuthService : IAuthService
         Message = "Current user is not authenticated."
     };
 
-    public async Task<ServiceResult<bool>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default)
+    public async Task<ServiceResult<AuthResponse>> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default)
     {
         if (_currentUserContext.UserId is not { } userId)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
@@ -498,7 +505,7 @@ public sealed class AuthService : IAuthService
         var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
         if (user is null)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.Unauthenticated,
                 Message = "Current user is not authenticated."
@@ -507,7 +514,7 @@ public sealed class AuthService : IAuthService
 
         if (user.IsBlocked)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.UserBlocked,
                 Message = "User account is blocked."
@@ -516,7 +523,7 @@ public sealed class AuthService : IAuthService
 
         if (!PasswordPolicy.HasUsablePassword(user.PasswordHash))
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.PasswordNotSet,
                 Message = "This account signs in with an external provider and has no password."
@@ -525,7 +532,7 @@ public sealed class AuthService : IAuthService
 
         if (!_passwordHasher.VerifyPassword(currentPassword, user.PasswordHash))
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.InvalidCurrentPassword,
                 Message = "Current password is incorrect."
@@ -537,7 +544,7 @@ public sealed class AuthService : IAuthService
         // and before hashing.
         if (Encoding.UTF8.GetByteCount(newPassword) > PasswordPolicy.MaxPasswordBytes)
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.PasswordTooLong,
                 Message = $"Password must be at most {PasswordPolicy.MaxPasswordBytes} bytes (UTF-8)."
@@ -546,17 +553,42 @@ public sealed class AuthService : IAuthService
 
         if (_passwordHasher.VerifyPassword(newPassword, user.PasswordHash))
         {
-            return ServiceResult<bool>.Failure(new ServiceError
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
                 Code = ErrorCodes.PasswordUnchanged,
                 Message = "New password must be different from the current password."
             });
         }
 
-        user.PasswordHash = _passwordHasher.HashPassword(newPassword);
-        await _userAuthStore.SaveChangesAsync(cancellationToken);
+        // One conditional UPDATE that also rotates TokenVersion (ADR-055): it matches only the row state
+        // the checks above were made against, so of two concurrent changes exactly one wins.
+        if (!await _userAuthStore.TryChangePasswordAsync(user, _passwordHasher.HashPassword(newPassword), cancellationToken))
+        {
+            // Lost a race or blocked in between: say what is true now (the store detached the stale copy).
+            var current = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+            if (current is null)
+            {
+                return ServiceResult<AuthResponse>.Failure(UnauthenticatedError());
+            }
 
-        return ServiceResult<bool>.Success(true);
+            return ServiceResult<AuthResponse>.Failure(current.IsBlocked
+                ? BlockedError()
+                : new ServiceError
+                {
+                    Code = ErrorCodes.InvalidCurrentPassword,
+                    Message = "Current password is incorrect."
+                });
+        }
+
+        await _sessionRevoker.RevokeAsync(userId);
+
+        // The caller keeps a session: built from the in-memory user, which now holds the committed
+        // version. No post-commit DB I/O, so a failure here can never report the change as failed.
+        return ServiceResult<AuthResponse>.Success(new AuthResponse
+        {
+            AccessToken = _jwtTokenService.GenerateAccessToken(user),
+            User = MapUser(user)
+        });
     }
 
     // Both endpoints delegate the actual write to IHomePointService — the single writer for

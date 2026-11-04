@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.Logging;
 using RentalPlatform.Api.Hubs;
 using RentalPlatform.Api.Serialization;
 using RentalPlatform.Application.Abstractions;
@@ -19,6 +20,10 @@ public static class ServiceCollectionExtensions
 {
     public const string FrontendCorsPolicy = "FrontendCorsPolicy";
 
+    // HttpContext.Items flag set by OnTokenValidated when the ADR-055 session check could not read the database.
+    private const string SessionCheckUnavailableKey = "auth.session_check_unavailable";
+    public const string SessionCheckUnavailableCode = "auth.session_check_unavailable";
+
     public static IServiceCollection AddApiServices(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -28,7 +33,13 @@ public static class ServiceCollectionExtensions
             ?? throw new InvalidOperationException("JWT settings are not configured.");
         ValidateJwtOptions(jwtSettings, environment);
 
-        services.AddMemoryCache(); // AI-search status answer (30 s)
+        services.AddMemoryCache(); // AI-search status answer (30 s), user security state (60 s)
+
+        // JWT revocation (ADR-055). Singletons holding process-local state: correct for ONE API instance.
+        services.AddSingleton<IUserSecurityStateReader, UserSecurityStateReader>();
+        services.AddSingleton<UserSecurityStateCache>();
+        services.AddSingleton<ChatConnectionRegistry>();
+        services.AddSingleton<ISessionRevoker, SessionRevoker>();
 
         services.AddControllers(options =>
             {
@@ -101,10 +112,56 @@ public static class ServiceCollectionExtensions
                         return Task.CompletedTask;
                     },
 
+                    // ADR-055: a signature-valid token is accepted only if its session version is still
+                    // current. Fail closed: when the check cannot be made the token is not accepted and the
+                    // challenge answers 503 (see OnChallenge), so a database blip does not log everyone out.
+                    OnTokenValidated = async context =>
+                    {
+                        var cache = context.HttpContext.RequestServices.GetRequiredService<UserSecurityStateCache>();
+                        try
+                        {
+                            if (context.Principal is null
+                                || !await SessionTokenValidator.IsAcceptedAsync(
+                                    context.Principal, cache, context.HttpContext.RequestAborted))
+                            {
+                                context.Fail("The session is no longer valid.");
+                            }
+                        }
+                        catch (OperationCanceledException) when (context.HttpContext.RequestAborted.IsCancellationRequested)
+                        {
+                            context.Fail("The request was cancelled.");
+                        }
+                        catch (Exception exception)
+                        {
+                            context.HttpContext.Items[SessionCheckUnavailableKey] = true;
+                            context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                                .CreateLogger("RentalPlatform.Api.JwtSessionCheck")
+                                .LogError(exception, "Could not verify the session of an authenticated request; rejecting with 503");
+                            context.Fail("The session could not be verified.");
+                        }
+                    },
+
                     // AI search is the one endpoint whose 401 carries an errorCode (ADR-045,
                     // ai_search.unauthenticated); every other endpoint keeps the default bare 401.
                     OnChallenge = async context =>
                     {
+                        // A session check that could not run is a 503 for every endpoint, AI search included.
+                        if (context.HttpContext.Items.ContainsKey(SessionCheckUnavailableKey))
+                        {
+                            context.HandleResponse();
+                            var unavailable = new ServiceError
+                            {
+                                Code = SessionCheckUnavailableCode,
+                                Message = "Your session could not be verified right now. Please try again."
+                            };
+                            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                            await context.Response.WriteAsJsonAsync(
+                                unavailable.ToProblemDetails(StatusCodes.Status503ServiceUnavailable),
+                                options: null,
+                                contentType: "application/problem+json");
+                            return;
+                        }
+
                         var policy = context.HttpContext.GetEndpoint()?.Metadata
                             .GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName;
                         if (policy != RateLimiterExtensions.AiSearchPolicy)

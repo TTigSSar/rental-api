@@ -101,6 +101,14 @@ public sealed class EmailVerificationService : IEmailVerificationService
                 return Duplicate();
             }
 
+            // Collation-equal is not equal (N'ss' = N'ß' on SQL Server): a pending row matched by a
+            // different address is somebody else's. Duplicate before the cooldown/cap checks, so a
+            // lookalike can neither replace it, mail its link nor spend its budget.
+            if (!string.Equals(state.Email.Trim().ToLowerInvariant(), candidate.Email.Trim().ToLowerInvariant(), StringComparison.Ordinal))
+            {
+                return Duplicate();
+            }
+
             userId = state.Id;
 
             var latest = await _store.GetLatestTokenCreatedAtAsync(userId, TokenPurpose.EmailVerification, cancellationToken);

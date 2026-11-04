@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.DTOs;
+using RentalPlatform.Application.Services;
 using RentalPlatform.Domain.Enums;
 using RentalPlatform.Tests.TestSupport;
 using Xunit;
@@ -104,6 +105,107 @@ public sealed class CollationEqualEmailTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(Stored, Assert.Single(h.Sender.Messages).To);
+    }
+
+    // Counts the replacement attempts, to prove the twin never reaches the write.
+    public class ReplaceCountingProxy : DispatchProxy
+    {
+        public IEmailVerificationStore Inner { get; set; } = null!;
+        public int ReplaceCalls { get; set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name == nameof(IEmailVerificationStore.TryReplacePendingAsync))
+            {
+                ReplaceCalls++;
+            }
+
+            if (targetMethod.Name == nameof(IEmailVerificationStore.FindAccountStateAsync))
+            {
+                args![0] = Stored;
+            }
+
+            return targetMethod.Invoke(Inner, args);
+        }
+    }
+
+    [Theory]
+    [InlineData(Twin)]
+    [InlineData(Fullwidth)]
+    public async Task Register_For_A_Collation_Equal_Address_Is_Duplicate_And_Replaces_Nothing(string requested)
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isEmailConfirmed: false, passwordHash: "victim-hash"));
+        await using var context = db.CreateContext();
+        ReplaceCountingProxy? counter = null;
+        var h = new AuthHarness(context, decorateStore: inner =>
+        {
+            var proxy = DispatchProxy.Create<IEmailVerificationStore, ReplaceCountingProxy>();
+            counter = (ReplaceCountingProxy)(object)proxy;
+            counter.Inner = inner;
+            return proxy;
+        });
+
+        var result = await h.Auth.RegisterAsync(AuthHarness.Register(requested));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(EmailVerificationService.ErrorCodes.DuplicateEmail, result.Error!.Code);
+        Assert.Equal(0, counter!.ReplaceCalls);
+        Assert.Empty(h.Sender.Messages);
+        Assert.Empty(await context.UserTokens.AsNoTracking().ToListAsync());
+        var row = await context.Users.AsNoTracking().SingleAsync();
+        Assert.Equal("victim-hash", row.PasswordHash);
+        Assert.Equal(Stored, row.Email);
+    }
+
+    [Fact]
+    public async Task Register_For_The_Exact_Address_Still_Replaces_The_Pending_Row()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isEmailConfirmed: false, passwordHash: "old-hash"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context, decorateStore: Fold);
+
+        var result = await h.Auth.RegisterAsync(AuthHarness.Register($" {Stored.ToUpperInvariant()} "));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Stored, Assert.Single(h.Sender.Messages).To);
+        var row = await context.Users.AsNoTracking().SingleAsync();
+        Assert.NotEqual("old-hash", row.PasswordHash);
+        Assert.Equal(Stored, row.Email);
+    }
+
+    [SqlServerFact]
+    public async Task On_Real_SQL_Server_Register_With_The_Twin_Leaves_The_Pending_Victim_Untouched()
+    {
+        using var db = new SqlServerTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isEmailConfirmed: false, passwordHash: "victim-hash", firstName: "Victim"));
+
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+
+        // Register once with the exact address to get a latest token on record, then move the clock
+        // past the cooldown so only the twin check can stop the second call.
+        Assert.True((await h.Auth.RegisterAsync(AuthHarness.Register(Stored, firstName: "Victim"))).IsSuccess);
+        var before = await context.Users.AsNoTracking().SingleAsync();
+        var tokensBefore = await context.UserTokens.AsNoTracking().Select(t => t.Id).ToListAsync();
+        h.Sender.Clear();
+        h.Clock.Advance(TimeSpan.FromMinutes(5));
+
+        var result = await h.Auth.RegisterAsync(AuthHarness.Register(Twin, password: "AttackerPassw0rd", firstName: "Attacker"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(EmailVerificationService.ErrorCodes.DuplicateEmail, result.Error!.Code);
+        Assert.Empty(h.Sender.Messages);
+
+        var after = await context.Users.AsNoTracking().SingleAsync();
+        Assert.Equal(before.Email, after.Email);
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.Equal(before.FirstName, after.FirstName);
+        Assert.Equal(before.LastName, after.LastName);
+        Assert.Equal(before.PhoneNumber, after.PhoneNumber);
+        Assert.Equal(before.HomeLatitude, after.HomeLatitude);
+        Assert.Equal(tokensBefore.OrderBy(i => i), (await context.UserTokens.AsNoTracking().Select(t => t.Id).ToListAsync()).OrderBy(i => i));
     }
 
     [SqlServerFact]

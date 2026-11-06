@@ -173,9 +173,6 @@ public sealed class SqlServerTestDatabase : IDisposable
             .AddInterceptors(interceptors)
             .Options);
 
-    /// <summary>The connection string of this throwaway database (for raw ADO.NET checks).</summary>
-    public string ConnectionString => _databaseConnectionString;
-
     /// <summary>
     /// Inserts minimal Users rows with raw SQL, naming only the columns that have existed since
     /// InitialCreate.

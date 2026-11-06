@@ -92,7 +92,7 @@ public sealed class OpenAiAiSearchModelTests
 
         var body = handler.Body!;
         Assert.Equal("gpt-6-luna", (string?)body["model"]);
-        Assert.Equal("low", (string?)body["reasoning_effort"]);
+        Assert.Equal("none", (string?)body["reasoning_effort"]);
         Assert.True((int)body["max_completion_tokens"]! >= 4096);
         Assert.Null(body["max_tokens"]);
         Assert.Null(body["provider"]);
@@ -110,6 +110,27 @@ public sealed class OpenAiAiSearchModelTests
         Assert.True((bool)format["json_schema"]!["strict"]!);
         Assert.False(string.IsNullOrEmpty((string?)format["json_schema"]!["name"]));
         AssertStrict(format["json_schema"]!["schema"]!);
+    }
+
+    [Theory]
+    [InlineData(null, "none")]
+    [InlineData("", "none")]
+    [InlineData("   ", "none")]
+    [InlineData("low", "low")]
+    public async Task ParseAndRank_SendConfiguredReasoningEffort(string? configured, string expected)
+    {
+        var options = configured is null
+            ? new AiSearchOptions { ApiKey = Key }
+            : new AiSearchOptions { ApiKey = Key, ReasoningEffort = configured };
+
+        var (model, handler) = Create(options);
+        handler.Respond = _ => Task.FromResult(Completion(ParseAnswer()));
+        await model.ParseAsync("a puzzle", "en", Catalogs);
+        Assert.Equal(expected, (string?)handler.Body!["reasoning_effort"]);
+
+        handler.Respond = _ => Task.FromResult(Completion(new JsonObject { ["orderedIds"] = new JsonArray(1) }));
+        await model.RankAsync("x", new[] { new AiRankCandidate(Guid.NewGuid(), "A", "c", 1m, null, null, "a") });
+        Assert.Equal(expected, (string?)handler.Body!["reasoning_effort"]);
     }
 
     // Strict mode: every property is required and every object closes additionalProperties.

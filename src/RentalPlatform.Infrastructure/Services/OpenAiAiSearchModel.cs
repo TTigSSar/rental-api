@@ -184,7 +184,7 @@ public sealed class OpenAiAiSearchModel : IAiSearchModel
             {
                 ["model"] = model,
                 ["max_completion_tokens"] = maxTokens,
-                ["reasoning_effort"] = "low",
+                ["reasoning_effort"] = _options.EffectiveReasoningEffort,
                 ["messages"] = new JsonArray(
                     new JsonObject { ["role"] = "system", ["content"] = system },
                     new JsonObject { ["role"] = "user", ["content"] = user }),

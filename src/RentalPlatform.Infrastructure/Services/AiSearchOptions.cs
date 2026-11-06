@@ -22,6 +22,17 @@ public sealed class AiSearchOptions
     public string ParseModel { get; init; } = "gpt-6-luna";
     public string RankModel { get; init; } = "gpt-6-luna";
 
+    public const string DefaultReasoningEffort = "none";
+
+    /// <summary>
+    /// reasoning_effort sent on both model calls (ADR-054 amendment). Not validated: the provider owns the
+    /// vocabulary, so a rollback to "low" is a config edit. Blank means the default.
+    /// </summary>
+    public string ReasoningEffort { get; init; } = DefaultReasoningEffort;
+
+    public string EffectiveReasoningEffort =>
+        string.IsNullOrWhiteSpace(ReasoningEffort) ? DefaultReasoningEffort : ReasoningEffort.Trim();
+
     public decimal DailyBudgetUsd { get; init; } = 1m;
     public int PerUserPerMinute { get; init; } = 5;
     public int PerUserPerDay { get; init; } = 50;

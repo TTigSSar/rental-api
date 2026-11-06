@@ -175,11 +175,23 @@ internal sealed class DevelopmentSeedRunner
             .Where(user => emails.Contains(user.Email))
             .ToDictionaryAsync(user => user.Email, user => user.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
+        var homeSeedIds = seedsWithHome.Select(user => user.Id).ToArray();
+        var deletedSeedIds = (await _dbContext.Users
+                .Where(user => homeSeedIds.Contains(user.Id) && user.DeletedAt != null)
+                .Select(user => user.Id)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
         var applied = 0;
         foreach (var seed in seedsWithHome)
         {
             if (!userIdsByEmail.TryGetValue(NormalizeEmail(seed.Email), out var userId))
             {
+                if (deletedSeedIds.Contains(seed.Id))
+                {
+                    continue; // deleted account (ADR-056) — left alone
+                }
+
                 _logger.LogWarning(
                     "Development seed: cannot apply a home point for {Email} — the user row is missing.",
                     seed.Email);
@@ -356,19 +368,38 @@ internal sealed class DevelopmentSeedRunner
             .Select(user => NormalizeEmail(user.Email))
             .ToArray();
 
+        var seedIds = DevelopmentSeedData.Users.Select(user => user.Id).ToArray();
+
+        // Match by email OR fixed seed Id: account deletion (ADR-056) rewrites the email to
+        // deleted-{id}@deleted.invalid, so an email-only match would miss a deleted seed user and
+        // the seed would INSERT the same Id again (PK violation).
         var existingUsers = await _dbContext.Users
-            .Where(user => seedEmails.Contains(user.Email))
+            .Where(user => seedEmails.Contains(user.Email) || seedIds.Contains(user.Id))
             .ToListAsync(cancellationToken);
 
-        var byEmail = existingUsers.ToDictionary(
-            user => NormalizeEmail(user.Email),
-            StringComparer.OrdinalIgnoreCase);
+        // Deleted seed users stay deleted: never restored, modified or re-inserted, and left out of
+        // the returned map so no downstream seeding attaches new rows to them.
+        var deletedSeedIds = existingUsers
+            .Where(user => user.DeletedAt != null)
+            .Select(user => user.Id)
+            .ToHashSet();
+
+        var byEmail = existingUsers
+            .Where(user => user.DeletedAt == null)
+            .ToDictionary(
+                user => NormalizeEmail(user.Email),
+                StringComparer.OrdinalIgnoreCase);
 
         var inserted = 0;
         var updated = 0;
 
         foreach (var seed in DevelopmentSeedData.Users)
         {
+            if (deletedSeedIds.Contains(seed.Id))
+            {
+                continue;
+            }
+
             var email = NormalizeEmail(seed.Email);
 
             if (byEmail.TryGetValue(email, out var existing))

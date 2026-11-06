@@ -175,6 +175,147 @@ public sealed class CollationEqualEmailTests
         Assert.Equal(Stored, row.Email);
     }
 
+    // External sign-in: the user lookup by email answers every address with the row stored under Stored.
+    public class UserFoldingProxy : DispatchProxy
+    {
+        public IUserAuthStore Inner { get; set; } = null!;
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name == nameof(IUserAuthStore.FindByEmailAsync))
+            {
+                args![0] = Stored;
+            }
+
+            return targetMethod.Invoke(Inner, args);
+        }
+    }
+
+    private static IUserAuthStore FoldUsers(IUserAuthStore inner)
+    {
+        var proxy = DispatchProxy.Create<IUserAuthStore, UserFoldingProxy>();
+        ((UserFoldingProxy)(object)proxy).Inner = inner;
+        return proxy;
+    }
+
+    private static ExternalUserInfo Google(string email, string hostedDomain) => new()
+    {
+        Provider = "google",
+        ProviderUserId = "attacker-sub",
+        Email = email,
+        FirstName = "Attacker",
+        LastName = "Twin",
+        FullName = "Attacker Twin",
+        HostedDomain = hostedDomain
+    };
+
+    private static readonly ExternalAuthRequest ExternalRequest = new() { Provider = "google", IdToken = "t" };
+
+    [Theory]
+    [InlineData(true, Twin, "busineß.example")]
+    [InlineData(false, Twin, "busineß.example")]
+    [InlineData(true, Fullwidth, "ｂusiness.example")]
+    [InlineData(false, Fullwidth, "ｂusiness.example")]
+    public async Task External_Sign_In_With_An_Authoritative_Twin_Is_A_Link_Conflict_And_Touches_Nothing(
+        bool verified, string twin, string hostedDomain)
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isEmailConfirmed: verified, passwordHash: "victim-hash", firstName: "Victim", lastName: "Owner"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context, decorateUserStore: FoldUsers);
+        h.External.Result = Google(twin, hostedDomain);
+        var before = await context.Users.AsNoTracking().SingleAsync();
+
+        var result = await h.Auth.ExternalAsync(ExternalRequest);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("auth.external_link_conflict", result.Error!.Code);
+        Assert.Null(result.Value);
+        var after = await context.Users.AsNoTracking().SingleAsync();
+        Assert.Equal(Stored, after.Email);
+        Assert.Equal(before.ExternalAuthProvider, after.ExternalAuthProvider);
+        Assert.Equal(before.ExternalProviderId, after.ExternalProviderId);
+        Assert.Equal("victim-hash", after.PasswordHash);
+        Assert.Equal(verified, after.IsEmailConfirmed);
+        Assert.Equal("Victim", after.FirstName);
+        Assert.Equal("Owner", after.LastName);
+    }
+
+    [Fact]
+    public async Task External_Sign_In_With_A_Twin_Of_A_Blocked_Account_Does_Not_Reveal_That_It_Is_Blocked()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isBlocked: true, passwordHash: "victim-hash"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context, decorateUserStore: FoldUsers);
+        h.External.Result = Google(Twin, "busineß.example");
+
+        var result = await h.Auth.ExternalAsync(ExternalRequest);
+
+        Assert.Equal("auth.external_link_conflict", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task External_Sign_In_On_The_Exact_Verified_Address_Still_Links()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, passwordHash: "victim-hash"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context, decorateUserStore: FoldUsers);
+        h.External.Result = Google($" {Stored.ToUpperInvariant()} ", "business.example");
+
+        var result = await h.Auth.ExternalAsync(ExternalRequest);
+
+        Assert.True(result.IsSuccess);
+        var row = await context.Users.AsNoTracking().SingleAsync();
+        Assert.Equal("google", row.ExternalAuthProvider);
+        Assert.Equal("attacker-sub", row.ExternalProviderId);
+        Assert.Equal("victim-hash", row.PasswordHash);
+    }
+
+    [Fact]
+    public async Task External_Sign_In_On_The_Exact_Pending_Address_Still_Resets_It()
+    {
+        using var db = new SqliteTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, isEmailConfirmed: false, passwordHash: "squatter-hash"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context, decorateUserStore: FoldUsers);
+        h.External.Result = Google(Stored, "business.example");
+
+        var result = await h.Auth.ExternalAsync(ExternalRequest);
+
+        Assert.True(result.IsSuccess);
+        var row = await context.Users.AsNoTracking().SingleAsync();
+        Assert.True(row.IsEmailConfirmed);
+        Assert.Equal(string.Empty, row.PasswordHash);
+        Assert.Equal("google", row.ExternalAuthProvider);
+    }
+
+    // On real SQL Server the twin insert loses to the case-insensitive unique index, the retry finds
+    // the victim's row, and the ordinal check must stop it there.
+    [SqlServerFact]
+    public async Task On_Real_SQL_Server_External_Sign_In_With_A_Verified_Twin_Does_Not_Link_Or_Sign_In()
+    {
+        using var db = new SqlServerTestDatabase();
+        await db.SeedAsync(TestData.User(UserId, Stored, passwordHash: "victim-hash", firstName: "Victim"));
+        await using var context = db.CreateContext();
+        var h = new AuthHarness(context);
+        h.External.Result = Google(Twin, "busineß.example");
+        var before = await context.Users.AsNoTracking().SingleAsync();
+
+        var result = await h.Auth.ExternalAsync(ExternalRequest);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("auth.external_link_conflict", result.Error!.Code);
+        var users = await context.Users.AsNoTracking().ToListAsync();
+        var after = Assert.Single(users);
+        Assert.Equal(Stored, after.Email);
+        Assert.Equal(before.ExternalAuthProvider, after.ExternalAuthProvider);
+        Assert.Equal(before.ExternalProviderId, after.ExternalProviderId);
+        Assert.Equal("victim-hash", after.PasswordHash);
+        Assert.Equal("Victim", after.FirstName);
+    }
+
     [SqlServerFact]
     public async Task On_Real_SQL_Server_Register_With_The_Twin_Leaves_The_Pending_Victim_Untouched()
     {

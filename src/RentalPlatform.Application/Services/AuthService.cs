@@ -702,6 +702,20 @@ public sealed class AuthService : IAuthService
                 continue; // lost a race on Users.Email or on the identity: look it up again.
             }
 
+            // The lookup runs under the database collation, so a lookalike address (busineß.am for
+            // business.am) returns the victim's row. A row stored under a different string is not this
+            // mailbox (ADR-028 section 2): nothing is linked, reset or signed in. Checked before the
+            // blocked test so a twin cannot learn that the victim is blocked. This also catches the
+            // retry after a twin insert lost to the case-insensitive unique index.
+            if (!string.Equals(existing.Email.Trim().ToLowerInvariant(), normalizedEmail, StringComparison.Ordinal))
+            {
+                return ServiceResult<User>.Failure(new ServiceError
+                {
+                    Code = ErrorCodes.ExternalLinkConflict,
+                    Message = "This email belongs to an existing account that cannot be linked to this sign-in method."
+                });
+            }
+
             if (existing.IsBlocked)
             {
                 // Confirmed or pending, a blocked account is never linked, reset or replaced.

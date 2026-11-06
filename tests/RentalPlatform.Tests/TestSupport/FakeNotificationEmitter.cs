@@ -36,6 +36,14 @@ public sealed class FakeNotificationEmitter : INotificationEmitter
         return Task.CompletedTask;
     }
 
+    public List<Booking> DeclinedByDeletedOwner { get; } = new();
+
+    public Task BookingDeclinedByDeletedOwnerAsync(Booking booking, CancellationToken cancellationToken = default)
+    {
+        DeclinedByDeletedOwner.Add(booking);
+        return Task.CompletedTask;
+    }
+
     public Task BookingRequestedAsync(Booking booking, User renter, Listing listing, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 

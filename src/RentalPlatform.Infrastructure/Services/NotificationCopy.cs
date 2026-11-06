@@ -51,6 +51,17 @@ internal static class NotificationCopy
             ?? DefaultLanguage;
     }
 
+    /// <summary>
+    /// The actor shown for a person whose account was deleted (ADR-056), in the recipient's language. Used as
+    /// the notification's ActorName and wherever the copy names the actor.
+    /// </summary>
+    public static string DeletedUser(string language) => language switch
+    {
+        "hy" => "Ջնջված օգտատեր",
+        "ru" => "Удалённый пользователь",
+        _ => "Deleted user"
+    };
+
     /// <summary>The district's own name in the recipient's language (the District row carries all three).</summary>
     public static string DistrictName(District district, string language) => language switch
     {

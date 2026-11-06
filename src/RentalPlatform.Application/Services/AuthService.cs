@@ -174,7 +174,9 @@ public sealed class AuthService : IAuthService
         // throws SaltParseException on an empty hash instead of returning false, which would
         // otherwise unwind to a 500 and still burn a rate-limit permit. Treated identically to
         // a wrong password so we never reveal whether the account exists or is external-auth.
-        if (user is null || !PasswordPolicy.HasUsablePassword(user.PasswordHash) || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        // A deleted account (ADR-056) is refused explicitly, not by relying on the scrubbed email and empty
+        // hash, and answers exactly like an unknown email.
+        if (user is null || user.DeletedAt is not null || !PasswordPolicy.HasUsablePassword(user.PasswordHash) || !_passwordHasher.VerifyPassword(request.Password, user.PasswordHash))
         {
             return ServiceResult<AuthResponse>.Failure(new ServiceError
             {
@@ -297,6 +299,17 @@ public sealed class AuthService : IAuthService
         var provider = externalUser.Provider.ToLowerInvariant();
 
         var user = await _userAuthStore.FindByExternalProviderAsync(provider, externalUser.ProviderUserId, cancellationToken);
+
+        // ADR-056: a deleted row never signs in, whatever it still carries. (Deletion also clears the provider
+        // link, so the same Google account normally falls through to a fresh registration below.)
+        if (user?.DeletedAt is not null)
+        {
+            return ServiceResult<AuthResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.InvalidExternalToken,
+                Message = "External identity token is invalid."
+            });
+        }
 
         if (user is null)
         {
@@ -670,6 +683,17 @@ public sealed class AuthService : IAuthService
             var now = Now();
             var existing = await _userAuthStore.FindByEmailAsync(normalizedEmail, cancellationToken);
 
+            // A deleted row (ADR-056) is never linked, reset or signed in to. Its email is the scrubbed
+            // deleted-{id}@deleted.invalid, which no provider vouches for, so this is a defensive guard.
+            if (existing?.DeletedAt is not null)
+            {
+                return ServiceResult<User>.Failure(new ServiceError
+                {
+                    Code = ErrorCodes.InvalidExternalToken,
+                    Message = "External identity token is invalid."
+                });
+            }
+
             if (existing is null)
             {
                 // The provider has verified this mailbox, so the new account is verified at once.
@@ -889,6 +913,7 @@ public sealed class AuthService : IAuthService
         CreatedAt = user.CreatedAt,
         IsBlocked = user.IsBlocked,
         Role = user.Role,
+        HasPassword = PasswordPolicy.HasUsablePassword(user.PasswordHash),
         HomePoint = MapHomePoint(user)
     };
 

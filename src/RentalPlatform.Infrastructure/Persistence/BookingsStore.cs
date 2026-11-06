@@ -52,13 +52,41 @@ public sealed class BookingsStore : IBookingsStore
     public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
         _dbContext.Listings.Include(listing => listing.Owner).FirstOrDefaultAsync(listing => listing.Id == listingId, cancellationToken);
 
+    public Task<bool> IsListingOwnerDeletedAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+        _dbContext.Listings
+            .AsNoTracking()
+            .AnyAsync(listing => listing.Id == listingId && listing.Owner.DeletedAt != null, cancellationToken);
+
     public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
     {
+        // ADR-056 amendment 6, and the lock order of ADR-029 (Users before everything else). An account deletion
+        // holds the owner's Users row lock from its first statement until it commits and then writes Listings and
+        // Bookings. So the owner is read FIRST in this transaction, before any lock on Listings or Bookings is
+        // taken: the read waits for a deletion in progress and then sees DeletedAt, and it can never hold a
+        // Listings lock while waiting for the Users row (that order deadlocked against the deletion, SQL error 1205).
+        // The owner id comes from an ordinary read taken outside the transaction, which leaves no lock behind.
+        var ownerId = await _dbContext.Listings
+            .AsNoTracking()
+            .Where(listing => listing.Id == booking.ListingId)
+            .Select(listing => (Guid?)listing.OwnerId)
+            .FirstOrDefaultAsync(cancellationToken);
+
         // SERIALIZABLE prevents two concurrent transactions from both passing the overlap
         // check and inserting overlapping bookings: SQL Server holds a key-range lock during
         // the AnyAsync read, so the second transaction blocks until the first commits/rolls back.
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable, cancellationToken);
+
+        if (ownerId is { } owner)
+        {
+            var ownerDeleted = await _dbContext.Users
+                .AnyAsync(user => user.Id == owner && user.DeletedAt != null, cancellationToken);
+            if (ownerDeleted)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return false;
+            }
+        }
 
         // A Pending row only blocks while it is still live: a pending request past its ExpiresAt is
         // effectively dead even if the background sweep hasn't flipped it to Expired yet. This keeps

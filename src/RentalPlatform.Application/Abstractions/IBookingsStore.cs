@@ -8,8 +8,13 @@ public interface IBookingsStore
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default);
 
+    // Fresh, untracked read: true when the listing's owner account has been deleted (ADR-056).
+    Task<bool> IsListingOwnerDeletedAsync(Guid listingId, CancellationToken cancellationToken = default);
+
     // Atomically checks for Pending+Approved+Active overlap and, if absent, persists the booking.
-    // Returns true when the booking was added; false when a blocking overlap was detected.
+    // Returns true when the booking was added; false when a blocking overlap was detected or, inside the same
+    // transaction, the listing's owner turned out to be deleted (ADR-056 amendment 6: the read blocks on a deletion
+    // in progress, which holds the owner's row lock until it commits).
     // Implemented under a SERIALIZABLE transaction so concurrent creates cannot both succeed.
     Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default);
 

@@ -40,4 +40,13 @@ public interface IEmailService
         string? preferredLanguage,
         string link,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends the "your account was deleted" confirmation (ADR-056 section 4) to the pre-erasure address, in
+    /// the pre-erasure language (en/hy/ru, English fallback). The body carries no user data. Never throws.
+    /// </summary>
+    Task SendAccountDeletedAsync(
+        string email,
+        string? preferredLanguage,
+        CancellationToken cancellationToken = default);
 }

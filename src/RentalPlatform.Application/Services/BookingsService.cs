@@ -88,6 +88,13 @@ public sealed class BookingsService : IBookingsService
             return Failure<BookingResponse>(ErrorCodes.ListingNotFound, "Listing was not found.");
         }
 
+        // ADR-056: a deleted owner's listings are archived, but this closes the window of a deletion in progress.
+        // Answers like a missing listing, so the deletion is not disclosed.
+        if (listing.Owner?.DeletedAt is not null)
+        {
+            return Failure<BookingResponse>(ErrorCodes.ListingNotFound, "Listing was not found.");
+        }
+
         if (listing.Status != ListingStatus.Approved)
         {
             return Failure<BookingResponse>(ErrorCodes.ListingNotApproved, "Only approved listings can be booked.");
@@ -146,6 +153,13 @@ public sealed class BookingsService : IBookingsService
         var added = await _bookingsStore.TryCreateBookingAsync(booking, cancellationToken);
         if (!added)
         {
+            // The store also refuses, inside its transaction, when the owner's deletion committed after the
+            // read above (ADR-056): say what is true rather than "overlap".
+            if (await _bookingsStore.IsListingOwnerDeletedAsync(listing.Id, cancellationToken))
+            {
+                return Failure<BookingResponse>(ErrorCodes.ListingNotFound, "Listing was not found.");
+            }
+
             return Failure<BookingResponse>(ErrorCodes.Overlap, "The selected dates overlap with an existing booking request.");
         }
 

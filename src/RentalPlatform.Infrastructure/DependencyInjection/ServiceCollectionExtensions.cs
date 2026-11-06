@@ -45,6 +45,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAccountDeletionService, AccountDeletionService>();
+        services.AddScoped<IAccountDeletionStore, AccountDeletionStore>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
         services.AddScoped<IExternalIdentityTokenValidator, ExternalIdentityTokenValidator>();
         services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();

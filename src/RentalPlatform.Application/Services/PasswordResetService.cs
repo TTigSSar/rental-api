@@ -85,9 +85,9 @@ public sealed class PasswordResetService : IPasswordResetService
 
         var state = await _reads.FindAccountStateAsync(normalized, cancellationToken);
 
-        // Unknown, blocked and unverified (pending) accounts all look the same from outside: nothing sent.
+        // Unknown, deleted (ADR-056), blocked and unverified (pending) accounts all look the same from outside: nothing sent.
         // A verified external-only account (empty hash) is allowed on purpose (ADR-035 section 5).
-        if (state is null || state.IsBlocked || !state.IsEmailConfirmed)
+        if (state is null || state.IsDeleted || state.IsBlocked || !state.IsEmailConfirmed)
         {
             return ServiceResult<bool>.Success(true);
         }
@@ -206,7 +206,7 @@ public sealed class PasswordResetService : IPasswordResetService
         }
 
         // A blocked or unverified owner never gets a usable link (ADR-035 section 4).
-        if (view.UserIsBlocked || !view.UserIsEmailConfirmed)
+        if (view.UserIsDeleted || view.UserIsBlocked || !view.UserIsEmailConfirmed)
         {
             return (null, Error(ErrorCodes.TokenInvalid, "The password reset link is invalid."));
         }

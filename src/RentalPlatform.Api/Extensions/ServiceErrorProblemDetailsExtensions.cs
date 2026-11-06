@@ -23,6 +23,14 @@ public static class ServiceErrorProblemDetailsExtensions
 
         problemDetails.Extensions["errorCode"] = error.Code;
 
+        if (error.Extensions is { } extensions)
+        {
+            foreach (var (key, value) in extensions)
+            {
+                problemDetails.Extensions[key] = value;
+            }
+        }
+
         return problemDetails;
     }
 }

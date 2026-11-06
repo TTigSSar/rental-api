@@ -18,6 +18,12 @@ public interface INotificationEmitter
     /// <summary>The owner declined a booking → notify the renter.</summary>
     Task BookingDeclinedAsync(Booking booking, User owner, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// An owner deleted their account while this request was Pending, so it was closed as Rejected (ADR-056)
+    /// -> notify the renter. The actor is the localized "Deleted user": no name, no avatar, never a link.
+    /// </summary>
+    Task BookingDeclinedByDeletedOwnerAsync(Booking booking, CancellationToken cancellationToken = default);
+
     /// <summary>A listing passed moderation → notify the owner.</summary>
     Task ListingApprovedAsync(Listing listing, CancellationToken cancellationToken = default);
 

@@ -27,7 +27,7 @@ public sealed class PasswordResetStore : IPasswordResetStore
             // blocked (or is not verified) a moment after the caller looked. The no-op SET still takes
             // the row's exclusive lock, which serialises this against a concurrent reset.
             var locked = await _dbContext.Users
-                .Where(user => user.Id == token.UserId && user.IsEmailConfirmed && !user.IsBlocked)
+                .Where(user => user.Id == token.UserId && user.IsEmailConfirmed && !user.IsBlocked && user.DeletedAt == null)
                 .ExecuteUpdateAsync(set => set.SetProperty(user => user.CreatedAt, user => user.CreatedAt), cancellationToken);
             if (locked != 1)
             {
@@ -88,7 +88,7 @@ public sealed class PasswordResetStore : IPasswordResetStore
         // Users first (lock order). Blocked or unverified accounts are refused here even if they
         // became so after the caller's read; a reset never verifies a pending account (ADR-035 section 4).
         var updated = await _dbContext.Users
-            .Where(user => user.Id == userId && !user.IsBlocked && user.IsEmailConfirmed)
+            .Where(user => user.Id == userId && !user.IsBlocked && user.IsEmailConfirmed && user.DeletedAt == null)
             .ExecuteUpdateAsync(set => set
                 .SetProperty(user => user.PasswordHash, newPasswordHash)
                 // Same UPDATE, same transaction as the token consumption (ADR-055): every older JWT dies with it.

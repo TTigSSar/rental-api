@@ -14,11 +14,16 @@ public sealed class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly IExternalNonceService _externalNonceService;
+    private readonly IAccountDeletionService _accountDeletionService;
 
-    public AuthController(IAuthService authService, IExternalNonceService externalNonceService)
+    public AuthController(
+        IAuthService authService,
+        IExternalNonceService externalNonceService,
+        IAccountDeletionService accountDeletionService)
     {
         _authService = authService;
         _externalNonceService = externalNonceService;
+        _accountDeletionService = accountDeletionService;
     }
 
     [HttpPost("register")]
@@ -225,6 +230,31 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    // ADR-056. Anonymizes the caller's own account. Deliberately NOT refused for a blocked caller (exempt from
+    // the ADR-030 section 11 write block): the service never reads IsBlocked. 401 after a commit comes from the
+    // revoked token (ADR-055), not from here.
+    [HttpDelete("me")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.AuthPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> DeleteAccount(
+        [FromBody] DeleteAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _accountDeletionService.DeleteCurrentUserAsync(request, cancellationToken);
+        if (result.IsSuccess)
+        {
+            return NoContent();
+        }
+
+        return FromError(result.Error);
+    }
+
     [HttpPut("me/preferred-language")]
     [Authorize]
     [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
@@ -395,6 +425,10 @@ public sealed class AuthController : ControllerBase
             "auth.password_not_set" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.password_unchanged" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
             "auth.password_too_long" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "account.invalid_confirmation" => BadRequest(error.ToProblemDetails(StatusCodes.Status400BadRequest)),
+            "account.admin_cannot_delete" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
+            "account.has_open_rentals" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "account.state_changed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "auth.home_point_in_use" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             // 400: the pin is simply in the wrong place and the user can move it. Reached from both
             // POST /register (optional home-point step) and PUT /me/home-point.

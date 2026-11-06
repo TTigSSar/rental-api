@@ -83,5 +83,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(user => user.HomeDistrictId);
+
+        // Account deletion (ADR-056): NULL = active account.
+        builder.Property(user => user.DeletedAt)
+            .HasColumnType("datetime2");
     }
 }

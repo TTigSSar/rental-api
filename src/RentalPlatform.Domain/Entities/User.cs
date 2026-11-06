@@ -60,6 +60,9 @@ public sealed class User
     // no-ops leave this untouched). Surfaced on CurrentUserResponse.HomePoint only — self-view only.
     public DateTime? HomePointUpdatedAt { get; set; }
 
+    // Account deletion (ADR-056): the row is anonymized, not removed. Non-null means the account was deleted.
+    public DateTime? DeletedAt { get; set; }
+
     public ICollection<Listing> Listings { get; set; } = new List<Listing>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
     public ICollection<Favorite> Favorites { get; set; } = new List<Favorite>();

@@ -57,7 +57,11 @@ public sealed class BookingsStore : IBookingsStore
             .AsNoTracking()
             .AnyAsync(listing => listing.Id == listingId && listing.Owner.DeletedAt != null, cancellationToken);
 
-    public async Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default)
+    public async Task<bool> TryCreateBookingAsync(
+        Booking booking,
+        Guid? districtId,
+        Guid categoryId,
+        CancellationToken cancellationToken = default)
     {
         // ADR-056 amendment 6, and the lock order of ADR-029 (Users before everything else). An account deletion
         // holds the owner's Users row lock from its first statement until it commits and then writes Listings and
@@ -112,8 +116,44 @@ public sealed class BookingsStore : IBookingsStore
 
         await _dbContext.Bookings.AddAsync(booking, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // P3-3: count the persisted request in the same transaction, last, so a rollback undoes both.
+        await IncrementDemandCountAsync(
+            YerevanCalendar.DateOf(booking.CreatedAt), districtId, categoryId, cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    // EF only (no raw SQL, so the SQLite test host works). Under SERIALIZABLE the UPDATE takes key-range
+    // locks on the sought key even when no row matches, so a concurrent first-row creator blocks until the
+    // winner commits and then updates the inserted row. The null-district predicate is a literal IS NULL
+    // (not "= @p") so it seeks the clustered (Day, DistrictId, CategoryId) key.
+    private async Task IncrementDemandCountAsync(
+        DateOnly day, Guid? districtId, Guid categoryId, CancellationToken cancellationToken)
+    {
+        var cells = _dbContext.DemandDailyCounts.Where(count => count.Day == day && count.CategoryId == categoryId);
+        cells = districtId is { } district
+            ? cells.Where(count => count.DistrictId == district)
+            : cells.Where(count => count.DistrictId == null);
+
+        var updated = await cells.ExecuteUpdateAsync(
+            update => update.SetProperty(count => count.BookingRequests, count => count.BookingRequests + 1),
+            cancellationToken);
+        if (updated > 0)
+        {
+            return;
+        }
+
+        _dbContext.DemandDailyCounts.Add(new DemandDailyCount
+        {
+            Id = Guid.NewGuid(),
+            Day = day,
+            DistrictId = districtId,
+            CategoryId = categoryId,
+            BookingRequests = 1
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<bool> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default)

@@ -150,7 +150,8 @@ public sealed class BookingsService : IBookingsService
 
         // Atomic overlap-then-insert. Blocks if any Pending OR Approved booking covers the
         // requested range — preventing both duplicate-request and racing concurrent creates.
-        var added = await _bookingsStore.TryCreateBookingAsync(booking, cancellationToken);
+        var added = await _bookingsStore.TryCreateBookingAsync(
+            booking, listing.DistrictId, listing.CategoryId, cancellationToken);
         if (!added)
         {
             // The store also refuses, inside its transaction, when the owner's deletion committed after the

@@ -354,6 +354,35 @@ namespace RentalPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("ConversationParticipants", (string)null);
                 });
 
+            modelBuilder.Entity("RentalPlatform.Domain.Entities.DemandDailyCount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("BookingRequests")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("DistrictId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
+
+                    b.HasIndex("Day", "DistrictId", "CategoryId")
+                        .IsUnique();
+
+                    SqlServerIndexBuilderExtensions.IsClustered(b.HasIndex("Day", "DistrictId", "CategoryId"));
+
+                    b.ToTable("DemandDailyCounts", (string)null);
+                });
+
             modelBuilder.Entity("RentalPlatform.Domain.Entities.District", b =>
                 {
                     b.Property<Guid>("Id")

@@ -166,6 +166,16 @@ public sealed class SqlServerTestDatabase : IDisposable
             .UseSqlServer(_databaseConnectionString)
             .Options);
 
+    // Same as CreateContext() but with EF interceptors, e.g. to force a failure at a chosen point.
+    public AppDbContext CreateContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_databaseConnectionString)
+            .AddInterceptors(interceptors)
+            .Options);
+
+    /// <summary>The connection string of this throwaway database (for raw ADO.NET checks).</summary>
+    public string ConnectionString => _databaseConnectionString;
+
     /// <summary>
     /// Inserts minimal Users rows with raw SQL, naming only the columns that have existed since
     /// InitialCreate.

@@ -13,4 +13,10 @@ public static class YerevanCalendar
         var yerevanNow = utcNow.UtcDateTime + Offset;
         return DateTime.SpecifyKind(yerevanNow.Date - Offset, DateTimeKind.Utc);
     }
+
+    /// <summary>The Yerevan calendar day a UTC instant falls on (same arithmetic as the demand backfill SQL).</summary>
+    public static DateOnly DateOf(DateTime utc) => DateOnly.FromDateTime(utc + Offset);
+
+    /// <summary>The Yerevan calendar day of a UTC instant.</summary>
+    public static DateOnly DateOf(DateTimeOffset utc) => DateOf(utc.UtcDateTime);
 }

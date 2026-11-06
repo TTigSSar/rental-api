@@ -16,7 +16,16 @@ public interface IBookingsStore
     // transaction, the listing's owner turned out to be deleted (ADR-056 amendment 6: the read blocks on a deletion
     // in progress, which holds the owner's row lock until it commits).
     // Implemented under a SERIALIZABLE transaction so concurrent creates cannot both succeed.
-    Task<bool> TryCreateBookingAsync(Booking booking, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Atomic overlap-check, insert and demand-counter increment (P3-3). <paramref name="districtId"/> and
+    /// <paramref name="categoryId"/> are the listing's values at request time, passed by the caller so the
+    /// store takes no Listings lock inside its transaction before the Users read.
+    /// </summary>
+    Task<bool> TryCreateBookingAsync(
+        Booking booking,
+        Guid? districtId,
+        Guid categoryId,
+        CancellationToken cancellationToken = default);
 
     // Atomically re-checks for an Approved/Active overlap (excluding this booking) and, if absent,
     // persists the already-mutated tracked booking. Returns false when a blocking overlap exists.

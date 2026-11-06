@@ -209,7 +209,7 @@ public sealed class AccountDeletionGuardsTests
         var store = new BookingsStore(context);
         var booking = TestData.Booking(Guid.NewGuid(), ListingId, RenterId, TestData.Today.AddDays(6), TestData.Today.AddDays(7), BookingStatus.Pending);
 
-        var added = await store.TryCreateBookingAsync(booking);
+        var added = await store.TryCreateBookingAsync(booking, null, Guid.NewGuid());
 
         Assert.False(added);
         Assert.True(await store.IsListingOwnerDeletedAsync(ListingId));

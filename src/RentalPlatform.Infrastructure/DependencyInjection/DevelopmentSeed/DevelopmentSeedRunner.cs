@@ -782,9 +782,71 @@ internal sealed class DevelopmentSeedRunner
         if (newRows.Count > 0)
         {
             await _dbContext.Bookings.AddRangeAsync(newRows, cancellationToken);
+            await AddDemandCountsAsync(newRows, cancellationToken);
         }
 
         return newRows.Count;
+    }
+
+    // P3-3: the seeded bookings are counted in the demand table, aggregated per (Yerevan day, district,
+    // category), as tracked entities so they are saved by the SAME SaveChanges as the bookings (no orphan
+    // counts if that save fails). Only bookings NOT already present (the caller's existing-id guard) are
+    // passed in, so a re-run never double-counts; existing cells (migration backfill, live bookings) are
+    // incremented rather than duplicated.
+    private async Task AddDemandCountsAsync(IReadOnlyList<Booking> newBookings, CancellationToken cancellationToken)
+    {
+        var listingIds = newBookings.Select(booking => booking.ListingId).Distinct().ToArray();
+
+        var metadata = (await _dbContext.Listings
+                .AsNoTracking()
+                .Where(listing => listingIds.Contains(listing.Id))
+                .Select(listing => new { listing.Id, listing.DistrictId, listing.CategoryId })
+                .ToListAsync(cancellationToken))
+            .ToDictionary(row => row.Id, row => (row.DistrictId, row.CategoryId));
+
+        // Listings seeded earlier in this same run are tracked but not saved yet; they win over the DB.
+        foreach (var entry in _dbContext.Listings.Local.Where(listing => listingIds.Contains(listing.Id)))
+        {
+            metadata[entry.Id] = (entry.DistrictId, entry.CategoryId);
+        }
+
+        var cells = newBookings
+            .Where(booking => metadata.ContainsKey(booking.ListingId))
+            .GroupBy(booking =>
+            {
+                var (districtId, categoryId) = metadata[booking.ListingId];
+                return (Day: YerevanCalendar.DateOf(booking.CreatedAt), DistrictId: districtId, CategoryId: categoryId);
+            })
+            .ToList();
+        if (cells.Count == 0)
+        {
+            return;
+        }
+
+        var minDay = cells.Min(cell => cell.Key.Day);
+        var maxDay = cells.Max(cell => cell.Key.Day);
+        var existing = (await _dbContext.DemandDailyCounts
+                .Where(count => count.Day >= minDay && count.Day <= maxDay)
+                .ToListAsync(cancellationToken))
+            .ToDictionary(count => (count.Day, count.DistrictId, count.CategoryId));
+
+        foreach (var cell in cells)
+        {
+            if (existing.TryGetValue(cell.Key, out var row))
+            {
+                row.BookingRequests += cell.Count();
+                continue;
+            }
+
+            _dbContext.DemandDailyCounts.Add(new DemandDailyCount
+            {
+                Id = Guid.NewGuid(),
+                Day = cell.Key.Day,
+                DistrictId = cell.Key.DistrictId,
+                CategoryId = cell.Key.CategoryId,
+                BookingRequests = cell.Count()
+            });
+        }
     }
 
     private async Task<int> SeedReviewsAsync(

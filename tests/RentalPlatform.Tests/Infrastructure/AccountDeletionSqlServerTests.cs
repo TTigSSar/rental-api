@@ -116,7 +116,7 @@ public sealed class AccountDeletionSqlServerTests
         var start = TestData.Today.AddDays(6);
         var booking = TestData.Booking(Guid.NewGuid(), UserListingId, OtherId, start, start.AddDays(1), BookingStatus.Pending);
         await using var createContext = db.CreateContext();
-        var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking));
+        var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking, null, Guid.NewGuid()));
 
         await Task.Delay(1500);
         Assert.False(create.IsCompleted, "the create must wait on the owner's row lock while the deletion is open");

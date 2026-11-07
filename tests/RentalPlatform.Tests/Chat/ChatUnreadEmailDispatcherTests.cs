@@ -238,13 +238,55 @@ public sealed class ChatUnreadEmailDispatcherTests
     }
 
     [Fact]
-    public async Task A_Moderation_Thread_Is_Never_Emailed()
+    public async Task A_Moderation_Thread_Emails_The_Member_Only_Never_The_Admin_And_Has_No_Toy_Row()
     {
         using var h = new Harness();
-        await h.SeedConversationAsync(kind: ConversationKind.Moderation);
-        await h.AddLineAsync(OwnerId, Old);
+        // By convention OwnerId is the moderator and RenterId the member.
+        await h.SeedConversationAsync((admin, _) => admin.Role = UserRole.Admin, kind: ConversationKind.Moderation);
+        await h.AddLineAsync(OwnerId, Old, MessageType.ModerationNote);
+        await h.AddLineAsync(null, Old, MessageType.System); // unread for the admin too, but never emailed
+
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+
+        var email = Assert.Single(h.Email.ChatUnreadSent);
+        Assert.Equal("renter@test.local", email.To);
+        Assert.True(email.IsModeration);
+        Assert.Null((await h.ParticipantAsync(OwnerId)).ChatEmailSentAt);
+        Assert.Equal($"https://dorent.test/chat/{ConversationId}", email.OpenChatUrl);
+
+        var rendered = ChatUnreadEmailTemplate.Render(email);
+        Assert.Equal("Модерация DoRent: новое сообщение", rendered.Subject);
+        Assert.DoesNotContain("<table", rendered.HtmlBody);
+        Assert.DoesNotContain("<img", rendered.HtmlBody);
+        Assert.DoesNotContain(email.ToyTitle, rendered.HtmlBody + rendered.TextBody);
+        Assert.Contains(email.OpenChatUrl, rendered.HtmlBody);
+    }
+
+    [Fact]
+    public async Task A_Moderation_Thread_Follows_The_Same_Rules()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync((admin, member) => { admin.Role = UserRole.Admin; member.ChatEmailsEnabled = false; },
+            kind: ConversationKind.Moderation);
+        await h.AddLineAsync(OwnerId, Old, MessageType.ModerationNote);
 
         Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+    }
+
+    [Theory]
+    [InlineData("en", "DoRent Moderation: new message")]
+    [InlineData("ru", "Модерация DoRent: новое сообщение")]
+    [InlineData("hy", "DoRent մոդերացիա՝ նոր հաղորդագրություն")]
+    [InlineData(null, "DoRent Moderation: new message")]
+    public void Moderation_Heading_Is_Fixed_And_Localised(string? language, string expected)
+    {
+        foreach (var human in new[] { true, false })
+        {
+            var email = Email(language, hasHuman: human, firstName: "Olga") with { IsModeration = true };
+
+            Assert.Equal(expected, ChatUnreadEmailTemplate.Heading(email));
+            Assert.Equal(expected, ChatUnreadEmailTemplate.Render(email).Subject);
+        }
     }
 
     [Fact]

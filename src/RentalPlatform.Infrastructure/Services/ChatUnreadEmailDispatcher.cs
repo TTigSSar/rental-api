@@ -69,13 +69,15 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
 
         // The unread definition is the one ConversationsStore.ListForUserAsync uses (ADR-001): after the
         // participant's read cursor, not their own message, not a line they caused (ActorUserId).
-        // Booking threads only: a Moderation thread has no toy and its participants are support (ADR-049).
+        // Booking threads: renter and owner. Moderation threads: the member only (RenterId by convention); the
+        // moderator (OwnerId) is support and never gets these emails (ADR-049), also guarded by the Admin role check.
         var candidates = await (
             from participant in db.ConversationParticipants.AsNoTracking()
             join conversation in db.Conversations.AsNoTracking() on participant.ConversationId equals conversation.Id
             join user in db.Users.AsNoTracking() on participant.UserId equals user.Id
-            where conversation.Kind == ConversationKind.Booking
-                && (participant.UserId == conversation.RenterId || participant.UserId == conversation.OwnerId)
+            where ((conversation.Kind == ConversationKind.Booking
+                    && (participant.UserId == conversation.RenterId || participant.UserId == conversation.OwnerId))
+                || (conversation.Kind == ConversationKind.Moderation && participant.UserId == conversation.RenterId))
                 && user.ChatEmailsEnabled
                 && user.IsEmailConfirmed
                 && !user.IsBlocked
@@ -104,7 +106,8 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
                 user.Email,
                 user.PreferredLanguage,
                 conversation.ToyTitle,
-                conversation.ToyImageUrl))
+                conversation.ToyImageUrl,
+                conversation.Kind == ConversationKind.Moderation))
             .Take(MaxEmailsPerRun)
             .ToListAsync(cancellationToken);
 
@@ -179,6 +182,7 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
             ToyTitle: candidate.ToyTitle ?? string.Empty,
             ToyImageUrl: AbsoluteImageUrl(baseUrl, candidate.ToyImageUrl),
             HasHumanMessage: humanSender is not null,
+            IsModeration: candidate.IsModeration,
             SenderFirstName: humanSender is { IsDeleted: false } ? humanSender.FirstName : null,
             SenderDeleted: humanSender?.IsDeleted ?? false,
             OpenChatUrl: $"{baseUrl}/chat/{candidate.ConversationId}",
@@ -235,5 +239,6 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
         string Email,
         string? PreferredLanguage,
         string? ToyTitle,
-        string? ToyImageUrl);
+        string? ToyImageUrl,
+        bool IsModeration);
 }

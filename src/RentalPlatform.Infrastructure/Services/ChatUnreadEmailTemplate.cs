@@ -12,6 +12,7 @@ public static class ChatUnreadEmailTemplate
     private sealed record Copy(
         Func<string, string, string> WroteHeading,
         Func<string, string> NewHeading,
+        string ModerationHeading,
         string DeletedUser,
         string Cta,
         string Why,
@@ -21,6 +22,7 @@ public static class ChatUnreadEmailTemplate
     private static readonly Copy English = new(
         WroteHeading: (name, toy) => $"{name} wrote to you about {toy}",
         NewHeading: toy => $"New in your chat about {toy}",
+        ModerationHeading: "DoRent Moderation: new message",
         DeletedUser: "Deleted user",
         Cta: "Open chat",
         Why: "You are getting this because you have a conversation on DoRent and the message has been unread for a while.",
@@ -32,6 +34,7 @@ public static class ChatUnreadEmailTemplate
     private static readonly Copy Russian = new(
         WroteHeading: (name, toy) => $"{name}: новое сообщение об игрушке «{toy}»",
         NewHeading: toy => $"Новое в чате об игрушке «{toy}»",
+        ModerationHeading: "Модерация DoRent: новое сообщение",
         DeletedUser: "Удалённый пользователь",
         Cta: "Открыть чат",
         Why: "Вы получили это письмо, потому что у вас есть переписка на DoRent и сообщение какое-то время остаётся непрочитанным.",
@@ -43,6 +46,7 @@ public static class ChatUnreadEmailTemplate
     private static readonly Copy Armenian = new(
         WroteHeading: (name, toy) => $"{name}: նոր հաղորդագրություն «{toy}» խաղալիքի մասին",
         NewHeading: toy => $"Նոր բան Ձեր զրույցում՝ «{toy}» խաղալիքի մասին",
+        ModerationHeading: "DoRent մոդերացիա՝ նոր հաղորդագրություն",
         DeletedUser: "Ջնջված օգտատեր",
         Cta: "Բացել զրույցը",
         Why: "Դուք ստանում եք այս նամակը, քանի որ DoRent-ում զրույց ունեք, և հաղորդագրությունը որոշ ժամանակ չի կարդացվել։",
@@ -71,6 +75,12 @@ public static class ChatUnreadEmailTemplate
     public static string Heading(ChatUnreadEmail email)
     {
         var copy = Select(email.PreferredLanguage);
+        if (email.IsModeration)
+        {
+            // Same heading whether the unread line is a moderator note or a system line.
+            return copy.ModerationHeading;
+        }
+
         if (!email.HasHumanMessage)
         {
             return copy.NewHeading(email.ToyTitle);
@@ -101,10 +111,12 @@ public static class ChatUnreadEmailTemplate
             $"<div style=\"padding:20px 32px;border-bottom:1px solid {border};font-size:28px;font-weight:700;color:#C24600;\">DoRent</div>" +
             "<div style=\"padding:32px;\">" +
             $"<h1 style=\"margin:0 0 20px;font-size:24px;line-height:32px;font-weight:700;color:#1f2937;\">{WebUtility.HtmlEncode(heading)}</h1>" +
-            $"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin:0 0 20px;border:1px solid {border};border-radius:14px;\"><tr>" +
-            $"<td style=\"padding:12px;width:64px;vertical-align:middle;\">{thumbnail}</td>" +
-            $"<td style=\"padding:12px 12px 12px 2px;vertical-align:middle;font-size:16px;line-height:22px;font-weight:600;\">{WebUtility.HtmlEncode(email.ToyTitle)}</td>" +
-            "</tr></table>" +
+            (email.IsModeration
+                ? string.Empty
+                : $"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin:0 0 20px;border:1px solid {border};border-radius:14px;\"><tr>" +
+                  $"<td style=\"padding:12px;width:64px;vertical-align:middle;\">{thumbnail}</td>" +
+                  $"<td style=\"padding:12px 12px 12px 2px;vertical-align:middle;font-size:16px;line-height:22px;font-weight:600;\">{WebUtility.HtmlEncode(email.ToyTitle)}</td>" +
+                  "</tr></table>") +
             $"<a href=\"{WebUtility.HtmlEncode(email.OpenChatUrl)}\" style=\"display:inline-block;min-height:24px;padding:12px 32px;border-radius:999px;" +
             "background:#C24600;color:#ffffff;font-size:16px;font-weight:600;line-height:24px;text-decoration:none;\">" +
             $"{WebUtility.HtmlEncode(copy.Cta)}</a>" +
@@ -117,7 +129,7 @@ public static class ChatUnreadEmailTemplate
 
         var text =
             $"{heading}\n\n" +
-            $"{email.ToyTitle}\n\n" +
+            (email.IsModeration ? string.Empty : $"{email.ToyTitle}\n\n") +
             $"{copy.Cta}: {email.OpenChatUrl}\n\n" +
             $"{copy.Why}\n\n" +
             $"{copy.Unsubscribe}: {email.UnsubscribeUrl}\n" +

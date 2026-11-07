@@ -7,6 +7,7 @@ namespace RentalPlatform.Application.DTOs;
 /// <param name="HasHumanMessage">True when the unread lines include a non-system message.</param>
 /// <param name="SenderFirstName">First name of the human sender; null when there is none or the sender is deleted.</param>
 /// <param name="SenderDeleted">True when the human sender's account is deleted (the email says "Deleted user").</param>
+/// <param name="IsModeration">True for a moderation thread: fixed "DoRent Moderation" heading and no toy row.</param>
 public sealed record ChatUnreadEmail(
     string To,
     string? PreferredLanguage,
@@ -17,4 +18,5 @@ public sealed record ChatUnreadEmail(
     bool SenderDeleted,
     string OpenChatUrl,
     string UnsubscribeUrl,
-    string SettingsUrl);
+    string SettingsUrl,
+    bool IsModeration = false);

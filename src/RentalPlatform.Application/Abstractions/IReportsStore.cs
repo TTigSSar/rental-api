@@ -53,17 +53,16 @@ public interface IReportsStore
     Task<IReadOnlyDictionary<Guid, string?>> GetListingPrimaryImageUrlsAsync(
         IReadOnlyCollection<Guid> listingIds, CancellationToken cancellationToken = default);
 
-    /// <summary>Avatar URL per user id, for TargetImageUrl resolution on User-target rows.</summary>
-    Task<IReadOnlyDictionary<Guid, string?>> GetUserAvatarUrlsAsync(
-        IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default);
-
-    /// <summary>Which of the given user ids belong to deleted accounts (DeletedAt set), for TargetIsDeleted.</summary>
-    Task<IReadOnlySet<Guid>> GetDeletedUserIdsAsync(
+    /// <summary>Avatar (null for deleted accounts) and deleted flag per user id, in one query, for
+    /// TargetImageUrl / TargetIsDeleted resolution on User-target rows. Unknown ids are absent.</summary>
+    Task<IReadOnlyDictionary<Guid, ReportTargetUser>> GetReportTargetUsersAsync(
         IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record ReportsPage(IReadOnlyCollection<Report> Items, int TotalCount);
+
+public sealed record ReportTargetUser(string? AvatarUrl, bool IsDeleted);
 
 public sealed record ReportStatusCounts(int Open, int Resolved, int Dismissed, int All);

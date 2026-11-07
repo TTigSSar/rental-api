@@ -264,7 +264,7 @@ public sealed class AdminReportsService : IAdminReportsService
         return ServiceResult<User>.Success(user);
     }
 
-    // Resolves TargetImageUrl (listing primary image / user avatar / null for Message) in two
+    // Resolves TargetImageUrl (listing primary image / user avatar / null for Message) in
     // batched queries — never one query per row — same convention as
     // AdminListingsService/AdminListingsStore.GetOwnerListingStatsAsync.
     private async Task<List<AdminReportRowResponse>> MapRowsAsync(
@@ -284,12 +284,9 @@ public sealed class AdminReportsService : IAdminReportsService
         var listingImages = listingIds.Count == 0
             ? new Dictionary<Guid, string?>()
             : await _store.GetListingPrimaryImageUrlsAsync(listingIds, cancellationToken);
-        var userAvatars = userIds.Count == 0
-            ? new Dictionary<Guid, string?>()
-            : await _store.GetUserAvatarUrlsAsync(userIds, cancellationToken);
-        var deletedUserIds = userIds.Count == 0
-            ? new HashSet<Guid>()
-            : await _store.GetDeletedUserIdsAsync(userIds, cancellationToken);
+        var targetUsers = userIds.Count == 0
+            ? new Dictionary<Guid, ReportTargetUser>()
+            : await _store.GetReportTargetUsersAsync(userIds, cancellationToken);
 
         return reports.Select(report => new AdminReportRowResponse
         {
@@ -300,12 +297,11 @@ public sealed class AdminReportsService : IAdminReportsService
             TargetImageUrl = report.TargetType switch
             {
                 ReportTargetType.Listing => listingImages.GetValueOrDefault(report.TargetId),
-                ReportTargetType.User => deletedUserIds.Contains(report.TargetId)
-                    ? null
-                    : userAvatars.GetValueOrDefault(report.TargetId),
+                ReportTargetType.User => targetUsers.GetValueOrDefault(report.TargetId)?.AvatarUrl,
                 _ => null
             },
-            TargetIsDeleted = report.TargetType == ReportTargetType.User && deletedUserIds.Contains(report.TargetId),
+            TargetIsDeleted = report.TargetType == ReportTargetType.User
+                && targetUsers.GetValueOrDefault(report.TargetId)?.IsDeleted == true,
             ReasonCode = report.ReasonCode,
             Detail = report.Detail,
             Severity = report.Severity,

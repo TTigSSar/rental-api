@@ -133,6 +133,25 @@ public sealed class ReportsStore : IReportsStore
         return rows.ToDictionary(row => row.Id, row => row.AvatarUrl);
     }
 
+    public async Task<IReadOnlySet<Guid>> GetDeletedUserIdsAsync(
+        IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default)
+    {
+        if (userIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        var ids = userIds.Distinct().ToList();
+
+        var deleted = await _dbContext.Users
+            .AsNoTracking()
+            .Where(user => ids.Contains(user.Id) && user.DeletedAt != null)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+
+        return deleted.ToHashSet();
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _dbContext.SaveChangesAsync(cancellationToken);
 

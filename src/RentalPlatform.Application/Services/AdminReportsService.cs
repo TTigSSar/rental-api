@@ -287,6 +287,9 @@ public sealed class AdminReportsService : IAdminReportsService
         var userAvatars = userIds.Count == 0
             ? new Dictionary<Guid, string?>()
             : await _store.GetUserAvatarUrlsAsync(userIds, cancellationToken);
+        var deletedUserIds = userIds.Count == 0
+            ? new HashSet<Guid>()
+            : await _store.GetDeletedUserIdsAsync(userIds, cancellationToken);
 
         return reports.Select(report => new AdminReportRowResponse
         {
@@ -297,9 +300,12 @@ public sealed class AdminReportsService : IAdminReportsService
             TargetImageUrl = report.TargetType switch
             {
                 ReportTargetType.Listing => listingImages.GetValueOrDefault(report.TargetId),
-                ReportTargetType.User => userAvatars.GetValueOrDefault(report.TargetId),
+                ReportTargetType.User => deletedUserIds.Contains(report.TargetId)
+                    ? null
+                    : userAvatars.GetValueOrDefault(report.TargetId),
                 _ => null
             },
+            TargetIsDeleted = report.TargetType == ReportTargetType.User && deletedUserIds.Contains(report.TargetId),
             ReasonCode = report.ReasonCode,
             Detail = report.Detail,
             Severity = report.Severity,

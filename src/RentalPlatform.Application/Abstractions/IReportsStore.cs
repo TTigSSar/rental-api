@@ -57,6 +57,10 @@ public interface IReportsStore
     Task<IReadOnlyDictionary<Guid, string?>> GetUserAvatarUrlsAsync(
         IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default);
 
+    /// <summary>Which of the given user ids belong to deleted accounts (DeletedAt set), for TargetIsDeleted.</summary>
+    Task<IReadOnlySet<Guid>> GetDeletedUserIdsAsync(
+        IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

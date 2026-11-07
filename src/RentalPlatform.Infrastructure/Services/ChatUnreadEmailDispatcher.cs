@@ -27,6 +27,9 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
     /// <summary>An unread line older than this never counts (ADR-059): no stale-backlog email after downtime.</summary>
     public static readonly TimeSpan MaxUnreadAge = TimeSpan.FromHours(48);
 
+    /// <summary>After the shared send budget refuses, the sweep does not call it again for this long.</summary>
+    public static readonly TimeSpan BudgetBackoff = TimeSpan.FromMinutes(30);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IChatEmailUnsubscribeTokens _tokens;
     private readonly TimeProvider _timeProvider;
@@ -41,6 +44,7 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
     // the shared budget). Only the sweep loop touches it.
     private readonly Queue<DateTimeOffset> _chatSends = new();
     private DateTimeOffset? _chatCapWarnedAt;
+    private DateTimeOffset? _budgetBackoffUntil;
 
     public ChatUnreadEmailDispatcher(
         IServiceScopeFactory scopeFactory,
@@ -125,6 +129,12 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
             return 0;
         }
 
+        // Shared budget refused recently: do not probe (and re-log Critical) again until the back-off passes.
+        if (_budgetBackoffUntil is { } until && nowOffset < until)
+        {
+            return 0;
+        }
+
         var now = nowOffset.UtcDateTime;
         var cutoff = now - UnreadThreshold;
         var oldestCounted = now - MaxUnreadAge;
@@ -153,17 +163,26 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
                 .Where(message => message.ConversationId == conversation.Id
                     && message.SenderId != participant.UserId
                     && (message.ActorUserId == null || message.ActorUserId != participant.UserId)
+                    && (participant.LastReadAt == null || message.CreatedAt > participant.LastReadAt))
+                .Min(message => (DateTime?)message.CreatedAt)
+            let oldestCountedUnread = db.ChatMessages
+                .Where(message => message.ConversationId == conversation.Id
+                    && message.SenderId != participant.UserId
+                    && (message.ActorUserId == null || message.ActorUserId != participant.UserId)
                     && message.CreatedAt >= oldestCounted
                     && (participant.LastReadAt == null || message.CreatedAt > participant.LastReadAt))
                 .Min(message => (DateTime?)message.CreatedAt)
+            // Trigger: the oldest line inside the 48 h age cap is older than 15 minutes.
             // One email per unread streak. Re-armed when the recipient has read the conversation since the last
-            // email, i.e. the oldest unread line is newer than the email. This is not written as
+            // email, i.e. the oldest unread line is newer than the email. The re-arm check uses the UNCAPPED
+            // oldest unread line: a line that merely aged out of the 48 h window is still unread, so it must
+            // not make a newer line look like a new streak. This is not written as
             // "LastReadAt > ChatEmailSentAt": MarkReadAsync sets LastReadAt to the latest message's CreatedAt,
             // not to the time of the read, so after a real read LastReadAt is older than the email and that
             // comparison would never re-arm. Whenever LastReadAt > ChatEmailSentAt this holds too.
-            where oldestUnread != null && oldestUnread < cutoff
+            where oldestCountedUnread != null && oldestCountedUnread < cutoff
                 && (participant.ChatEmailSentAt == null || oldestUnread > participant.ChatEmailSentAt)
-            orderby oldestUnread
+            orderby oldestCountedUnread
             select new Candidate(
                 participant.Id,
                 participant.ConversationId,
@@ -196,7 +215,10 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
             if (!_budget.TryAcquire())
             {
                 ReleaseChatCap();
-                break; // the budget logged Critical
+                // The budget logged Critical on this refusal. Stay quiet for a while so a long exhaustion is
+                // not re-logged (and re-probed) on every 60 s sweep.
+                _budgetBackoffUntil = nowOffset + BudgetBackoff;
+                break;
             }
 
             // Claim BEFORE sending (at-most-once, ADR-029): the update only matches while the row still holds

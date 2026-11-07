@@ -454,13 +454,44 @@ public sealed class ChatUnreadEmailDispatcherTests
         Assert.Null((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
         Assert.Null((await h.ParticipantAsync(OwnerId)).ChatEmailSentAt);
 
+        h.Clock.Advance(ChatUnreadEmailDispatcher.BudgetBackoff);
         h.Budget.Remaining = 1; // only one send left: exactly one goes, the other stays eligible
         Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
         Assert.Equal(1, h.Budget.Acquired);
 
+        h.Clock.Advance(ChatUnreadEmailDispatcher.BudgetBackoff); // the second refusal started a new back-off
         h.Budget.Remaining = null;
         Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
         Assert.Equal(2, h.Email.ChatUnreadSent.Count);
+    }
+
+    [Fact]
+    public async Task After_A_Budget_Refusal_The_Shared_Budget_Is_Not_Probed_Again_Until_The_Back_Off_Passes()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, Old);
+        h.Budget.Remaining = 0;
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(1, h.Budget.Attempts);
+
+        // Every 60 s sweep inside the back-off returns quietly without calling the budget (no Critical spam).
+        for (var i = 0; i < 5; i++)
+        {
+            h.Clock.Advance(ChatUnreadEmailDispatcher.SweepInterval);
+            Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        }
+
+        Assert.Equal(1, h.Budget.Attempts);
+
+        // Capacity is back, but the dispatcher stays quiet until the back-off is over.
+        h.Budget.Remaining = null;
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+
+        h.Clock.Advance(ChatUnreadEmailDispatcher.BudgetBackoff);
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(2, h.Budget.Attempts);
     }
 
     [Fact]
@@ -526,6 +557,37 @@ public sealed class ChatUnreadEmailDispatcherTests
     }
 
     [Fact]
+    public async Task A_First_Line_Aging_Out_Of_The_48_Hour_Window_Does_Not_Re_Arm_The_Same_Streak()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, Old); // m1
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        var sentAt = (await h.ParticipantAsync(RenterId)).ChatEmailSentAt;
+        Assert.NotNull(sentAt);
+
+        // The recipient never reads. m2 arrives later; then m1 leaves the 48 h window while m2 is inside it.
+        h.Clock.Advance(TimeSpan.FromHours(2));
+        await h.AddLineAsync(OwnerId, TimeSpan.Zero); // m2
+        h.Clock.Advance(TimeSpan.FromHours(47));
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Single(h.Email.ChatUnreadSent);
+        Assert.Equal(sentAt, (await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
+
+        // Once the recipient reads, a new line that stays unread for 15 minutes starts a new streak.
+        await using (var context = h.Db.CreateContext())
+        {
+            var store = new ConversationsStore(context, NullLogger<ConversationsStore>.Instance);
+            await store.MarkReadAsync(ConversationId, RenterId);
+        }
+
+        await h.AddLineAsync(OwnerId, Old); // m3
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(2, h.Email.ChatUnreadSent.Count);
+    }
+
+    [Fact]
     public async Task A_Closed_Production_Gate_Skips_The_Run_And_Claims_Nothing()
     {
         using var h = new Harness();
@@ -553,6 +615,12 @@ public sealed class ChatUnreadEmailDispatcherTests
         Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
         Assert.NotNull((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
         Assert.Null((await h.ParticipantAsync(OwnerId)).ChatEmailSentAt);
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+
+        // The first counted line ages out of the 48 h window while a newer one stays inside: no second email.
+        h.Clock.Advance(TimeSpan.FromHours(2));
+        await h.AddLineAsync(OwnerId, TimeSpan.Zero);
+        h.Clock.Advance(TimeSpan.FromHours(47));
         Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
     }
 

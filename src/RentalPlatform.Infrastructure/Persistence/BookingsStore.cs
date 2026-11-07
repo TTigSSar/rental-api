@@ -188,6 +188,8 @@ public sealed class BookingsStore : IBookingsStore
         if (hasApprovedOverlap)
         {
             await transaction.RollbackAsync(cancellationToken);
+            // Nothing was written; do not leave the caller's mutated copy (Status = Approved) tracked as Modified.
+            _dbContext.Entry(booking).State = EntityState.Detached;
             return ApproveBookingOutcome.Overlap;
         }
 

@@ -316,6 +316,43 @@ public sealed class SqlServerTestDatabase : IDisposable
             city);
     }
 
+    /// <summary>
+    /// Polls until some request running in THIS database is blocked behind a lock (a non-zero
+    /// blocking_session_id in sys.dm_exec_requests), so a test knows its second session really reached the
+    /// lock and is waiting, instead of guessing with a fixed delay. Pass the tasks driving the sessions as
+    /// <paramref name="watched"/>: if one finishes first, the wait fails at once with its outcome rather than
+    /// running out the timeout. Needs VIEW SERVER STATE on the test login.
+    /// </summary>
+    public async Task WaitForBlockedRequestAsync(TimeSpan timeout, params Task[] watched)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        await using var master = new SqlConnection(MasterConnectionString);
+        await master.OpenAsync();
+        await using var query = master.CreateCommand();
+        query.CommandText =
+            "SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id <> 0 AND database_id = DB_ID(@name);";
+        query.Parameters.AddWithValue("@name", _databaseName);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if ((int)(await query.ExecuteScalarAsync())! > 0)
+            {
+                return;
+            }
+
+            var finished = watched.FirstOrDefault(task => task.IsCompleted);
+            if (finished is not null)
+            {
+                await finished; // rethrows its failure; otherwise it simply did not block
+                throw new InvalidOperationException("A watched session completed without ever being blocked.");
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException($"No request in {_databaseName} became blocked within {timeout}.");
+    }
+
     public async Task SeedAsync(params object[] entities)
     {
         await using var context = CreateContext();

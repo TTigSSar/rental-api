@@ -118,7 +118,7 @@ public sealed class AccountDeletionSqlServerTests
         await using var createContext = db.CreateContext();
         var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking, null, Guid.NewGuid()));
 
-        await Task.Delay(1500);
+        await db.WaitForBlockedRequestAsync(TimeSpan.FromSeconds(30), create);
         Assert.False(create.IsCompleted, "the create must wait on the owner's row lock while the deletion is open");
 
         await session!.ClosePendingBookingsAsync(DateTime.UtcNow);
@@ -147,7 +147,7 @@ public sealed class AccountDeletionSqlServerTests
         await using var createContext = db.CreateContext();
         var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking, null, CategoryId));
 
-        await Task.Delay(1500);
+        await db.WaitForBlockedRequestAsync(TimeSpan.FromSeconds(30), create);
         Assert.False(create.IsCompleted, "the create must wait on the renter's row lock while the deletion is open");
 
         Assert.NotNull(await session!.ClosePendingBookingsAsync(DateTime.UtcNow));
@@ -158,6 +158,76 @@ public sealed class AccountDeletionSqlServerTests
         Assert.False(await create.WaitAsync(TimeSpan.FromSeconds(30)));
         await using var verify = db.CreateContext();
         Assert.Empty(await verify.Bookings.AsNoTracking().ToListAsync());
+    }
+
+    // The opposite ordering: the create's renter read wins and holds its shared lock on the renter row until the
+    // create commits (SERIALIZABLE), so the deletion's first statement waits, then finds the new Pending booking
+    // and closes it (Cancelled). Invariant: no Pending/Approved/Active booking survives for the deleted user.
+    [SqlServerFact]
+    public async Task A_Booking_Create_That_Read_The_Renter_First_Makes_The_Deletion_Wait_And_Is_Then_Closed()
+    {
+        using var db = new SqlServerTestDatabase();
+        await SeedAsync(db);
+
+        var start = TestData.Today.AddDays(6);
+        var bookingId = Guid.NewGuid();
+        var booking = TestData.Booking(bookingId, OtherListingId, UserId, start, start.AddDays(1), BookingStatus.Pending);
+
+        // Pauses the create just before its overlap read, i.e. after both Users reads (their shared locks are held).
+        var pause = new PauseBeforeOverlapReadInterceptor();
+        await using var createContext = db.CreateContext(pause);
+        var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking, null, CategoryId));
+        await Task.WhenAny(pause.Reached.Task, create).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(pause.Reached.Task.IsCompleted, "the create must reach the overlap read (and hold the renter lock)");
+
+        await using var deletionContext = db.CreateContext();
+        var begin = Task.Run(() => new AccountDeletionStore(deletionContext).BeginAsync(UserId));
+        await db.WaitForBlockedRequestAsync(TimeSpan.FromSeconds(30), begin, create);
+        Assert.False(begin.IsCompleted, "the deletion must wait on the renter's row while the create holds its lock");
+
+        pause.Release.SetResult();
+        Assert.True(await create.WaitAsync(TimeSpan.FromSeconds(30)));
+
+        var session = await begin.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.NotNull(session);
+        var closed = await session!.ClosePendingBookingsAsync(DateTime.UtcNow);
+        Assert.NotNull(closed);
+        Assert.Equal(bookingId, Assert.Single(closed!).Booking.Id);
+        await session.EraseAsync(DateTime.UtcNow, "Deleted user");
+        await session.CommitAsync();
+        await session.DisposeAsync();
+
+        await using var verify = db.CreateContext();
+        Assert.NotNull((await verify.Users.AsNoTracking().SingleAsync(u => u.Id == UserId)).DeletedAt);
+        Assert.DoesNotContain(
+            await verify.Bookings.AsNoTracking().Where(b => b.RenterId == UserId || b.Listing.OwnerId == UserId).ToListAsync(),
+            b => b.Status is BookingStatus.Pending or BookingStatus.Approved or BookingStatus.Active);
+        Assert.Equal(BookingStatus.Cancelled, (await verify.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId)).Status);
+    }
+
+    private sealed class PauseBeforeOverlapReadInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private int _fired;
+
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("[Bookings]") && command.CommandText.Contains("[ExpiresAt]")
+                && Interlocked.Exchange(ref _fired, 1) == 0)
+            {
+                Reached.SetResult();
+                await Release.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            }
+
+            return result;
+        }
     }
 
     // Approve read the booking as Pending, then the deletion cancelled it and committed: the approve must lose

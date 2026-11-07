@@ -864,4 +864,102 @@ public sealed class BookingsServiceTests
         Assert.True(result.IsSuccess);
         Assert.Equal(new[] { "cancelled" }, emitter.Calls);
     }
+
+    // ADR-056: the approve lost the compare-and-set (a deletion/cancel closed the booking after the service's read).
+    [Fact]
+    public async Task Approve_Losing_The_Compare_And_Set_Maps_To_NotPending_And_Emits_Nothing()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        var notifications = new FakeNotificationEmitter();
+        var chat = new FakeChatSystemMessageEmitter();
+        await using var context = db.CreateContext();
+        var racing = new CancelAfterReadStore(new BookingsStore(context), db);
+        var service = new BookingsService(
+            new FakeCurrentUserContext(OwnerId), racing, notifications, chat,
+            new ReviewsStore(context),
+            new ConversationsStore(context, NullLogger<ConversationsStore>.Instance));
+
+        var result = await service.ApproveAsync(bookingId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("booking.not_pending", result.Error!.Code);
+        Assert.Empty(notifications.Approved);
+        Assert.Empty(chat.Calls);
+        await using var verify = db.CreateContext();
+        Assert.Equal(BookingStatus.Cancelled, (await verify.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId)).Status);
+    }
+
+    [Fact]
+    public async Task Approve_Leaves_The_Tracked_Booking_Unchanged_So_A_Later_SaveChanges_Writes_No_Booking_Row()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        var bookingId = Guid.NewGuid();
+        await db.SeedAsync(TestData.Booking(
+            bookingId, ListingId, RenterId,
+            Today.AddDays(5), Today.AddDays(8),
+            BookingStatus.Pending,
+            expiresAt: DateTime.UtcNow.AddHours(24)));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, OwnerId).ApproveAsync(bookingId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var entry = Assert.Single(context.ChangeTracker.Entries<Booking>());
+        Assert.Equal(EntityState.Unchanged, entry.State);
+        Assert.Equal(BookingStatus.Approved, entry.Entity.Status);
+
+        // A concurrent closer wins after the approve; a stray SaveChanges must not resurrect Approved.
+        await using (var other = db.CreateContext())
+        {
+            await other.Bookings.Where(b => b.Id == bookingId)
+                .ExecuteUpdateAsync(set => set.SetProperty(b => b.Status, BookingStatus.Cancelled));
+        }
+
+        Assert.Equal(0, await context.SaveChangesAsync());
+        await using var verify = db.CreateContext();
+        Assert.Equal(BookingStatus.Cancelled, (await verify.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId)).Status);
+    }
+
+    // Delegates to the real store; after the service's read it cancels the booking from another connection,
+    // which is exactly the window the compare-and-set exists for.
+    private sealed class CancelAfterReadStore : RentalPlatform.Application.Abstractions.IBookingsStore
+    {
+        private readonly RentalPlatform.Application.Abstractions.IBookingsStore _inner;
+        private readonly SqliteTestDatabase _db;
+
+        public CancelAfterReadStore(RentalPlatform.Application.Abstractions.IBookingsStore inner, SqliteTestDatabase db)
+        {
+            _inner = inner;
+            _db = db;
+        }
+
+        public async Task<Booking?> FindBookingWithRelationsByIdAsync(Guid bookingId, CancellationToken cancellationToken = default)
+        {
+            var booking = await _inner.FindBookingWithRelationsByIdAsync(bookingId, cancellationToken);
+            await using var other = _db.CreateContext();
+            await other.Bookings.Where(b => b.Id == bookingId)
+                .ExecuteUpdateAsync(set => set.SetProperty(b => b.Status, BookingStatus.Cancelled), cancellationToken);
+            return booking;
+        }
+
+        public Task<IReadOnlyList<Booking>> ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default) => _inner.ExpirePendingAsync(utcNow, cancellationToken);
+        public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) => _inner.FindUserByIdAsync(userId, cancellationToken);
+        public Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default) => _inner.FindListingByIdAsync(listingId, cancellationToken);
+        public Task<bool> IsListingOwnerDeletedAsync(Guid listingId, CancellationToken cancellationToken = default) => _inner.IsListingOwnerDeletedAsync(listingId, cancellationToken);
+        public Task<bool> TryCreateBookingAsync(Booking booking, Guid? districtId, Guid categoryId, CancellationToken cancellationToken = default) => _inner.TryCreateBookingAsync(booking, districtId, categoryId, cancellationToken);
+        public Task<RentalPlatform.Application.Abstractions.ApproveBookingOutcome> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default) => _inner.TryApproveBookingAsync(booking, cancellationToken);
+        public Task<IReadOnlyCollection<Booking>> GetRenterBookingsAsync(Guid renterId, CancellationToken cancellationToken = default) => _inner.GetRenterBookingsAsync(renterId, cancellationToken);
+        public Task<IReadOnlyCollection<Booking>> GetOwnerBookingRequestsAsync(Guid ownerId, CancellationToken cancellationToken = default) => _inner.GetOwnerBookingRequestsAsync(ownerId, cancellationToken);
+        public Task<Booking?> FindBookingDetailByIdAsync(Guid bookingId, CancellationToken cancellationToken = default) => _inner.FindBookingDetailByIdAsync(bookingId, cancellationToken);
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(cancellationToken);
+    }
 }

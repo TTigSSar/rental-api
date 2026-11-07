@@ -114,12 +114,12 @@ public sealed class ReportsStore : IReportsStore
         return rows.ToDictionary(row => row.ListingId, row => (string?)row.Url);
     }
 
-    public async Task<IReadOnlyDictionary<Guid, string?>> GetUserAvatarUrlsAsync(
+    public async Task<IReadOnlyDictionary<Guid, ReportTargetUser>> GetReportTargetUsersAsync(
         IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken = default)
     {
         if (userIds.Count == 0)
         {
-            return new Dictionary<Guid, string?>();
+            return new Dictionary<Guid, ReportTargetUser>();
         }
 
         var ids = userIds.Distinct().ToList();
@@ -127,10 +127,15 @@ public sealed class ReportsStore : IReportsStore
         var rows = await _dbContext.Users
             .AsNoTracking()
             .Where(user => ids.Contains(user.Id))
-            .Select(user => new { user.Id, AvatarUrl = user.DeletedAt == null ? user.AvatarUrl : null })
+            .Select(user => new
+            {
+                user.Id,
+                IsDeleted = user.DeletedAt != null,
+                AvatarUrl = user.DeletedAt == null ? user.AvatarUrl : null
+            })
             .ToListAsync(cancellationToken);
 
-        return rows.ToDictionary(row => row.Id, row => row.AvatarUrl);
+        return rows.ToDictionary(row => row.Id, row => new ReportTargetUser(row.AvatarUrl, row.IsDeleted));
     }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>

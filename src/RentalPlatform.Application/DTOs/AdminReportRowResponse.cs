@@ -16,6 +16,9 @@ public sealed class AdminReportRowResponse
     public Guid TargetId { get; init; }
     public string TargetLabel { get; init; } = string.Empty;
     public string? TargetImageUrl { get; init; }
+    // ADR-056 (AD-7): true only for a User target whose account was deleted (always false for
+    // Listing/Message targets). TargetLabel stays as stored; TargetImageUrl is then null.
+    public bool TargetIsDeleted { get; init; }
 
     public string ReasonCode { get; init; } = string.Empty;
     public string? Detail { get; init; }

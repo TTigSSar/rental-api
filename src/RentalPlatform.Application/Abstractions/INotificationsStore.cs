@@ -36,6 +36,9 @@ public interface INotificationsStore
 
     Task MarkAllReadAsync(Guid recipientId, DateTime readAt, CancellationToken cancellationToken = default);
 
+    /// <summary>ADR-056: true when the user exists and has <c>DeletedAt</c> set.</summary>
+    Task<bool> IsRecipientDeletedAsync(Guid recipientId, CancellationToken cancellationToken = default);
+
     Task AddAsync(Notification notification, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

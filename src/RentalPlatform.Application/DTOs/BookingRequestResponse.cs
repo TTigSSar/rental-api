@@ -13,6 +13,8 @@ public sealed class BookingRequestResponse
     public string RenterEmail { get; init; } = string.Empty;
     public string RenterFirstName { get; init; } = string.Empty;
     public string RenterLastName { get; init; } = string.Empty;
+    // ADR-056: the renter deleted their account (names and email above are then empty).
+    public bool RenterIsDeleted { get; init; }
     public DateOnly StartDate { get; init; }
     public DateOnly EndDate { get; init; }
     public decimal TotalPrice { get; init; }

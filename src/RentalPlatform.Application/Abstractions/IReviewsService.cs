@@ -20,9 +20,11 @@ public interface IReviewsService
     Task<ToyReviewSummaryResponse> GetListingToyReviewsAsync(
         Guid listingId, CancellationToken cancellationToken = default);
 
-    Task<OwnerReviewSummaryResponse> GetOwnerReviewsAsync(
+    /// <summary>Null when <paramref name="ownerId"/> is a deleted user (ADR-056): the API answers 404.</summary>
+    Task<OwnerReviewSummaryResponse?> GetOwnerReviewsAsync(
         Guid ownerId, CancellationToken cancellationToken = default);
 
-    Task<RenterReviewSummaryResponse> GetRenterReviewsAsync(
+    /// <summary>Null when <paramref name="renterId"/> is a deleted user (ADR-056): the API answers 404.</summary>
+    Task<RenterReviewSummaryResponse?> GetRenterReviewsAsync(
         Guid renterId, CancellationToken cancellationToken = default);
 }

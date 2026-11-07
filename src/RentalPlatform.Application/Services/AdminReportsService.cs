@@ -264,7 +264,7 @@ public sealed class AdminReportsService : IAdminReportsService
         return ServiceResult<User>.Success(user);
     }
 
-    // Resolves TargetImageUrl (listing primary image / user avatar / null for Message) in two
+    // Resolves TargetImageUrl (listing primary image / user avatar / null for Message) in
     // batched queries — never one query per row — same convention as
     // AdminListingsService/AdminListingsStore.GetOwnerListingStatsAsync.
     private async Task<List<AdminReportRowResponse>> MapRowsAsync(
@@ -284,9 +284,9 @@ public sealed class AdminReportsService : IAdminReportsService
         var listingImages = listingIds.Count == 0
             ? new Dictionary<Guid, string?>()
             : await _store.GetListingPrimaryImageUrlsAsync(listingIds, cancellationToken);
-        var userAvatars = userIds.Count == 0
-            ? new Dictionary<Guid, string?>()
-            : await _store.GetUserAvatarUrlsAsync(userIds, cancellationToken);
+        var targetUsers = userIds.Count == 0
+            ? new Dictionary<Guid, ReportTargetUser>()
+            : await _store.GetReportTargetUsersAsync(userIds, cancellationToken);
 
         return reports.Select(report => new AdminReportRowResponse
         {
@@ -297,19 +297,22 @@ public sealed class AdminReportsService : IAdminReportsService
             TargetImageUrl = report.TargetType switch
             {
                 ReportTargetType.Listing => listingImages.GetValueOrDefault(report.TargetId),
-                ReportTargetType.User => userAvatars.GetValueOrDefault(report.TargetId),
+                ReportTargetType.User => targetUsers.GetValueOrDefault(report.TargetId)?.AvatarUrl,
                 _ => null
             },
+            TargetIsDeleted = report.TargetType == ReportTargetType.User
+                && targetUsers.GetValueOrDefault(report.TargetId)?.IsDeleted == true,
             ReasonCode = report.ReasonCode,
             Detail = report.Detail,
             Severity = report.Severity,
             Status = report.Status,
             CreatedAt = report.CreatedAt,
             ReporterId = report.ReporterUserId,
-            ReporterFirstName = report.Reporter.FirstName,
-            ReporterLastName = report.Reporter.LastName,
-            ReporterEmail = report.Reporter.Email,
-            ReporterAvatarUrl = report.Reporter.AvatarUrl,
+            ReporterFirstName = DeletedUserDisplay.FirstName(report.Reporter),
+            ReporterLastName = DeletedUserDisplay.LastName(report.Reporter),
+            ReporterEmail = DeletedUserDisplay.Email(report.Reporter),
+            ReporterAvatarUrl = DeletedUserDisplay.AvatarUrl(report.Reporter),
+            ReporterIsDeleted = DeletedUserDisplay.IsDeleted(report.Reporter),
             ResolvedAt = report.ResolvedAt,
             ResolutionNote = report.ResolutionNote
         }).ToList();

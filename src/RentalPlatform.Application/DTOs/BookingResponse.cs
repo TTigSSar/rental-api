@@ -16,6 +16,8 @@ public sealed class BookingResponse
     public decimal TotalPrice { get; init; }
     public string OwnerFirstName { get; init; } = string.Empty;
     public string OwnerLastName { get; init; } = string.Empty;
+    // ADR-056: the owner deleted their account (names above are then empty).
+    public bool OwnerIsDeleted { get; init; }
     public BookingStatus Status { get; init; }
     public DateTime ExpiresAt { get; init; }
     public DateTime CreatedAt { get; init; }

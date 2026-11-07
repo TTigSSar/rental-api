@@ -24,7 +24,7 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
     {
         var user = await _dbContext.Users
             .AsNoTracking()
-            .Where(u => u.Id == userId)
+            .Where(u => u.Id == userId && u.DeletedAt == null)
             .Select(u => new
             {
                 u.Id,
@@ -99,10 +99,16 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
         };
     }
 
-    public async Task<IReadOnlyList<ListingPreviewResponse>> GetUserListingsAsync(
+    public async Task<IReadOnlyList<ListingPreviewResponse>?> GetUserListingsAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
+        // ADR-056: a deleted user's listings are archived, but the answer is a 404 like the profile.
+        if (await _dbContext.Users.AnyAsync(u => u.Id == userId && u.DeletedAt != null, cancellationToken))
+        {
+            return null;
+        }
+
         var rows = await _dbContext.Listings
             .AsNoTracking()
             .Where(l => l.OwnerId == userId && l.Status == ListingStatus.Approved)

@@ -650,6 +650,73 @@ public sealed class AdminReportsServiceTests
         Assert.Null(result.Value!.TargetImageUrl);
     }
 
+    // ---------- TargetIsDeleted (ADR-056 AD-7) ----------
+
+    private static async Task<(Guid Deleted, Guid Live)> SeedUserTargetsAsync(SqliteTestDatabase db)
+    {
+        var deletedId = Guid.NewGuid();
+        var liveId = Guid.NewGuid();
+        var deleted = TestData.User(deletedId, "gone@test.local");
+        deleted.AvatarUrl = "/uploads/gone.png";
+        deleted.DeletedAt = DateTime.UtcNow;
+        var live = TestData.User(liveId, "live@test.local");
+        live.AvatarUrl = "/uploads/live.png";
+        await db.SeedAsync(deleted, live);
+        return (deletedId, liveId);
+    }
+
+    [Fact]
+    public async Task GetQueue_TargetIsDeleted_Flags_Only_Deleted_User_Targets()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaseAsync(db);
+        var (deletedUser, liveUser) = await SeedUserTargetsAsync(db);
+        var deletedRow = Guid.NewGuid();
+        var liveRow = Guid.NewGuid();
+        var listingRow = Guid.NewGuid();
+        var messageRow = Guid.NewGuid();
+        await db.SeedAsync(
+            TestData.Report(deletedRow, ReportTargetType.User, deletedUser, ReporterId, "spam"),
+            TestData.Report(liveRow, ReportTargetType.User, liveUser, ReporterId, "spam"),
+            TestData.Report(listingRow, ReportTargetType.Listing, ListingId, ReporterId, "spam"),
+            TestData.Report(messageRow, ReportTargetType.Message, Guid.NewGuid(), ReporterId, "spam"));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId).GetQueueAsync(new AdminReportQueueFilter { Status = "all" });
+
+        Assert.True(result.IsSuccess);
+        var rows = result.Value!.Items.ToDictionary(i => i.Id);
+        Assert.True(rows[deletedRow].TargetIsDeleted);
+        Assert.Null(rows[deletedRow].TargetImageUrl);
+        Assert.False(rows[liveRow].TargetIsDeleted);
+        Assert.Equal("/uploads/live.png", rows[liveRow].TargetImageUrl);
+        Assert.False(rows[listingRow].TargetIsDeleted);
+        Assert.False(rows[messageRow].TargetIsDeleted);
+    }
+
+    [Fact]
+    public async Task GetById_And_Resolve_Return_TargetIsDeleted()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaseAsync(db);
+        var (deletedUser, _) = await SeedUserTargetsAsync(db);
+        var id = Guid.NewGuid();
+        await db.SeedAsync(TestData.Report(id, ReportTargetType.User, deletedUser, ReporterId, "spam"));
+
+        await using var context = db.CreateContext();
+        var service = CreateService(context, AdminId);
+
+        var single = await service.GetByIdAsync(id);
+        Assert.True(single.IsSuccess);
+        Assert.True(single.Value!.TargetIsDeleted);
+        Assert.Null(single.Value.TargetImageUrl);
+
+        var resolved = await service.ResolveAsync(id, "done");
+        Assert.True(resolved.IsSuccess);
+        Assert.True(resolved.Value!.TargetIsDeleted);
+        Assert.Null(resolved.Value.TargetImageUrl);
+    }
+
     // ---------- Admin-role enforcement (defence in depth) ----------
 
     [Fact]

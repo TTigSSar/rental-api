@@ -13,6 +13,9 @@ public class ThrowingConversationsStore : IConversationsStore
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) => throw Fail();
 
+    // Not "throws": the emitter asks this first (ADR-056), and the swallow tests must still reach the member they target.
+    public virtual Task<bool> IsUserDeletedAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
     public Task<Conversation?> GetOrCreateForBookingAsync(Guid bookingId, Guid currentUserId, CancellationToken cancellationToken = default) => throw Fail();
 
     public Task<Conversation?> GetOrCreateForBookingSystemAsync(Guid bookingId, CancellationToken cancellationToken = default) => throw Fail();

@@ -8,6 +8,8 @@ public sealed class PendingListingForReviewResponse
     public string OwnerEmail { get; init; } = string.Empty;
     public string OwnerFirstName { get; init; } = string.Empty;
     public string OwnerLastName { get; init; } = string.Empty;
+    // ADR-056: the owner deleted their account (owner names and email are then empty).
+    public bool OwnerIsDeleted { get; init; }
 
     public Guid CategoryId { get; init; }
     public string CategoryName { get; init; } = string.Empty;

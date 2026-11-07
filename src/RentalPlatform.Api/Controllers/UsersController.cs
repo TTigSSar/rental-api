@@ -32,11 +32,13 @@ public sealed class UsersController : ControllerBase
     [HttpGet("{userId:guid}/listings")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(IReadOnlyList<ListingPreviewResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<ListingPreviewResponse>>> GetUserListings(
         Guid userId,
         CancellationToken cancellationToken)
     {
         var listings = await _profileService.GetUserListingsAsync(userId, cancellationToken);
+        if (listings is null) return NotFound();
         return Ok(listings);
     }
 }

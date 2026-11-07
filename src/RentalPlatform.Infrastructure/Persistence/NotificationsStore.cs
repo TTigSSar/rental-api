@@ -102,6 +102,9 @@ public sealed class NotificationsStore : INotificationsStore
                 setters => setters.SetProperty(notification => notification.ReadAt, readAt),
                 cancellationToken);
 
+    public Task<bool> IsRecipientDeletedAsync(Guid recipientId, CancellationToken cancellationToken = default) =>
+        _dbContext.Users.AnyAsync(user => user.Id == recipientId && user.DeletedAt != null, cancellationToken);
+
     public async Task AddAsync(Notification notification, CancellationToken cancellationToken = default) =>
         await _dbContext.Notifications.AddAsync(notification, cancellationToken);
 

@@ -16,6 +16,8 @@ public sealed class AdminMessageThreadResponse
     public string MemberFirstName { get; init; } = string.Empty;
     public string MemberLastName { get; init; } = string.Empty;
     public string? MemberAvatarUrl { get; init; }
+    // ADR-056: the member deleted their account (names above are then empty).
+    public bool MemberIsDeleted { get; init; }
 
     // Derived: IsBlocked => Suspended; else IsIdConfirmed => Active; else Pending.
     public UserAccountStatus MemberStatus { get; init; }

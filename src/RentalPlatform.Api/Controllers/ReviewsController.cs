@@ -95,21 +95,23 @@ public sealed class ReviewsController : ControllerBase
     [HttpGet("owner/{userId:guid}")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(OwnerReviewSummaryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OwnerReviewSummaryResponse>> GetOwnerReviews(
         Guid userId, CancellationToken cancellationToken)
     {
         var summary = await _reviewsService.GetOwnerReviewsAsync(userId, cancellationToken);
-        return Ok(summary);
+        return summary is null ? NotFound() : Ok(summary);
     }
 
     [HttpGet("renter/{userId:guid}")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(RenterReviewSummaryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RenterReviewSummaryResponse>> GetRenterReviews(
         Guid userId, CancellationToken cancellationToken)
     {
         var summary = await _reviewsService.GetRenterReviewsAsync(userId, cancellationToken);
-        return Ok(summary);
+        return summary is null ? NotFound() : Ok(summary);
     }
 
     private ActionResult FromError(ServiceError? error)

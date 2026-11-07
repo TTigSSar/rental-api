@@ -16,6 +16,8 @@ public sealed class ChatConversationDetailsResponse
 
     public string CounterpartName { get; init; } = string.Empty;
     public string? CounterpartAvatarUrl { get; init; }
+    // ADR-056: the counterpart deleted their account (name empty, avatar null); sending is refused.
+    public bool CounterpartIsDeleted { get; init; }
     public bool CounterpartVerified { get; init; }
 
     /// <summary>Null for a Moderation conversation — there is no toy strip.</summary>

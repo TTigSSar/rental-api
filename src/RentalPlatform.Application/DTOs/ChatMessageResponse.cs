@@ -12,6 +12,9 @@ public sealed class ChatMessageResponse
     /// <summary>Author display name. Null for System messages.</summary>
     public string? SenderName { get; init; }
 
+    // ADR-056: the sender deleted their account (SenderName is then empty).
+    public bool SenderIsDeleted { get; init; }
+
     /// <summary>"text" | "image" | "system" | "moderationNote" | "location".</summary>
     public string Type { get; init; } = string.Empty;
 

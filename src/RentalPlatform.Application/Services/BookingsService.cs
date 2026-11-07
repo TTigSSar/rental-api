@@ -527,8 +527,9 @@ public sealed class BookingsService : IBookingsService
         Currency = booking.Listing.Currency,
         PricePerDay = booking.Listing.PricePerDay,
         CompensationAmount = booking.Listing.CompensationAmount,
-        OwnerFirstName = booking.Listing.Owner?.FirstName ?? string.Empty,
-        OwnerLastName = booking.Listing.Owner?.LastName ?? string.Empty,
+        OwnerFirstName = DeletedUserDisplay.FirstName(booking.Listing.Owner),
+        OwnerLastName = DeletedUserDisplay.LastName(booking.Listing.Owner),
+        OwnerIsDeleted = DeletedUserDisplay.IsDeleted(booking.Listing.Owner),
         StartDate = booking.StartDate,
         EndDate = booking.EndDate,
         TotalPrice = booking.TotalPrice,
@@ -550,9 +551,10 @@ public sealed class BookingsService : IBookingsService
             .FirstOrDefault(),
         Currency = booking.Listing.Currency,
         RenterId = booking.RenterId,
-        RenterEmail = booking.Renter.Email,
-        RenterFirstName = booking.Renter.FirstName,
-        RenterLastName = booking.Renter.LastName,
+        RenterEmail = DeletedUserDisplay.Email(booking.Renter),
+        RenterFirstName = DeletedUserDisplay.FirstName(booking.Renter),
+        RenterLastName = DeletedUserDisplay.LastName(booking.Renter),
+        RenterIsDeleted = DeletedUserDisplay.IsDeleted(booking.Renter),
         StartDate = booking.StartDate,
         EndDate = booking.EndDate,
         TotalPrice = booking.TotalPrice,
@@ -609,9 +611,10 @@ public sealed class BookingsService : IBookingsService
             Note = booking.Note,
 
             CounterpartyId = counterparty.Id,
-            CounterpartyFirstName = counterparty.FirstName,
-            CounterpartyLastName = counterparty.LastName,
-            CounterpartyAvatarUrl = counterparty.AvatarUrl
+            CounterpartyFirstName = DeletedUserDisplay.FirstName(counterparty),
+            CounterpartyLastName = DeletedUserDisplay.LastName(counterparty),
+            CounterpartyAvatarUrl = DeletedUserDisplay.AvatarUrl(counterparty),
+            CounterpartyIsDeleted = DeletedUserDisplay.IsDeleted(counterparty)
         };
     }
 

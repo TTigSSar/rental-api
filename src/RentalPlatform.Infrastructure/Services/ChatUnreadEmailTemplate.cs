@@ -106,7 +106,9 @@ public static class ChatUnreadEmailTemplate
               "style=\"display:block;width:64px;height:64px;object-fit:cover;border-radius:12px;border:0;\">";
 
         var html =
-            "<!DOCTYPE html><html><body style=\"margin:0;padding:24px 0;background:#F2EFE8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.5;\">" +
+            "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<style>@media (max-width:600px){.cta{display:block!important;width:100%!important;box-sizing:border-box!important;text-align:center!important;}}</style></head>" +
+            "<body style=\"margin:0;padding:24px 0;background:#F2EFE8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.5;\">" +
             $"<div style=\"max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid {border};overflow:hidden;\">" +
             $"<div style=\"padding:20px 32px;border-bottom:1px solid {border};font-size:28px;font-weight:700;color:#C24600;\">DoRent</div>" +
             "<div style=\"padding:32px;\">" +
@@ -117,7 +119,7 @@ public static class ChatUnreadEmailTemplate
                   $"<td style=\"padding:12px;width:64px;vertical-align:middle;\">{thumbnail}</td>" +
                   $"<td style=\"padding:12px 12px 12px 2px;vertical-align:middle;font-size:16px;line-height:22px;font-weight:600;\">{WebUtility.HtmlEncode(email.ToyTitle)}</td>" +
                   "</tr></table>") +
-            $"<a href=\"{WebUtility.HtmlEncode(email.OpenChatUrl)}\" style=\"display:inline-block;min-height:24px;padding:12px 32px;border-radius:999px;" +
+            $"<a href=\"{WebUtility.HtmlEncode(email.OpenChatUrl)}\" class=\"cta\" style=\"display:inline-block;min-height:24px;padding:12px 32px;border-radius:999px;" +
             "background:#C24600;color:#ffffff;font-size:16px;font-weight:600;line-height:24px;text-decoration:none;\">" +
             $"{WebUtility.HtmlEncode(copy.Cta)}</a>" +
             "</div>" +

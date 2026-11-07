@@ -547,6 +547,8 @@ public sealed class ChatUnreadEmailDispatcherTests
         Assert.Contains("&lt;b&gt;Duplo&lt;/b&gt; &amp; co", message.HtmlBody);
         Assert.DoesNotContain("<b>Duplo</b>", message.HtmlBody);
         Assert.Contains("background:#C24600", message.HtmlBody);
+        Assert.Contains("class=\"cta\"", message.HtmlBody);
+        Assert.Contains("@media (max-width:600px){.cta{display:block!important;width:100%!important", message.HtmlBody);
         Assert.Contains("width=\"64\"", message.HtmlBody);
         foreach (var link in new[] { email.OpenChatUrl, email.UnsubscribeUrl, email.SettingsUrl })
         {

@@ -38,4 +38,21 @@ public sealed class FakeEmailService : IEmailService
         PasswordResetSent.Add((email, preferredLanguage, link));
         return Task.CompletedTask;
     }
+
+    public List<(string Email, string? Language)> AccountDeletedSent { get; } = new();
+
+    // Set to prove a throwing implementation cannot fail a committed deletion (the real one never throws).
+    public bool ThrowOnAccountDeleted { get; set; }
+
+    public Task SendAccountDeletedAsync(
+        string email, string? preferredLanguage, CancellationToken cancellationToken = default)
+    {
+        AccountDeletedSent.Add((email, preferredLanguage));
+        if (ThrowOnAccountDeleted)
+        {
+            throw new InvalidOperationException("Simulated email failure.");
+        }
+
+        return Task.CompletedTask;
+    }
 }

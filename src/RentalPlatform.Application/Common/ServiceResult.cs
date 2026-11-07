@@ -26,4 +26,8 @@ public sealed class ServiceError
     // Set only by errors that map to 429 (auth.verification_cooldown); the controller turns it into
     // a Retry-After header.
     public int? RetryAfterSeconds { get; init; }
+
+    // Extra ProblemDetails members for the few errors whose answer carries data (account.has_open_rentals
+    // -> openRentals, ADR-056). Copied verbatim into ProblemDetails.Extensions by ToProblemDetails.
+    public IReadOnlyDictionary<string, object?>? Extensions { get; init; }
 }

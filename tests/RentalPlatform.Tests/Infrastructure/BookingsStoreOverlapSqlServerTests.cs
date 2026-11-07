@@ -58,7 +58,7 @@ public sealed class BookingsStoreOverlapSqlServerTests
             await using var context = db.CreateContext();
             var added = await new BookingsStore(context).TryCreateBookingAsync(TestData.Booking(
                 Guid.NewGuid(), listingId, RenterId,
-                Base.AddDays((int)c[2]), Base.AddDays((int)c[3]), BookingStatus.Pending));
+                Base.AddDays((int)c[2]), Base.AddDays((int)c[3]), BookingStatus.Pending), null, CategoryId);
 
             Assert.True((bool)c[4] == added, $"existing [{c[0]},{c[1]}] vs new [{c[2]},{c[3]}]");
         }

@@ -45,6 +45,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAccountDeletionService, AccountDeletionService>();
+        services.AddScoped<IAccountDeletionStore, AccountDeletionStore>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
         services.AddScoped<IExternalIdentityTokenValidator, ExternalIdentityTokenValidator>();
         services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();
@@ -125,6 +127,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReportsService, ReportsService>();
         services.AddScoped<IAdminReportsService, AdminReportsService>();
         services.AddScoped<IAdminOverviewService, AdminOverviewService>();
+        services.AddScoped<IAdminDemandService, AdminDemandService>();
         services.AddScoped<INotificationsService, NotificationsService>();
         services.AddScoped<INotificationEmitter, NotificationEmitter>();
         services.AddScoped<IChatService, ChatService>();
@@ -142,6 +145,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IModerationLogStore, ModerationLogStore>();
         services.AddScoped<IReportsStore, ReportsStore>();
         services.AddScoped<IAdminOverviewStore, AdminOverviewStore>();
+        services.AddScoped<IAdminDemandStore, AdminDemandStore>();
         services.AddScoped<IReviewsStore, ReviewsStore>();
         services.AddScoped<INotificationsStore, NotificationsStore>();
         services.AddScoped<IConversationsStore, ConversationsStore>();

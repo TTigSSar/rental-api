@@ -166,6 +166,13 @@ public sealed class SqlServerTestDatabase : IDisposable
             .UseSqlServer(_databaseConnectionString)
             .Options);
 
+    // Same as CreateContext() but with EF interceptors, e.g. to force a failure at a chosen point.
+    public AppDbContext CreateContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_databaseConnectionString)
+            .AddInterceptors(interceptors)
+            .Options);
+
     /// <summary>
     /// Inserts minimal Users rows with raw SQL, naming only the columns that have existed since
     /// InitialCreate.
@@ -299,10 +306,20 @@ public sealed class SqlServerTestDatabase : IDisposable
 
     public void Dispose()
     {
+        // Close this database's idle pooled connections BEFORE the drop, from the client side. Left
+        // to the server, ALTER DATABASE ... ROLLBACK IMMEDIATE has to kill each of them, which took
+        // about 3 s per test (measured: 0.03 s with the pool cleared) and, under a loaded instance,
+        // once ran past the 30 s command timeout (AccountDeletionSqlServerTests, full suite, 2026-11-06).
+        // ClearPool is scoped to this connection string, so parallel tests' pools are untouched.
+        using (var own = new SqlConnection(_databaseConnectionString))
+        {
+            SqlConnection.ClearPool(own);
+        }
+
         using var master = new SqlConnection(MasterConnectionString);
         master.Open();
         using var drop = master.CreateCommand();
-        // Kick out any lingering connections (e.g. pooled) before dropping.
+        // Safety net for any connection still in use (the pool was cleared above).
         drop.CommandText =
             $"""
             ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;

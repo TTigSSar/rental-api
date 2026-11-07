@@ -124,6 +124,40 @@ public sealed class NotificationEmitter : INotificationEmitter
             };
         }, cancellationToken);
 
+    // ADR-056: the owner deleted their account while the request was Pending, so it was closed as Rejected.
+    // Same card as a decline, but the actor is the localized "Deleted user": no name, no avatar. The renter's
+    // User row must be loaded on the booking (language); a missing one falls back to English.
+    public Task BookingDeclinedByDeletedOwnerAsync(Booking booking, CancellationToken cancellationToken = default) =>
+        EmitAsync(NotificationKind.Declined, booking.Id, booking.RenterId, () =>
+        {
+            var language = NotificationCopy.ResolveLanguage(booking.Renter?.PreferredLanguage);
+            var deletedUser = NotificationCopy.DeletedUser(language);
+            var copy = NotificationCopy.BookingDeclined(
+                language, deletedUser, booking.Listing.Title, null, Meta(booking, language));
+            return new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = booking.RenterId,
+                Kind = NotificationKind.Declined,
+                Category = NotificationCategory.Booking,
+                Urgent = false,
+                Title = copy.Title,
+                Body = copy.Body,
+                Meta = copy.Meta,
+                ActorName = deletedUser,
+                ActorAvatarUrl = null,
+                ActorVerified = false,
+                EntityType = NotificationEntityType.Booking,
+                EntityId = booking.Id,
+                DeepLink = "/listings",
+                ToyTitle = booking.Listing.Title,
+                ToyImageUrl = PrimaryImageUrl(booking.Listing),
+                PrimaryActionLabel = copy.PrimaryActionLabel,
+                PrimaryActionDeepLink = "/listings",
+                CreatedAt = DateTime.UtcNow
+            };
+        }, cancellationToken);
+
     public Task ListingApprovedAsync(Listing listing, CancellationToken cancellationToken = default) =>
         EmitAsync(NotificationKind.ListingLive, listing.Id, listing.OwnerId, () =>
         {

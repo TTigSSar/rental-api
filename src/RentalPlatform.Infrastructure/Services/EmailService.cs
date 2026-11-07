@@ -93,6 +93,24 @@ public sealed class EmailService : IEmailService
             _logger.LogError("Password reset email could not be sent ({ExceptionType}).", exception.GetType().Name);
         }
     }
+
+    public async Task SendAccountDeletedAsync(
+        string email,
+        string? preferredLanguage,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var message = AccountDeletedEmailTemplate.Render(email, preferredLanguage);
+            await _sender.SendAsync(message, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Never throws and never fails the deletion, which is already committed (ADR-056 section 4).
+            // The log carries no address (ADR-029 section 3).
+            _logger.LogError("Account-deleted email could not be sent ({ExceptionType}).", exception.GetType().Name);
+        }
+    }
 }
 
 // en/hy/ru with an English fallback (ADR-025 precedent), HTML plus a text part. The body carries no

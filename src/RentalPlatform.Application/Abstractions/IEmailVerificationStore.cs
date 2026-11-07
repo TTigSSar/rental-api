@@ -5,7 +5,7 @@ using RentalPlatform.Domain.Enums;
 namespace RentalPlatform.Application.Abstractions;
 
 /// <summary>Untracked snapshot of an account, enough to decide register/resend/external outcomes.</summary>
-public sealed record AccountState(Guid Id, bool IsEmailConfirmed, bool IsBlocked, string? PreferredLanguage, string Email);
+public sealed record AccountState(Guid Id, bool IsEmailConfirmed, bool IsBlocked, string? PreferredLanguage, string Email, bool IsDeleted = false);
 
 /// <summary>Untracked snapshot of a token and its owner, as read by verify-email.</summary>
 public sealed record VerificationTokenView(
@@ -15,7 +15,8 @@ public sealed record VerificationTokenView(
     DateTime? ConsumedAt,
     bool UserIsEmailConfirmed,
     bool UserIsBlocked,
-    string PasswordHash);
+    string PasswordHash,
+    bool UserIsDeleted = false);
 
 /// <summary>
 /// The per-user limits a token writer enforces inside its transaction: tokens created before

@@ -27,7 +27,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
         _dbContext.Users
             .AsNoTracking()
             .Where(user => user.Email == email)
-            .Select(user => new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage, user.Email))
+            .Select(user => new AccountState(user.Id, user.IsEmailConfirmed, user.IsBlocked, user.PreferredLanguage, user.Email, user.DeletedAt != null))
             .FirstOrDefaultAsync(cancellationToken);
 
     public Task<DateTime?> GetLatestTokenCreatedAtAsync(
@@ -201,7 +201,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
         var user = await _dbContext.Users
             .AsNoTracking()
             .Where(candidate => candidate.Id == token.UserId)
-            .Select(candidate => new { candidate.IsEmailConfirmed, candidate.IsBlocked, candidate.PasswordHash })
+            .Select(candidate => new { candidate.IsEmailConfirmed, candidate.IsBlocked, candidate.PasswordHash, IsDeleted = candidate.DeletedAt != null })
             .FirstOrDefaultAsync(cancellationToken);
         if (user is null)
         {
@@ -210,7 +210,7 @@ public sealed class EmailVerificationStore : IEmailVerificationStore
 
         return new VerificationTokenView(
             token.Id, token.UserId, token.ExpiresAt, token.ConsumedAt,
-            user.IsEmailConfirmed, user.IsBlocked, user.PasswordHash);
+            user.IsEmailConfirmed, user.IsBlocked, user.PasswordHash, user.IsDeleted);
     }
 
     public async Task<bool> TryCommitVerificationAsync(

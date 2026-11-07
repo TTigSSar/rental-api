@@ -2205,3 +2205,547 @@ sudo -u dorent -H bash -lc '/opt/dorent/rental-api/deploy/smoke.sh'
 новым кодом (пользователи с `ExternalAuthProvider = google`, имена, телефоны),
 старый код читает — колонки те же. Восстановление `.bak` — только при порче
 данных, и это потеря всего, что записано после бэкапа шага 2.
+
+## Релиз: P3-3 demand counts (ADR-058 stop-first)
+
+Процедура релиза с миграцией `20261106201730_AddDemandDailyCounts` (ADR-057,
+Trello P3-3). Решения — ADR-058 (stop-first), ADR-023 (репетиция), ADR-010
+вариант B (инвариант — шаг релиза, `smoke.sh` не меняется). Одобрено Тиграном
+2026-11-07. Это документированная ручная процедура: ни автоматического
+dual-write, ни новой инфраструктуры.
+
+**Что меняется.**
+
+- **Миграция** создаёт `DemandDailyCounts` (`Day date`, `DistrictId
+  uniqueidentifier NULL`, `CategoryId uniqueidentifier`, `BookingRequests int`;
+  кластерный уникальный индекс `(Day, DistrictId, CategoryId)`) и **заполняет её
+  из `Bookings`** (бэкфилл — один `INSERT ... SELECT` в самой миграции, по
+  *текущим* району и категории объявления). Применяется при старте `api`, до
+  `app.Run()`.
+- **Новый код** на каждое создание брони увеличивает счётчик **в той же
+  транзакции**, что и вставку брони. Инвариант:
+  `SUM(BookingRequests) = COUNT(*) FROM Bookings`.
+- **`Down` необратим** (счётчики хранят район и категорию «на момент запроса»,
+  пересчитать их из `Bookings` после этого нельзя).
+- Новый эндпойнт `GET /api/admin/demand` (только админ). Изменений
+  `docker-compose.production.yml`, `.env`, nginx, туннеля, томов — **нет**
+  (проверяется шагом 1.3 ниже). Пересоздаются только `api` и `ui`.
+
+**Почему stop-first, а не обычный `up -d`.** Старый процесс `api` не знает про
+счётчик. Если он пишет брони, пока (или после того как) бэкфилл отработал, —
+`SUM` и `COUNT` расходятся навсегда. Поэтому старый `api` останавливается
+**до** бэкфилла, а старый код после бэкфилла не должен писать никогда.
+
+> 🔴 **Откат только кодом ЗАПРЕЩЁН.** Старый образ поверх новой схемы будет
+> писать брони мимо счётчика — инвариант сломается молча, при зелёном
+> `smoke.sh`. Единственный откат этого релиза — восстановление бэкапа,
+> снятого на остановленном `api` (`BAK_STOP`), плюс старые образы
+> `:pre-demand-counts`. Брони, созданные после выкладки, при этом теряются —
+> раздел «Откат» и «Ручное восстановление» ниже.
+
+**Простой.** `api` недоступен от шага 6 до healthy на шаге 8. Принятая оценка
+ADR-058 — **около 1–4 минут** (оценка, не измерено; реальное значение
+вписывается из репетиции и затем из боевого деплоя). Недоступен весь `/api/`
+(nginx отдаёт 502), не только создание броней; статика SPA отвечает. Не
+запускать окно рядом с cron-бэкапом 03:30.
+
+**Риск / Evidence (для pre-deploy блока).** Risk: `MEDIUM` по формальным
+критериям (миграция EF), но есть необратимая миграция и процедура отката,
+теряющая данные — оформлять как **полный план** (Infrastructure Diff + Rollback)
+и ждать ack Тиграна. Evidence = `HIGH` только если выполнены все пункты
+предусловий ниже и каждый имеет следы в транскрипте.
+
+### Общие хелперы (один SSH-сеанс, секреты в argv не попадают)
+
+```bash
+cd /opt/dorent/rental-api
+DC="docker compose -f docker-compose.production.yml"
+LIVE=RentalPlatformDb                       # на репетиции: LIVE=RentalPlatformDb_rehearsal
+P="$(grep -E "^MSSQL_SA_PASSWORD=" .env | tail -n1 | cut -d= -f2-)"
+# те же ex/qp, что в «Репетиция миграций на восстановленном бэкапе» (ADR-023);
+# </dev/null у каждого docker-вызова обязателен (ловушка 3 там же).
+# qh = qp, но с заголовками колонок (для выгрузки в файл).
+ex() { $DC exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "$1" </dev/null; }
+qp() { $DC exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -h -1 -W -s "|" -Q "SET NOCOUNT ON; $1" </dev/null; }
+qh() { $DC exec -T -e SQLCMDPASSWORD="$P" db \
+  /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -W -s "|" -Q "SET NOCOUNT ON; $1" </dev/null; }
+
+# Инвариант: ОДИН оператор (ADR-010 вариант B). Нужны N (число броней на момент
+# остановки api) и LIVE. PASS = SUM = COUNT И COUNT >= N.
+inv() { qp "SELECT CASE WHEN s.sum_req = c.cnt AND c.cnt >= $N THEN 'INVARIANT PASS' ELSE 'INVARIANT FAIL' END
+  + ' sum=' + CAST(s.sum_req AS varchar(20)) + ' count=' + CAST(c.cnt AS varchar(20)) + ' N=$N'
+  FROM (SELECT COALESCE(SUM(CAST(BookingRequests AS bigint)), 0) AS sum_req FROM [$LIVE].dbo.DemandDailyCounts) AS s
+  CROSS JOIN (SELECT COUNT_BIG(*) AS cnt FROM [$LIVE].dbo.Bookings) AS c;"; }
+```
+
+Точный SQL инварианта (то, что делает `inv`):
+
+```sql
+SELECT CASE WHEN s.sum_req = c.cnt AND c.cnt >= @N
+            THEN 'INVARIANT PASS' ELSE 'INVARIANT FAIL' END
+       + ' sum=' + CAST(s.sum_req AS varchar(20))
+       + ' count=' + CAST(c.cnt AS varchar(20))
+FROM (SELECT COALESCE(SUM(CAST(BookingRequests AS bigint)), 0) AS sum_req
+      FROM [RentalPlatformDb].dbo.DemandDailyCounts) AS s
+CROSS JOIN (SELECT COUNT_BIG(*) AS cnt FROM [RentalPlatformDb].dbo.Bookings) AS c;
+```
+
+Один оператор, но **не один снимок**: при уровне READ COMMITTED бронь,
+создаваемая ровно между двумя чтениями, даёт кратковременное расхождение
+(счётчик и бронь коммитятся вместе, читаются раздельно). Поэтому
+`INVARIANT FAIL` **перепроверяется один раз** сразу же; два `FAIL` подряд —
+настоящее расхождение. `COUNT >= N` ловит обратную ошибку: бэкфилл не увидел
+брони, которые есть в бэкапе (`SUM = COUNT = 0` при `N > 0`).
+
+### Предусловия (гейт: любое «нет» — СТОП, на production не выходить)
+
+Репетиция ADR-023 на восстановленной копии — по разделу «Репетиция миграций на
+восстановленном бэкапе» (шаги 1–7 там), со следующими **добавлениями и
+утверждениями**. Репетиция идёт после `build` и строго до шага 6.
+
+1. **Строка подключения ведёт в репетиционную базу, а не в боевую.** Перед
+   запуском контейнера репетиции:
+
+   ```bash
+   grep -o 'Database=[A-Za-z_]*' /tmp/rehearsal.env     # ровно ОДНА строка: Database=RentalPlatformDb_rehearsal
+   grep -c '^ConnectionStrings__' /tmp/rehearsal.env    # ровно 1
+   ```
+
+   Любой другой вывод (особенно `Database=RentalPlatformDb`) — СТОП: миграция
+   с необратимым `Down` ушла бы в боевую базу.
+2. **Миграция применилась.** В `/tmp/rehearsal.log` ровно одна строка
+   `Applying migration '20261106201730_AddDemandDailyCounts'.`, затем
+   `Application started.`, ноль совпадений по `error|exception|unhandled`.
+3. **Инвариант на репетиционной базе.** `N` и `LIVE` берутся с репетиции
+   (`LIVE=RentalPlatformDb_rehearsal`; `N` — `COUNT(*) FROM Bookings`, снятый
+   до запуска api). `inv` обязан дать `INVARIANT PASS`. Отдельно сверить, что
+   отпечаток шага 1 репетиции (users/listings/bookings) не изменился.
+4. **Шаги «восстановить поверх» работают.** Прогнать на репетиционной базе
+   ровно те команды из раздела «Откат» (шаг 3: `SINGLE_USER` +
+   `RESTORE ... WITH REPLACE` из `.bak`, но с `LIVE=RentalPlatformDb_rehearsal`
+   и источником — тот же `rehearsal.bak`), затем проверить:
+   `OBJECT_ID(N'[RentalPlatformDb_rehearsal].dbo.DemandDailyCounts')` — `NULL`
+   и `COUNT(*) FROM Bookings` равен `N`. Это доказывает, что откат физически
+   выполним, до того как он понадобится.
+5. **Извлечение и ручное восстановление исполняются без SQL-ошибок.**
+   Прогнать извлечение (шаг 2 отката) на репетиционной базе, взяв `MAXC` по
+   третьей с конца брони (так в выгрузку попадут реальные строки), и
+   пересоздание (раздел «Ручное восстановление», блок 5.1): все строки обязаны
+   получить вердикт `ALREADY_PRESENT`, вставлено 0. Затем один раз
+   проверить и путь вставки: создать в *репетиционной* `RescueBookings`
+   синтетические копии 2–3 броней с `Id = NEWID()` и датами, сдвинутыми
+   на +1000 дней (`DATEADD(DAY, 1000, StartDate/EndDate)`), прогнать блок 5.1 —
+   они получают `OK` и вставляются; сверить, что `CreatedAt`/`UpdatedAt`
+   байт в байт равны исходным; удалить эти строки по `Id` (зависимостей у них
+   нет). Только на репетиционной базе.
+6. **Замеры (вписать в pre-deploy блок как факты, не оценки):** длительность
+   применения миграции (от старта контейнера до `Application started.`),
+   длительность `backup-production.sh` и `--verify`, размер `.bak`. Они дают
+   реальный простой вместо оценки «1–4 минуты».
+7. **Убрать за собой** по шагу 7 раздела «Репетиция»; в списке баз после — нет
+   `RentalPlatformDb_rehearsal` и нет `RentalPlatformDb_rescue`.
+
+### Последовательность
+
+Выполнять **в одном SSH-сеансе** (переменные ниже нужны откату); состояние
+дополнительно пишется в файл, чтобы откат пережил обрыв сеанса. Файл не
+содержит секретов.
+
+1. **Код.**
+
+   ```bash
+   cd /opt/dorent/rental-api
+   PRE_API="$(git rev-parse HEAD)"; PRE_UI="$(git -C ../Rental-Ui rev-parse HEAD)"
+   git fetch && git status -sb                       # на ожидаемой ветке, без локальных правок
+   git pull --ff-only && git -C ../Rental-Ui pull --ff-only    # только то, что уже на origin/main
+   git diff --stat "$PRE_API"..HEAD -- docker-compose.production.yml   # ОЖИДАЕТСЯ: пусто
+   git diff --name-only "$PRE_API"..HEAD -- "*Migrations*" | grep -vE "Designer|ModelSnapshot"
+   # ОЖИДАЕТСЯ: ровно одна строка ...AddDemandDailyCounts.cs
+   ```
+
+   Не пусто в `docker-compose.production.yml` — это уже не «только образы»:
+   пересмотреть Infrastructure Diff до продолжения.
+2. **Бэкап + проверка восстановимости** (два запуска, режимы взаимоисключающие):
+
+   ```bash
+   ./deploy/backup-production.sh && ./deploy/backup-production.sh --verify
+   # ожидается: Backup OK: ... и VERIFY PASS: ... ; упал --verify — СТОП
+   ```
+3. **Сборка** (до любого `up`, по одному образу — 2 ГБ RAM):
+
+   ```bash
+   $DC build api && $DC build ui
+   ```
+4. **Базовый замер гео-каталога, пока старый `api` ещё работает:**
+
+   ```bash
+   ./deploy/smoke.sh --record-baseline      # exit 1 = замер не снят: разобраться до остановки api
+   ```
+5. **Тег старых образов `:pre-demand-counts`.** После шага 3 `:latest` уже
+   указывает на НОВЫЕ образы, поэтому тегировать `:latest` нельзя — берётся
+   образ, на котором работают текущие (ещё старые) контейнеры:
+
+   ```bash
+   CID_API="$($DC ps -q api </dev/null)"; CID_UI="$($DC ps -q ui </dev/null)"
+   docker tag "$(docker inspect -f '{{.Image}}' "$CID_API")" rental-api-api:pre-demand-counts
+   docker tag "$(docker inspect -f '{{.Image}}' "$CID_UI")"  rental-api-ui:pre-demand-counts
+   docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' </dev/null | grep -E 'rental-api-(api|ui):(latest|pre-demand-counts)'
+   # ОЖИДАЕТСЯ: у api и ui id тега pre-demand-counts != id latest
+   ```
+6. **Остановить старый `api` и убедиться, что он остановлен.** Записать время.
+
+   ```bash
+   TS6="$(date -u +%FT%TZ)"; echo "TS6 (stop api) = $TS6"
+   $DC stop -t 30 api </dev/null
+   docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' "$CID_API"   # ожидается: exited ...
+   $DC ps --status running --services </dev/null | grep -qx api && echo "STOP FAILED - api still running"
+   # exit=137 значит SIGKILL после 30 с: допустимо, но записать в отчёт
+   ```
+
+   С этого момента до шага 8 запись броней невозможна — это и есть простой.
+7. **Бэкап на остановленном `api` + проверка + фиксация точки отсчёта.**
+
+   ```bash
+   ./deploy/backup-production.sh && ./deploy/backup-production.sh --verify
+   BAK_STOP="$(ls -t /opt/dorent/backups/*.bak | head -n1)"; echo "BAK_STOP=$BAK_STOP"
+   # имя ДОЛЖНО отличаться от файла шага 2 (имя содержит минуту; два бэкапа в одну
+   # минуту перезапишут друг друга). Совпало — подождать минуту и повторить.
+   N="$(qp "SELECT COUNT_BIG(*) FROM [$LIVE].dbo.Bookings;" | tr -d '[:space:]')"
+   MAXC="$(qp "SELECT COALESCE(CONVERT(varchar(33), MAX(CreatedAt), 126), '0001-01-01T00:00:00') FROM [$LIVE].dbo.Bookings;" | tr -d '[:space:]')"
+   MAXU="$(qp "SELECT COALESCE(CONVERT(varchar(33), MAX(UpdatedAt), 126), '0001-01-01T00:00:00') FROM [$LIVE].dbo.Bookings;" | tr -d '[:space:]')"
+   echo "N=$N MAXC=$MAXC MAXU=$MAXU"
+   umask 077; printf 'PRE_API=%s\nPRE_UI=%s\nTS6=%s\nBAK_STOP=%s\nN=%s\nMAXC=%s\nMAXU=%s\n' \
+     "$PRE_API" "$PRE_UI" "$TS6" "$BAK_STOP" "$N" "$MAXC" "$MAXU" > /opt/dorent/deployment-notes/p33-state.env
+   ```
+
+   `N` — число броней, которое обязано быть в базе после бэкфилла (гарантия,
+   что бэкфилл увидел всё). `MAXC`/`MAXU` — граница «до/после выкладки» для
+   отката: берётся из самой базы, а не из часов хоста. `BAK_STOP` проверен
+   `VERIFY PASS` — иначе дальше не идти.
+8. **Поднять новый стек, дождаться healthy, прочитать лог миграции.**
+
+   ```bash
+   TS8="$(date -u +%FT%TZ)"; echo "TS8 (up -d) = $TS8"
+   $DC up -d </dev/null
+   for i in $(seq 1 60); do
+     s="$(docker inspect -f '{{.State.Health.Status}}' "$($DC ps -q api </dev/null)" 2>/dev/null)"
+     [ "$s" = healthy ] && break; sleep 5
+   done; echo "api health: $s"; echo "healthy at $(date -u +%FT%TZ)"
+   $DC logs --no-color --since 15m api </dev/null | grep -E "Applying migration|Application started"
+   # ОЖИДАЕТСЯ: ровно одна строка Applying migration '20261106201730_AddDemandDailyCounts'.
+   #            и Application started.   (больше миграций, чем ожидалось — СТОП)
+   $DC logs --no-color --since 15m api </dev/null | grep -icE "error|exception|unhandled"   # ожидается 0
+   ```
+
+   Простой = (время healthy) − `TS6`. Не вышел в `healthy` за 5 минут — не
+   перезапускать вслепую: смотреть `State.Health.Log` (M-014) и лог `api`.
+9. **`./deploy/smoke.sh`** (раздел j). Деплой не завершён, пока он не прошёл.
+   `smoke.sh` инвариант счётчиков **не проверяет** (ADR-010 не менялся) — это
+   шаг 10.
+10. **Инвариант** (определение `inv` и `N` — выше). При `INVARIANT FAIL` —
+    повторить **один раз** сразу; два `FAIL` подряд — расхождение настоящее,
+    переходить к «Откату»:
+
+    ```bash
+    inv        # INVARIANT PASS -> дальше; INVARIANT FAIL -> сразу ещё один inv
+    ```
+11. **Админ-эндпойнт закрыт для анонима** (loopback, мимо Cloudflare Access):
+
+    ```bash
+    curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/api/admin/demand
+    # ожидается: 401
+    ```
+12. **Запись и итог.** Строка в `/opt/dorent/deployment-notes/deploys.log`
+    (дата, коммиты обоих репозиториев, Risk/Evidence, вердикт smoke), в
+    отчёт — verbatim блок `smoke.sh`, `TS6`, `TS8`, время healthy, реальный
+    простой, `N`. Образы `:pre-demand-counts` и `BAK_STOP` не удалять, пока
+    релиз не подтверждён в боевом использовании.
+
+**Оценки, которые боевой деплой заменяет измерениями** (до репетиции — только
+оценки): простой 1–4 мин (ADR-058); применение миграции — секунды на нескольких
+десятках броней; `backup-production.sh` + `--verify` — единицы–десятки секунд
+(плюс архив `uploads`); `docker compose stop -t 30` — до 30 с. Ни одно из этих
+чисел не измерено — вписывается из репетиции и деплоя.
+
+### Откат (никогда только кодом)
+
+Решение об откате принимается явно: перед выполнением назвать риск (потеря
+всего, записанного после `BAK_STOP`), покрывающий бэкап (`BAK_STOP`) и план.
+Сначала посчитать, что именно будет потеряно (ничего не меняет):
+
+```bash
+source /opt/dorent/deployment-notes/p33-state.env
+qp "SELECT 'new_bookings=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.Bookings WHERE CreatedAt > '$MAXC') AS varchar(10))
+  + ' changed_bookings=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.Bookings WHERE CreatedAt <= '$MAXC' AND UpdatedAt > '$MAXU' AND Status <> 4) AS varchar(10))
+  + ' new_users=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.Users WHERE CreatedAt > '$MAXC') AS varchar(10))
+  + ' new_chat_messages=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.ChatMessages WHERE CreatedAt > '$MAXC') AS varchar(10))
+  + ' new_notifications=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.Notifications WHERE CreatedAt > '$MAXC') AS varchar(10));"
+```
+
+Восстановление откатывает **всё**, что записано после `BAK_STOP`, а не только
+брони. ADR-058 покрывает брони; новые пользователи, чат и прочее восстановление
+не возвращает — эти числа Тигран видит до решения.
+
+1. **Остановить `api`** (иначе `SINGLE_USER` не получить и новые записи уйдут
+   в никуда):
+
+   ```bash
+   $DC stop -t 30 api </dev/null
+   $DC ps --status running --services </dev/null | grep -qx api && echo "STOP FAILED"
+   ```
+2. **Извлечь потерянное в файл и во вспомогательную базу** (до восстановления;
+   `ex`/`qh`/`MAXC`/`MAXU` из блока выше). Вспомогательная база
+   `RentalPlatformDb_rescue` — отдельная база на том же сервере, `RESTORE`
+   боевой её не затрагивает; файл — человекочитаемая копия.
+
+   ```bash
+   R="[RentalPlatformDb_rescue].dbo"; B="[$LIVE].dbo"
+   ex "IF DB_ID(N'RentalPlatformDb_rescue') IS NOT NULL THROW 50000, 'rescue DB already exists - rename or drop it deliberately', 1;
+       CREATE DATABASE [RentalPlatformDb_rescue];"
+   ex "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; SET NOCOUNT ON;
+   SELECT b.*, CAST('NEW' AS varchar(8)) AS Kind INTO ${R}.RescueBookings
+     FROM ${B}.Bookings b WHERE b.CreatedAt > '$MAXC';
+   INSERT INTO ${R}.RescueBookings
+     SELECT b.*, 'CHANGED' FROM ${B}.Bookings b
+     WHERE b.CreatedAt <= '$MAXC' AND b.UpdatedAt > '$MAXU' AND b.Status <> 4;
+   SELECT n.* INTO ${R}.RescueNotifications FROM ${B}.Notifications n
+     WHERE n.EntityType = 0 AND n.EntityId IN (SELECT Id FROM ${R}.RescueBookings);
+   SELECT c.* INTO ${R}.RescueConversations FROM ${B}.Conversations c
+     WHERE c.BookingId IN (SELECT Id FROM ${R}.RescueBookings);
+   SELECT m.* INTO ${R}.RescueChatMessages FROM ${B}.ChatMessages m
+     WHERE m.ConversationId IN (SELECT Id FROM ${R}.RescueConversations);
+   SELECT u.Id, u.Email, u.FirstName, u.LastName, u.PreferredLanguage INTO ${R}.RescueContacts
+     FROM ${B}.Users u
+     WHERE u.Id IN (SELECT RenterId FROM ${R}.RescueBookings)
+        OR u.Id IN (SELECT l.OwnerId FROM ${B}.Listings l JOIN ${R}.RescueBookings r ON r.ListingId = l.Id);"
+   umask 077; OUT="/opt/dorent/backups/p33-rescue-$(date -u +%Y%m%d_%H%M%S).txt"
+   qh "SELECT Id, ListingId, RenterId, StartDate, EndDate, Status, CreatedAt, UpdatedAt, Kind
+       FROM [RentalPlatformDb_rescue].dbo.RescueBookings ORDER BY CreatedAt;" > "$OUT"
+   qh "SELECT * FROM [RentalPlatformDb_rescue].dbo.RescueContacts;" >> "$OUT"
+   wc -l "$OUT"; ls -l "$OUT"      # mode 600; в файле персональные данные
+   ```
+
+   Берутся **все** колонки `Bookings` (а не только восемь основных): без
+   `TotalPrice` (NOT NULL), `ExpiresAt`, `ApprovedAt`/`ActiveAt`/`CompletedAt`,
+   `RejectionReason`, `Note` бронь не вставить обратно. Строки `Kind='CHANGED'` —
+   брони, созданные ДО выкладки, но изменённые после неё (одобрены, отменены,
+   выданы…): восстановление вернёт их в прежний статус, поэтому они тоже
+   теряются. `Status <> 4` исключает `Expired`: старый `api` перепроведёт
+   просрочку сам при старте.
+3. **`RESTORE ... WITH REPLACE` из `BAK_STOP`** (`api` остановлен):
+
+   ```bash
+   CID="$($DC ps -q db </dev/null)"
+   docker cp "$BAK_STOP" "$CID:/var/opt/mssql/backup/rollback.bak"
+   $DC exec -T -u root db chown mssql:mssql /var/opt/mssql/backup/rollback.bak </dev/null
+   qp "RESTORE VERIFYONLY FROM DISK = N'/var/opt/mssql/backup/rollback.bak';"
+   ex "ALTER DATABASE [$LIVE] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+   ex "RESTORE DATABASE [$LIVE] FROM DISK = N'/var/opt/mssql/backup/rollback.bak' WITH REPLACE, RECOVERY;" \
+     || { ex "ALTER DATABASE [$LIVE] SET MULTI_USER;"; echo "RESTORE FAILED - STOP"; }
+   ex "ALTER DATABASE [$LIVE] SET MULTI_USER;"
+   $DC exec -T -u root db rm -f /var/opt/mssql/backup/rollback.bak </dev/null
+   # проверка (оба условия обязательны):
+   qp "SELECT 'counters_table=' + COALESCE(CAST(OBJECT_ID(N'[$LIVE].dbo.DemandDailyCounts') AS varchar(20)), 'NULL')
+     + ' bookings=' + CAST((SELECT COUNT_BIG(*) FROM [$LIVE].dbo.Bookings) AS varchar(20)) + ' N=$N';"
+   # ОЖИДАЕТСЯ: counters_table=NULL и bookings = N
+   ```
+
+   `MOVE` не нужен: бэкап снят с этой же базы, пути файлов те же. Если
+   `RESTORE` упал — база может остаться в `SINGLE_USER`; ветка `||` возвращает
+   `MULTI_USER`, дальше СТОП: бэкап, который не восстановился, надо
+   разбирать, а не повторять вслепую.
+4. **Поднять старые образы.** `:latest` возвращается на `:pre-demand-counts`;
+   пересборка запрещена, пока дерево на новом коде:
+
+   ```bash
+   docker tag rental-api-api:pre-demand-counts rental-api-api:latest
+   docker tag rental-api-ui:pre-demand-counts  rental-api-ui:latest
+   git diff --stat "$PRE_API"..HEAD -- docker-compose.production.yml    # пусто (релиз compose не менял)
+   $DC up -d </dev/null                      # БЕЗ down -v, никогда; без --build
+   docker inspect -f '{{.Config.Image}} {{.Image}}' "$($DC ps -q api </dev/null)"
+   # сверить image id с rental-api-api:pre-demand-counts
+   ```
+5. **Smoke:** `./deploy/smoke.sh` (раздел j). Отсутствие `/api/admin/demand`
+   (404) — норма для старого образа; остальное обязано быть PASS. Затем — блок
+   5.1 ниже. Вспомогательную базу и файл НЕ удалять, пока Тигран не подтвердил,
+   что восстановление завершено.
+
+Схемный путь: миграция откатывается **только** этим восстановлением (`Down`
+необратим); всё, записанное после `BAK_STOP`, кроме перечисленного в
+«Ручном восстановлении», потеряно. Кодовый путь: `git checkout <PRE_API>` +
+пересборка нужны, только если дерево на сервере нужно вернуть на старый код
+перед следующим `build`; сам откат использует теги образов и пересборки не
+требует.
+
+### Ручное восстановление броней, потерянных восстановлением
+
+Все блоки читают `RentalPlatformDb_rescue` (шаг 2 отката) и работают на
+восстановленной базе. Таблицы и колонки взяты из сущностей `Booking`,
+`Notification`, `Conversation`, `ChatMessage`; ничего не выдумано. Исходные
+`Id`, `CreatedAt`, `UpdatedAt`, `ExpiresAt` **не пересоздаются, а копируются
+как есть** — ни `NEWID()`, ни `SYSUTCDATETIME()` в значениях строк.
+
+**(a) Статусы (0 Pending, 1 Approved, 2 Rejected, 3 Cancelled, 4 Expired,
+5 Completed, 7 Active; 6 выведен из обращения).** Через публичный API бронь
+можно создать только `Pending`, поэтому любой иной статус возвращается прямым
+SQL с теми же полями, что были в строке:
+
+| Статус | Как возвращается |
+|---|---|
+| 0 Pending, `ExpiresAt` в будущем | вставка как есть, TTL остаётся исходный; владелец сможет решить |
+| 0 Pending, `ExpiresAt` в прошлом | вставка как есть; штатная очистка `BookingExpiryBackgroundService` сама переведёт её в `Expired` и допишет строку в чат |
+| 1 Approved | как есть, с `ApprovedAt` |
+| 7 Active | как есть, с `ApprovedAt`, `ActiveAt` |
+| 5 Completed | как есть, с `ApprovedAt`, `ActiveAt`, `CompletedAt` |
+| 2 Rejected / 3 Cancelled / 4 Expired | как есть; `RejectionReason` сохраняется |
+| `Kind='CHANGED'` | не вставка, а `UPDATE` существующей строки: `Status`, `UpdatedAt`, `ApprovedAt`, `RejectionReason`, `ActiveAt`, `CompletedAt` |
+
+**Когда бронь вернуть нельзя** (вердикт ≠ `OK` в плане ниже — строка не
+вставляется, а уходит в список для связи, раздел (e)):
+
+- `RENTER_MISSING` — арендатор зарегистрировался после `BAK_STOP`, его нет в
+  восстановленной базе (FK `Restrict`); бронь без него не вставить;
+- `LISTING_MISSING` — объявление создано после `BAK_STOP`;
+- `DATE_CONFLICT` — на те же даты уже есть блокирующая бронь (правило создания
+  из `BookingsStore`: живая `Pending` + `Approved` + `Active`; для вставки
+  `Approved`/`Active` блокируют `Approved`/`Active`, как в одобрении;
+  интервал занятости `[start, effEnd)`, ADR-043: впритык допустимо);
+- `ROW_MISSING` — для `CHANGED`: сама строка отсутствует в восстановленной базе.
+
+**(b) Временные метки.** `CreatedAt`, `UpdatedAt`, `ExpiresAt`, `ApprovedAt`,
+`ActiveAt`, `CompletedAt` копируются неизменными. Это важно прежде всего для
+24-часового TTL `Pending`: срок идёт от исходного `CreatedAt` (`ExpiresAt =
+CreatedAt + 24 ч`), а не от момента восстановления, — иначе бронь, которую
+владелец не успел увидеть, «воскресла» бы на новые сутки и сдвинула бы
+историю. Расплата: у `Pending`, восстановленной под самый конец своего
+срока, у владельца остаётся мало времени — об этом сообщить отдельно (e).
+
+**(c) Уведомления.** Уведомления бронирования — строки `Notifications`
+(`EntityType = 0` = Booking, `EntityId` = `Booking.Id`) и push по SignalR;
+писем из путей `BookingsService` нет. Отправлено до отката: `Request` —
+владельцу (на создание), `Approved` / `Declined` — арендатору (на решение).
+Восстановление удалило эти строки из базы, но пользователи их уже видели.
+Правило: **возвращать те же строки целиком** (тот же `Id`, `CreatedAt`,
+`ReadAt`) — только для броней с вердиктом `OK`; **новых уведомлений не
+создавать** и **не просить арендаторов отправлять запросы заново** (это
+породило бы вторую бронь, второе уведомление `Request` владельцу и лишнюю
+единицу в счётчике при повторной попытке релиза). Push по SignalR не
+воспроизводится: пользователь увидит строку при ближайшей загрузке ленты.
+Для броней, которые вернуть нельзя, уведомления не возвращаются — об этом
+сообщает человек (e). Чат: `Conversation` и системные строки создаются
+приложением лениво (`GetOrCreateForBookingSystemAsync`) на ближайшем событии
+жизненного цикла брони; руками их не вставлять. История переписки арендатора
+и владельца за период после `BAK_STOP` **не восстанавливается** — она лежит в
+`RescueChatMessages` только для чтения; об этом сообщается обеим сторонам.
+
+**(d) Защита от дубликатов.** Перед вставкой каждая строка проверяется: нет ли
+уже брони с тем же `Id` (`ALREADY_PRESENT`), и нет ли блокирующего пересечения
+по `ListingId` и датам (`DATE_CONFLICT`). План и вставка выполняются в одной
+транзакции с `UPDLOCK, HOLDLOCK` на `Bookings`, поэтому между проверкой и
+вставкой новая бронь не проскочит. Повторный запуск безопасен.
+
+**5.1. План и применение** (одной транзакцией; `ex` прервётся на первой ошибке,
+`XACT_ABORT` откатит всё):
+
+```bash
+R="[RentalPlatformDb_rescue].dbo"; B="[$LIVE].dbo"
+ex "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; SET XACT_ABORT ON; SET NOCOUNT ON;
+DROP TABLE IF EXISTS ${R}.ReentryPlan;
+BEGIN TRAN;
+SELECT r.Id, r.Kind,
+  CASE
+    WHEN r.Kind = 'NEW' AND EXISTS (SELECT 1 FROM ${B}.Bookings x WHERE x.Id = r.Id) THEN 'ALREADY_PRESENT'
+    WHEN r.Kind = 'CHANGED' AND NOT EXISTS (SELECT 1 FROM ${B}.Bookings x WHERE x.Id = r.Id) THEN 'ROW_MISSING'
+    WHEN NOT EXISTS (SELECT 1 FROM ${B}.Users u WHERE u.Id = r.RenterId) THEN 'RENTER_MISSING'
+    WHEN NOT EXISTS (SELECT 1 FROM ${B}.Listings l WHERE l.Id = r.ListingId) THEN 'LISTING_MISSING'
+    WHEN r.Status IN (0, 1, 7) AND EXISTS (
+      SELECT 1 FROM ${B}.Bookings o WITH (UPDLOCK, HOLDLOCK)
+      WHERE o.ListingId = r.ListingId AND o.Id <> r.Id
+        AND (o.Status IN (1, 7) OR (r.Status = 0 AND o.Status = 0 AND o.ExpiresAt > SYSUTCDATETIME()))
+        AND o.StartDate < CASE WHEN r.EndDate > r.StartDate THEN r.EndDate ELSE DATEADD(DAY, 1, r.StartDate) END
+        AND r.StartDate < CASE WHEN o.EndDate > o.StartDate THEN o.EndDate ELSE DATEADD(DAY, 1, o.StartDate) END
+    ) THEN 'DATE_CONFLICT'
+    ELSE 'OK'
+  END AS Verdict
+INTO ${R}.ReentryPlan FROM ${R}.RescueBookings r;
+
+INSERT INTO ${B}.Bookings (Id, ListingId, RenterId, StartDate, EndDate, TotalPrice, Status, ExpiresAt,
+  CreatedAt, UpdatedAt, ApprovedAt, RejectionReason, ActiveAt, CompletedAt, Note)
+SELECT r.Id, r.ListingId, r.RenterId, r.StartDate, r.EndDate, r.TotalPrice, r.Status, r.ExpiresAt,
+  r.CreatedAt, r.UpdatedAt, r.ApprovedAt, r.RejectionReason, r.ActiveAt, r.CompletedAt, r.Note
+FROM ${R}.RescueBookings r JOIN ${R}.ReentryPlan p ON p.Id = r.Id AND p.Verdict = 'OK'
+WHERE r.Kind = 'NEW';
+
+UPDATE b SET b.Status = r.Status, b.UpdatedAt = r.UpdatedAt, b.ApprovedAt = r.ApprovedAt,
+  b.RejectionReason = r.RejectionReason, b.ActiveAt = r.ActiveAt, b.CompletedAt = r.CompletedAt
+FROM ${B}.Bookings b
+JOIN ${R}.RescueBookings r ON r.Id = b.Id AND r.Kind = 'CHANGED'
+JOIN ${R}.ReentryPlan p ON p.Id = r.Id AND p.Verdict = 'OK';
+
+INSERT INTO ${B}.Notifications (Id, RecipientId, Kind, Category, Title, Body, Meta, Urgent, ActorName,
+  ActorAvatarUrl, ActorVerified, ActorIsSystem, ActorSystemIcon, EntityType, EntityId, DeepLink, ToyTitle,
+  ToyImageUrl, PrimaryActionLabel, PrimaryActionDeepLink, SecondaryActionLabel, SecondaryActionDeepLink,
+  ReadAt, CreatedAt)
+SELECT n.Id, n.RecipientId, n.Kind, n.Category, n.Title, n.Body, n.Meta, n.Urgent, n.ActorName,
+  n.ActorAvatarUrl, n.ActorVerified, n.ActorIsSystem, n.ActorSystemIcon, n.EntityType, n.EntityId, n.DeepLink,
+  n.ToyTitle, n.ToyImageUrl, n.PrimaryActionLabel, n.PrimaryActionDeepLink, n.SecondaryActionLabel,
+  n.SecondaryActionDeepLink, n.ReadAt, n.CreatedAt
+FROM ${R}.RescueNotifications n
+JOIN ${R}.ReentryPlan p ON p.Id = n.EntityId AND p.Verdict = 'OK'
+WHERE EXISTS (SELECT 1 FROM ${B}.Users u WHERE u.Id = n.RecipientId)
+  AND NOT EXISTS (SELECT 1 FROM ${B}.Notifications x WHERE x.Id = n.Id);
+COMMIT;"
+qh "SELECT p.Kind, p.Verdict, COUNT(*) AS cnt FROM [RentalPlatformDb_rescue].dbo.ReentryPlan p GROUP BY p.Kind, p.Verdict;"
+qh "SELECT r.Id, r.ListingId, r.RenterId, r.StartDate, r.EndDate, r.Status, r.CreatedAt, p.Verdict
+    FROM [RentalPlatformDb_rescue].dbo.RescueBookings r JOIN [RentalPlatformDb_rescue].dbo.ReentryPlan p ON p.Id = r.Id
+    WHERE p.Verdict NOT IN ('OK', 'ALREADY_PRESENT');"
+```
+
+Сверка после применения: для каждой строки вердикта `OK` в `Bookings` лежит
+строка с тем же `Id`, `CreatedAt`, `UpdatedAt`, `Status` (сравнить с
+`RescueBookings`); `COUNT(*) FROM Bookings` = `N` + число вставленных `NEW/OK`.
+Если контейнер `api` уже работает на старых образах, он штатно подхватит строки
+без перезапуска. Старый код счётчик не ведёт, поэтому при повторной попытке
+релиза бэкфилл миграции посчитает и эти брони.
+
+**(e) Связь с затронутыми людьми.** Пишет Тигран (владелец платформы) — от
+имени сервиса, тем же каналом, которым он общается с пользователями (адреса
+и `PreferredLanguage` — из `RescueContacts` / файла `$OUT`; пользователей,
+которых нет в восстановленной базе, в приложении нет, только почта из файла).
+Язык — по `PreferredLanguage` (`hy` / `ru` / `en`); шаблоны на русском и
+английском ниже, армянский текст готовит Тигран. Платформа ничего не пишет
+автоматически.
+
+| Кому | Когда | Суть |
+|---|---|---|
+| Арендатор | вердикт `RENTER_MISSING` / `LISTING_MISSING` / `DATE_CONFLICT` | запрос не сохранился, отправить заново (при `RENTER_MISSING` — зарегистрироваться заново); извинение |
+| Владелец | тот же случай | запрос арендатора не сохранился; если арендатор напишет снова — придёт новое обычное уведомление |
+| Владелец | `Pending` восстановлена с коротким остатком TTL | запрос восстановлен, срок ответа истекает в `<ExpiresAt>`, оно не продлевается |
+| Обе стороны | у брони была переписка (`RescueChatMessages` непуст) | сообщения за период `<с BAK_STOP по откат>` потеряны, повторить важное |
+| Обе стороны | `CHANGED` вернулась в прежний статус | решение (одобрено/отменено/…) возвращено, подтверждать ничего не нужно; письмо — только если пользователь мог уже действовать по нему |
+
+> RU: «Здравствуйте, `<имя>`. Из-за технической неполадки на dorent.am в
+> `<дата, время>` мы вернули сайт к более раннему состоянию. Ваш запрос на
+> аренду «`<игрушка>`» на `<даты>` не сохранился / сохранился, но переписка по
+> нему за этот период потеряна. `<Что сделать: отправьте запрос заново / ничего
+> делать не нужно / ответьте на запрос до <срок>>`. Приносим извинения.»
+>
+> EN: «Hello `<name>`. Because of a technical problem on dorent.am we restored
+> the site to an earlier state at `<date, time>`. Your rental request for
+> "`<toy>`" on `<dates>` was not saved / was restored, but the messages about
+> it from that period were lost. `<What to do: please submit the request again
+> / nothing is needed / please answer the request by <deadline>>`. We are
+> sorry for the inconvenience.»
+
+**Закрытие.** Когда Тигран подтвердил, что люди уведомлены и данные сверены:
+
+```bash
+ex "IF DB_ID(N'RentalPlatformDb_rescue') IS NOT NULL BEGIN ALTER DATABASE [RentalPlatformDb_rescue] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [RentalPlatformDb_rescue]; END"
+shred -u -n 3 "$OUT"                       # персональные данные: файл и база не должны остаться
+rm -f /opt/dorent/deployment-notes/p33-state.env
+```
+
+Строка об откате — в `deploys.log`; запись об инциденте — в
+`knowledge/platform-history.md` (создаётся первым реальным инцидентом).

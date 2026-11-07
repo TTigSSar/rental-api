@@ -130,4 +130,105 @@ public sealed class AccountDeletionSqlServerTests
         await using var verify = db.CreateContext();
         Assert.Empty(await verify.Bookings.AsNoTracking().ToListAsync());
     }
+
+    [SqlServerFact]
+    public async Task A_Booking_Create_By_The_Deleted_Renter_Waits_And_Is_Then_Refused()
+    {
+        using var db = new SqlServerTestDatabase();
+        await SeedAsync(db);
+
+        await using var deletionContext = db.CreateContext();
+        var session = await new AccountDeletionStore(deletionContext).BeginAsync(UserId);
+        Assert.NotNull(session);
+
+        // The renter being deleted creates a request on somebody else's listing.
+        var start = TestData.Today.AddDays(6);
+        var booking = TestData.Booking(Guid.NewGuid(), OtherListingId, UserId, start, start.AddDays(1), BookingStatus.Pending);
+        await using var createContext = db.CreateContext();
+        var create = Task.Run(() => new BookingsStore(createContext).TryCreateBookingAsync(booking, null, CategoryId));
+
+        await Task.Delay(1500);
+        Assert.False(create.IsCompleted, "the create must wait on the renter's row lock while the deletion is open");
+
+        Assert.NotNull(await session!.ClosePendingBookingsAsync(DateTime.UtcNow));
+        await session.EraseAsync(DateTime.UtcNow, "Deleted user");
+        await session.CommitAsync();
+        await session.DisposeAsync();
+
+        Assert.False(await create.WaitAsync(TimeSpan.FromSeconds(30)));
+        await using var verify = db.CreateContext();
+        Assert.Empty(await verify.Bookings.AsNoTracking().ToListAsync());
+    }
+
+    // Approve read the booking as Pending, then the deletion cancelled it and committed: the approve must lose
+    // the compare-and-set and leave Cancelled in place (no "deleted renter + Approved booking").
+    [SqlServerFact]
+    public async Task An_Approve_That_Read_Pending_Before_The_Deletion_Committed_Loses_The_Compare_And_Set()
+    {
+        using var db = new SqlServerTestDatabase();
+        await SeedAsync(db);
+        var bookingId = Guid.NewGuid();
+        var start = TestData.Today.AddDays(5);
+        await db.SeedAsync(TestData.Booking(bookingId, OtherListingId, UserId, start, start.AddDays(1), BookingStatus.Pending));
+
+        await using var approveContext = db.CreateContext();
+        var tracked = await new BookingsStore(approveContext).FindBookingWithRelationsByIdAsync(bookingId);
+        Assert.NotNull(tracked);
+        tracked!.Status = BookingStatus.Approved;
+        tracked.ApprovedAt = DateTime.UtcNow;
+        tracked.UpdatedAt = DateTime.UtcNow;
+
+        await using (var deletionContext = db.CreateContext())
+        {
+            var session = await new AccountDeletionStore(deletionContext).BeginAsync(UserId);
+            Assert.NotNull(session);
+            Assert.Empty(await session!.FindOpenRentalsAsync());
+            Assert.NotNull(await session.ClosePendingBookingsAsync(DateTime.UtcNow));
+            await session.EraseAsync(DateTime.UtcNow, "Deleted user");
+            await session.CommitAsync();
+            await session.DisposeAsync();
+        }
+
+        var outcome = await new BookingsStore(approveContext).TryApproveBookingAsync(tracked);
+
+        Assert.Equal(RentalPlatform.Application.Abstractions.ApproveBookingOutcome.NotPending, outcome);
+        await using var verify = db.CreateContext();
+        Assert.Equal(BookingStatus.Cancelled, (await verify.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId)).Status);
+        Assert.NotNull((await verify.Users.AsNoTracking().SingleAsync(u => u.Id == UserId)).DeletedAt);
+    }
+
+    // The approve commits between the deletion's open-rentals check and its Pending read: the post-close re-check
+    // catches the now-Approved booking, the close reports a lost race (409 state_changed) and nothing is deleted.
+    [SqlServerFact]
+    public async Task An_Approve_Committed_Between_The_Open_Rentals_Check_And_The_Close_Aborts_The_Deletion()
+    {
+        using var db = new SqlServerTestDatabase();
+        await SeedAsync(db);
+        var bookingId = Guid.NewGuid();
+        var start = TestData.Today.AddDays(5);
+        await db.SeedAsync(TestData.Booking(bookingId, OtherListingId, UserId, start, start.AddDays(1), BookingStatus.Pending));
+
+        // The owner's read (it includes the renter row) happens first: once the deletion holds the renter's row
+        // lock the same read would simply wait for it.
+        await using var approveContext = db.CreateContext();
+        var store = new BookingsStore(approveContext);
+        var tracked = await store.FindBookingWithRelationsByIdAsync(bookingId);
+        tracked!.Status = BookingStatus.Approved;
+        tracked.ApprovedAt = DateTime.UtcNow;
+        tracked.UpdatedAt = DateTime.UtcNow;
+
+        await using var deletionContext = db.CreateContext();
+        var session = await new AccountDeletionStore(deletionContext).BeginAsync(UserId);
+        Assert.NotNull(session);
+        Assert.Empty(await session!.FindOpenRentalsAsync());
+
+        Assert.Equal(RentalPlatform.Application.Abstractions.ApproveBookingOutcome.Approved, await store.TryApproveBookingAsync(tracked));
+
+        Assert.Null(await session.ClosePendingBookingsAsync(DateTime.UtcNow));
+        await session.DisposeAsync(); // rolls back
+
+        await using var verify = db.CreateContext();
+        Assert.Equal(BookingStatus.Approved, (await verify.Bookings.AsNoTracking().SingleAsync(b => b.Id == bookingId)).Status);
+        Assert.Null((await verify.Users.AsNoTracking().SingleAsync(u => u.Id == UserId)).DeletedAt);
+    }
 }

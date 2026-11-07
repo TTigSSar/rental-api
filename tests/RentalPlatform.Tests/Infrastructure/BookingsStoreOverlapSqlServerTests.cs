@@ -82,7 +82,7 @@ public sealed class BookingsStoreOverlapSqlServerTests
             var tracked = await context.Bookings.FindAsync(pending.Id);
             var approved = await new BookingsStore(context).TryApproveBookingAsync(tracked!);
 
-            Assert.True((bool)c[4] == approved, $"existing [{c[0]},{c[1]}] vs pending [{c[2]},{c[3]}]");
+            Assert.True((bool)c[4] == (approved == RentalPlatform.Application.Abstractions.ApproveBookingOutcome.Approved),$"existing [{c[0]},{c[1]}] vs pending [{c[2]},{c[3]}]");
         }
     }
 }

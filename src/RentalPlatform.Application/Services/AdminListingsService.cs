@@ -451,7 +451,7 @@ public sealed class AdminListingsService : IAdminListingsService
             Id = listing.Id,
             OwnerId = listing.OwnerId,
             OwnerEmail = DeletedUserDisplay.Email(listing.Owner),
-            OwnerPhoneNumber = listing.Owner.PhoneNumber,
+            OwnerPhoneNumber = DeletedUserDisplay.PhoneNumber(listing.Owner),
             OwnerFirstName = DeletedUserDisplay.FirstName(listing.Owner),
             OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
             CategoryId = listing.CategoryId,

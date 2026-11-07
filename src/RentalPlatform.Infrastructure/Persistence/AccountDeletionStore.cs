@@ -140,6 +140,21 @@ public sealed class AccountDeletionStore : IAccountDeletionStore
                 closed.Add(new ClosedBooking(booking, rejected));
             }
 
+            // Re-check inside the same transaction, after the closes: an approve that committed between
+            // FindOpenRentalsAsync and the Pending read above, or a booking created by the user in that window,
+            // is not covered by the lock on the user row. Anything still open -> treated as a lost CAS (409).
+            var stillOpen = await _dbContext.Bookings
+                .AsNoTracking()
+                .AnyAsync(booking => (booking.Status == BookingStatus.Pending
+                                      || booking.Status == BookingStatus.Approved
+                                      || booking.Status == BookingStatus.Active)
+                                     && (booking.RenterId == userId || booking.Listing.OwnerId == userId),
+                    cancellationToken);
+            if (stillOpen)
+            {
+                return null;
+            }
+
             return closed;
         }
 
@@ -213,16 +228,54 @@ public sealed class AccountDeletionStore : IAccountDeletionStore
                 .ExecuteUpdateAsync(set => set.SetProperty(log => log.UserId, (Guid?)null), cancellationToken);
 
             // Admin-facing snapshots that name the user.
-            await _dbContext.Reports
+            // Moderation-log rows written when a report was resolved/dismissed/reopened carry the report's label
+            // (TargetType = Report, TargetId = the report id), so they are relabeled with the same wording.
+            var userReportIds = await _dbContext.Reports
+                .AsNoTracking()
                 .Where(report => report.TargetType == ReportTargetType.User && report.TargetId == userId)
-                .ExecuteUpdateAsync(set => set.SetProperty(report => report.TargetLabel, deletedUserLabel), cancellationToken);
+                .Select(report => report.Id)
+                .ToListAsync(cancellationToken);
+            if (userReportIds.Count > 0)
+            {
+                await _dbContext.Reports
+                    .Where(report => userReportIds.Contains(report.Id))
+                    .ExecuteUpdateAsync(set => set.SetProperty(report => report.TargetLabel, deletedUserLabel), cancellationToken);
+                await _dbContext.ModerationLogEntries
+                    .Where(entry => entry.TargetType == ModerationTargetType.Report && userReportIds.Contains(entry.TargetId))
+                    .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.TargetLabel, deletedUserLabel), cancellationToken);
+            }
 
+            // A Message report's TargetId is the conversation id. Only reports on the user's own conversations,
+            // filed by the other party, and labeled with this user's name are relabeled: a same-named stranger's
+            // chat is untouched.
             if (fullName.Length > 0)
             {
                 var chatLabel = ChatReportLabelPrefix + fullName;
-                await _dbContext.Reports
-                    .Where(report => report.TargetType == ReportTargetType.Message && report.TargetLabel == chatLabel)
-                    .ExecuteUpdateAsync(set => set.SetProperty(report => report.TargetLabel, ChatReportLabelPrefix + deletedUserLabel), cancellationToken);
+                var newChatLabel = ChatReportLabelPrefix + deletedUserLabel;
+                var conversationIds = await _dbContext.Conversations
+                    .AsNoTracking()
+                    .Where(conversation => conversation.OwnerId == userId || conversation.RenterId == userId)
+                    .Select(conversation => conversation.Id)
+                    .ToListAsync(cancellationToken);
+                var chatReportIds = conversationIds.Count == 0
+                    ? new List<Guid>()
+                    : await _dbContext.Reports
+                        .AsNoTracking()
+                        .Where(report => report.TargetType == ReportTargetType.Message
+                                         && report.ReporterUserId != userId
+                                         && report.TargetLabel == chatLabel
+                                         && conversationIds.Contains(report.TargetId))
+                        .Select(report => report.Id)
+                        .ToListAsync(cancellationToken);
+                if (chatReportIds.Count > 0)
+                {
+                    await _dbContext.Reports
+                        .Where(report => chatReportIds.Contains(report.Id))
+                        .ExecuteUpdateAsync(set => set.SetProperty(report => report.TargetLabel, newChatLabel), cancellationToken);
+                    await _dbContext.ModerationLogEntries
+                        .Where(entry => entry.TargetType == ModerationTargetType.Report && chatReportIds.Contains(entry.TargetId))
+                        .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.TargetLabel, newChatLabel), cancellationToken);
+                }
             }
 
             await _dbContext.ModerationLogEntries

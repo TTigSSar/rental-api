@@ -55,8 +55,9 @@ public interface IAccountDeletionSession : IAsyncDisposable
 
     /// <summary>
     /// Closes every Pending booking of the user (outgoing -> Cancelled, incoming -> Rejected), each by a
-    /// compare-and-set on Status = Pending. Null when a booking left Pending in the meantime (a lost CAS):
-    /// the caller must roll back.
+    /// compare-and-set on Status = Pending, then re-checks that no Pending/Approved/Active booking of the user
+    /// remains. Null when a booking left Pending in the meantime (a lost CAS) or a booking appeared or was
+    /// approved during the close: the caller must roll back.
     /// </summary>
     Task<IReadOnlyList<ClosedBooking>?> ClosePendingBookingsAsync(DateTime now, CancellationToken cancellationToken = default);
 

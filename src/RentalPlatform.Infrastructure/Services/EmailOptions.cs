@@ -11,12 +11,14 @@ public sealed class EmailOptions
 
     public const string DefaultFrom = "DoRent <no-reply@dorent.am>";
     public const int DefaultSendBudgetLimit = 100;
+    public const int DefaultChatSendBudgetLimit = 70;
     public static readonly TimeSpan DefaultSendBudgetWindow = TimeSpan.FromHours(24);
 
     public string? Provider { get; init; }
     public string? From { get; init; }
     public ResendOptions Resend { get; init; } = new();
     public SendBudgetOptions SendBudget { get; init; } = new();
+    public SendBudgetOptions ChatSendBudget { get; init; } = new();
 
     public bool IsResend => string.Equals(Provider?.Trim(), "Resend", StringComparison.OrdinalIgnoreCase);
 
@@ -31,6 +33,18 @@ public sealed class EmailOptions
 
     public TimeSpan EffectiveSendBudgetWindow =>
         double.TryParse(SendBudget.WindowHours?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var hours)
+        && hours > 0 && hours < 24 * 365
+            ? TimeSpan.FromHours(hours)
+            : DefaultSendBudgetWindow;
+
+    // Chat-only cap inside the shared budget (ADR-059): leaves the rest for verification / reset / deletion.
+    public int EffectiveChatSendBudgetLimit =>
+        int.TryParse(ChatSendBudget.Limit?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var limit) && limit > 0
+            ? limit
+            : DefaultChatSendBudgetLimit;
+
+    public TimeSpan EffectiveChatSendBudgetWindow =>
+        double.TryParse(ChatSendBudget.WindowHours?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var hours)
         && hours > 0 && hours < 24 * 365
             ? TimeSpan.FromHours(hours)
             : DefaultSendBudgetWindow;

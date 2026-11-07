@@ -24,24 +24,82 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
     private const int QuietHoursEnd = 9;
     private const string DevelopmentFallbackBaseUrl = "http://localhost:4200";
 
+    /// <summary>An unread line older than this never counts (ADR-059): no stale-backlog email after downtime.</summary>
+    public static readonly TimeSpan MaxUnreadAge = TimeSpan.FromHours(48);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IChatEmailUnsubscribeTokens _tokens;
     private readonly TimeProvider _timeProvider;
     private readonly AppOptions _app;
+    private readonly IEmailSendBudget _budget;
+    private readonly IEmailVerificationSettings _settings;
+    private readonly int _chatLimit;
+    private readonly TimeSpan _chatWindow;
     private readonly ILogger<ChatUnreadEmailDispatcher> _logger;
+
+    // Sliding window of chat sends (in memory, like the shared budget: a restart resets it, still bounded by
+    // the shared budget). Only the sweep loop touches it.
+    private readonly Queue<DateTimeOffset> _chatSends = new();
+    private DateTimeOffset? _chatCapWarnedAt;
 
     public ChatUnreadEmailDispatcher(
         IServiceScopeFactory scopeFactory,
         IChatEmailUnsubscribeTokens tokens,
         TimeProvider timeProvider,
         IOptions<AppOptions> app,
+        IOptions<EmailOptions> email,
+        IEmailSendBudget budget,
+        IEmailVerificationSettings settings,
         ILogger<ChatUnreadEmailDispatcher> logger)
     {
         _scopeFactory = scopeFactory;
         _tokens = tokens;
         _timeProvider = timeProvider;
         _app = app.Value;
+        _budget = budget;
+        _settings = settings;
+        _chatLimit = email.Value.EffectiveChatSendBudgetLimit;
+        _chatWindow = email.Value.EffectiveChatSendBudgetWindow;
         _logger = logger;
+    }
+
+    // Reserves one chat send inside the chat-only sliding cap. False (and one Warning per window) when full.
+    private bool TryAcquireChatCap(DateTimeOffset now)
+    {
+        while (_chatSends.Count > 0 && now - _chatSends.Peek() >= _chatWindow)
+        {
+            _chatSends.Dequeue();
+        }
+
+        if (_chatSends.Count >= _chatLimit)
+        {
+            if (_chatCapWarnedAt is null || now - _chatCapWarnedAt.Value >= _chatWindow)
+            {
+                _chatCapWarnedAt = now;
+                _logger.LogWarning(
+                    "Chat email cap reached ({Limit} per {WindowHours} h). Chat unread emails wait until {ResumeAt:O}; the shared send budget keeps its reserve.",
+                    _chatLimit, _chatWindow.TotalHours, _chatSends.Peek() + _chatWindow);
+            }
+
+            return false;
+        }
+
+        _chatSends.Enqueue(now);
+        return true;
+    }
+
+    private void ReleaseChatCap()
+    {
+        // Undo the most recent reservation (all reservations in a run carry the same timestamp).
+        if (_chatSends.Count > 0)
+        {
+            var kept = _chatSends.ToArray();
+            _chatSends.Clear();
+            foreach (var at in kept.Take(kept.Length - 1))
+            {
+                _chatSends.Enqueue(at);
+            }
+        }
     }
 
     /// <summary>True from 22:00 until 09:00 Yerevan (fixed UTC+4, ADR-048).</summary>
@@ -60,8 +118,16 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
             return 0;
         }
 
+        // Production email gate (ADR-028 section 9): when mail cannot actually be delivered, claim nothing,
+        // so the streaks are still unclaimed once the gate opens.
+        if (!_settings.IsOperational)
+        {
+            return 0;
+        }
+
         var now = nowOffset.UtcDateTime;
         var cutoff = now - UnreadThreshold;
+        var oldestCounted = now - MaxUnreadAge;
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -87,6 +153,7 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
                 .Where(message => message.ConversationId == conversation.Id
                     && message.SenderId != participant.UserId
                     && (message.ActorUserId == null || message.ActorUserId != participant.UserId)
+                    && message.CreatedAt >= oldestCounted
                     && (participant.LastReadAt == null || message.CreatedAt > participant.LastReadAt))
                 .Min(message => (DateTime?)message.CreatedAt)
             // One email per unread streak. Re-armed when the recipient has read the conversation since the last
@@ -116,6 +183,22 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Budget BEFORE the claim (ADR-059): if either is exhausted the run ends with nothing claimed, so the
+            // candidate stays eligible for a later run. Chat cap first (refundable), then the shared budget.
+            // If the claim then loses a race (only possible with a second instance) the chat reservation is
+            // refunded; the shared token cannot be returned (IEmailSendBudget has no release) and is accepted
+            // as spent: one wasted token per lost race.
+            if (!TryAcquireChatCap(nowOffset))
+            {
+                break;
+            }
+
+            if (!_budget.TryAcquire())
+            {
+                ReleaseChatCap();
+                break; // the budget logged Critical
+            }
+
             // Claim BEFORE sending (at-most-once, ADR-029): the update only matches while the row still holds
             // the value the candidate was selected with, so a concurrent run cannot claim it twice.
             var claimed = await db.ConversationParticipants
@@ -126,6 +209,7 @@ public sealed class ChatUnreadEmailDispatcher : BackgroundService
                     cancellationToken);
             if (claimed == 0)
             {
+                ReleaseChatCap();
                 continue;
             }
 

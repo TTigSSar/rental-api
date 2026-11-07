@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RentalPlatform.Application.Abstractions;
@@ -31,16 +32,43 @@ public sealed class ChatUnreadEmailDispatcherTests
 
     private const string JwtSecret = "xunit-dispatcher-test-signing-key-0123456789";
 
+    private sealed class TestDb : IDisposable
+    {
+        private readonly Func<AppDbContext> _create;
+        private readonly Func<object[], Task> _seed;
+        private readonly IDisposable _inner;
+
+        public TestDb(SqliteTestDatabase db) { _create = db.CreateContext; _seed = db.SeedAsync; _inner = db; }
+        public TestDb(SqlServerTestDatabase db) { _create = db.CreateContext; _seed = db.SeedAsync; _inner = db; }
+
+        public AppDbContext CreateContext() => _create();
+        public Task SeedAsync(params object[] entities) => _seed(entities);
+        public void Dispose() => _inner.Dispose();
+    }
+
+    private sealed class CountingLogger : ILogger<ChatUnreadEmailDispatcher>
+    {
+        public List<LogLevel> Levels { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Levels.Add(logLevel);
+    }
+
     private sealed class Harness : IDisposable
     {
-        public SqliteTestDatabase Db { get; } = new();
+        public TestDb Db { get; }
         public FakeEmailService Email { get; } = new();
         public FakeTimeProvider Clock { get; } = new(Noon);
+        public FakeEmailSendBudget Budget { get; } = new();
+        public FakeEmailVerificationSettings Settings { get; } = new();
+        public CountingLogger Logger { get; } = new();
         public ChatEmailUnsubscribeTokens Tokens { get; }
         public ChatUnreadEmailDispatcher Dispatcher { get; }
 
-        public Harness(IEmailService? emailOverride = null)
+        public Harness(IEmailService? emailOverride = null, string? chatLimit = null, bool sqlServer = false)
         {
+            Db = sqlServer ? new TestDb(new SqlServerTestDatabase()) : new TestDb(new SqliteTestDatabase());
             Tokens = new ChatEmailUnsubscribeTokens(Options.Create(new JwtOptions { SecretKey = JwtSecret }), Clock);
 
             var services = new ServiceCollection();
@@ -53,7 +81,10 @@ public sealed class ChatUnreadEmailDispatcherTests
                 Tokens,
                 Clock,
                 Options.Create(new AppOptions { PublicBaseUrl = "https://dorent.test/" }),
-                NullLogger<ChatUnreadEmailDispatcher>.Instance);
+                Options.Create(new EmailOptions { ChatSendBudget = new SendBudgetOptions { Limit = chatLimit } }),
+                Budget,
+                Settings,
+                Logger);
         }
 
         public async Task SeedConversationAsync(
@@ -405,6 +436,123 @@ public sealed class ChatUnreadEmailDispatcherTests
 
         Assert.Equal(ChatUnreadEmailDispatcher.MaxEmailsPerRun, await h.Dispatcher.RunOnceAsync());
         Assert.Equal(5, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+    }
+
+    // ---- send budget, age cap, gate (reviewer fixes) -------------------------------------------
+
+    [Fact]
+    public async Task Exhausted_Shared_Budget_Ends_The_Run_Without_Claiming_And_Later_Run_Sends()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(null, Old, MessageType.System); // unread for both parties
+        h.Budget.Remaining = 0;
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Empty(h.Email.ChatUnreadSent);
+        Assert.Null((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
+        Assert.Null((await h.ParticipantAsync(OwnerId)).ChatEmailSentAt);
+
+        h.Budget.Remaining = 1; // only one send left: exactly one goes, the other stays eligible
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(1, h.Budget.Acquired);
+
+        h.Budget.Remaining = null;
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(2, h.Email.ChatUnreadSent.Count);
+    }
+
+    [Fact]
+    public async Task Chat_Cap_Stops_The_Run_And_Leaves_The_Shared_Budget_Its_Reserve()
+    {
+        using var h = new Harness(chatLimit: "1");
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(null, Old, MessageType.System);
+        h.Budget.Remaining = 10;
+
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(9, h.Budget.Remaining); // the capped candidate did not touch the shared budget
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(9, h.Budget.Remaining);
+        Assert.Single(h.Email.ChatUnreadSent);
+
+        // One Warning, not one per run or per candidate, within the window.
+        await h.Dispatcher.RunOnceAsync();
+        Assert.Equal(1, h.Logger.Levels.Count(level => level == LogLevel.Warning));
+
+        // A rolling 24 h later the cap opens again and the waiting candidate goes out.
+        h.Clock.Advance(TimeSpan.FromHours(24));
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.Equal(2, h.Email.ChatUnreadSent.Count);
+    }
+
+    [Fact]
+    public async Task Default_Chat_Cap_Is_70()
+    {
+        Assert.Equal(70, new EmailOptions().EffectiveChatSendBudgetLimit);
+        Assert.Equal(70, new EmailOptions { ChatSendBudget = new SendBudgetOptions { Limit = "" } }.EffectiveChatSendBudgetLimit);
+        Assert.Equal(70, new EmailOptions { ChatSendBudget = new SendBudgetOptions { Limit = "abc" } }.EffectiveChatSendBudgetLimit);
+        Assert.Equal(5, new EmailOptions { ChatSendBudget = new SendBudgetOptions { Limit = " 5 " } }.EffectiveChatSendBudgetLimit);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_Line_Older_Than_48_Hours_Never_Counts_One_Inside_The_Window_Does()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, TimeSpan.FromHours(49));
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Null((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
+
+        await h.AddLineAsync(OwnerId, TimeSpan.FromHours(47));
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+    }
+
+    [Fact]
+    public async Task The_Threshold_Is_Measured_On_The_Oldest_Line_Inside_The_48_Hour_Window()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, TimeSpan.FromHours(60));
+        await h.AddLineAsync(OwnerId, TimeSpan.FromMinutes(5)); // oldest counted line is 5 min old
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+
+        h.Clock.Advance(TimeSpan.FromMinutes(11));
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+    }
+
+    [Fact]
+    public async Task A_Closed_Production_Gate_Skips_The_Run_And_Claims_Nothing()
+    {
+        using var h = new Harness();
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, Old);
+        h.Settings.IsOperational = false;
+
+        Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
+        Assert.Empty(h.Email.ChatUnreadSent);
+        Assert.Equal(0, h.Budget.Acquired);
+        Assert.Null((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
+
+        h.Settings.IsOperational = true;
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+    }
+
+    [SqlServerFact]
+    public async Task On_Real_SQL_Server_The_Candidate_Query_And_Claim_Work()
+    {
+        using var h = new Harness(sqlServer: true);
+        await h.SeedConversationAsync();
+        await h.AddLineAsync(OwnerId, TimeSpan.FromHours(49));
+        await h.AddLineAsync(OwnerId, Old);
+
+        Assert.Equal(1, await h.Dispatcher.RunOnceAsync());
+        Assert.NotNull((await h.ParticipantAsync(RenterId)).ChatEmailSentAt);
+        Assert.Null((await h.ParticipantAsync(OwnerId)).ChatEmailSentAt);
         Assert.Equal(0, await h.Dispatcher.RunOnceAsync());
     }
 

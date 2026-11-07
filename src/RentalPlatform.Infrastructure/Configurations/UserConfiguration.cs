@@ -59,6 +59,13 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.Role)
             .IsRequired();
 
+        // ADR-059: existing rows start opted in. ValueGeneratedNever so an explicit false is written on
+        // insert (HasDefaultValue alone would treat the CLR default false as "unset" and store the default).
+        builder.Property(user => user.ChatEmailsEnabled)
+            .IsRequired()
+            .HasDefaultValue(true)
+            .ValueGeneratedNever();
+
         // Session version (ADR-055): existing rows start at 0.
         builder.Property(user => user.TokenVersion)
             .IsRequired()

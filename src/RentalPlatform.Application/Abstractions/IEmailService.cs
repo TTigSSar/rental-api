@@ -1,3 +1,5 @@
+using RentalPlatform.Application.DTOs;
+
 namespace RentalPlatform.Application.Abstractions;
 
 /// <summary>
@@ -48,5 +50,13 @@ public interface IEmailService
     Task SendAccountDeletedAsync(
         string email,
         string? preferredLanguage,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends the "new message in your chat" email (ADR-059): en/hy/ru with an English fallback, no message
+    /// text, links built by the caller. Never throws.
+    /// </summary>
+    Task SendChatUnreadAsync(
+        ChatUnreadEmail email,
         CancellationToken cancellationToken = default);
 }

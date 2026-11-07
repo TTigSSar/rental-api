@@ -19,6 +19,12 @@ public sealed class ConversationParticipant
     /// <summary>Timestamp of the last read. Drives unread counts and the Seen indicator.</summary>
     public DateTime? LastReadAt { get; set; }
 
+    /// <summary>
+    /// When the unread-chat email (ADR-059) was last claimed for this participant. Set before the send, so a
+    /// failed send is not retried. Re-armed once <see cref="LastReadAt"/> moves past it.
+    /// </summary>
+    public DateTime? ChatEmailSentAt { get; set; }
+
     public Conversation Conversation { get; set; } = null!;
     public User User { get; set; } = null!;
 }

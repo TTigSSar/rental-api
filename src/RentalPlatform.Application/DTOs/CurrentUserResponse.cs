@@ -19,6 +19,9 @@ public sealed class CurrentUserResponse
     // dialog asks for the password or, when false, for the email (ADR-056).
     public bool HasPassword { get; init; }
 
+    // ADR-059: unread-chat-message emails on/off. Non-null; true for every existing account.
+    public bool ChatEmailsEnabled { get; init; }
+
     // Self-view only (home-point model) — never appears on any other DTO. Null when the user has no home
     // point set yet.
     public HomePointResponse? HomePoint { get; init; }

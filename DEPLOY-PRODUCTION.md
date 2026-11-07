@@ -1234,11 +1234,25 @@ cd /opt/dorent/rental-api
 # ожидается: VERIFY PASS: restored <file>.bak as RentalPlatformDb_verify, dbo.Users COUNT(*) = <N>
 # если VERIFY упал — СТОП, не деплоить: откатывать схему будет нечем
 
+# 2.5) ЕСЛИ понадобится теговый откат образов (:pre-<name>) — тегировать
+#      ТЕКУЩИЙ (старый) образ ЗДЕСЬ, ДО build, а не после (M-085). На этом
+#      хосте (Docker 29.6.1, containerd snapshotter) build переносит тег
+#      :latest на новый образ, и старый образ сразу становится недоступен для
+#      docker tag/docker commit («No such image» / «content digest not
+#      found») — даже если контейнер на нём ещё работает. Легаси-driver
+#      overlay2 это прощал, этот — нет.
+CID_API="$(docker compose -f docker-compose.production.yml ps -q api)"
+CID_UI="$(docker compose -f docker-compose.production.yml ps -q ui)"
+docker tag "$(docker inspect -f '{{.Image}}' "$CID_API")" rental-api-api:pre-<name>
+docker tag "$(docker inspect -f '{{.Image}}' "$CID_UI")"  rental-api-ui:pre-<name>
+
 # 3) сборка образов. Пункт f объясняет, почему сборка идёт ДО подъёма, но на
 #    обновлении надёжнее ещё и развести два образа по отдельным командам:
 #    2026-09-27 так и делалось (api 56 с, ui 61 с, OOM-killer не сработал)
 docker compose -f docker-compose.production.yml build api
 docker compose -f docker-compose.production.yml build ui
+# сверить: id тега pre-<name> должен ОТЛИЧАТЬСЯ от id :latest после build
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E 'rental-api-(api|ui):(latest|pre-<name>)'
 
 # 4) ЕСТЬ МИГРАЦИИ EF? -> РЕПЕТИЦИЯ на восстановленном бэкапе (обязательно,
 #    ADR-023) — подраздел ниже. Нет миграций -> шаг пропускается целиком.
@@ -2383,9 +2397,16 @@ CROSS JOIN (SELECT COUNT_BIG(*) AS cnt FROM [RentalPlatformDb].dbo.Bookings) AS 
    ```bash
    ./deploy/smoke.sh --record-baseline      # exit 1 = замер не снят: разобраться до остановки api
    ```
-5. **Тег старых образов `:pre-demand-counts`.** После шага 3 `:latest` уже
-   указывает на НОВЫЕ образы, поэтому тегировать `:latest` нельзя — берётся
-   образ, на котором работают текущие (ещё старые) контейнеры:
+5. **Тег старых образов `:pre-demand-counts`.** ⚠️ **Этот порядок (тег после
+   `build`, по CID контейнера) на проде 2026-11-07 НЕ СРАБОТАЛ** — `docker
+   tag`/`docker commit` оба упали («No such image» / «content digest …
+   not found»): на этом хосте (Docker 29.6.1, containerd snapshotter) `build`
+   переносит `:latest` на новый образ, и старый образ, едва став untagged,
+   тут же теряет content-блобы в containerd — даже у контейнера, который на
+   нём ещё жив (M-085). Деплой продолжился без тега (данные защищены
+   `BAK_STOP`, кодовый откат — `git checkout` + пересборка, см. «Откат» и
+   «Последовательность» общего раздела, пункт 2.5). **Для следующего такого
+   релиза тегировать на шаге 1, ДО `build`:**
 
    ```bash
    CID_API="$($DC ps -q api </dev/null)"; CID_UI="$($DC ps -q ui </dev/null)"
@@ -2567,6 +2588,19 @@ qp "SELECT 'new_bookings=' + CAST((SELECT COUNT(*) FROM [$LIVE].dbo.Bookings WHE
    docker inspect -f '{{.Config.Image}} {{.Image}}' "$($DC ps -q api </dev/null)"
    # сверить image id с rental-api-api:pre-demand-counts
    ```
+
+   > ⚠️ **На деплое 2026-11-07 тега `:pre-demand-counts` не существует**
+   > (M-085 — тег не удался, см. шаг 5 выше). Если откат этого конкретного
+   > релиза понадобится, шаг 4 заменяется на кодовый путь:
+   > ```bash
+   > cd /opt/dorent/rental-api  && git checkout 2ee84b4716394c3b91c9302200e2327f67e4fbb2
+   > cd /opt/dorent/Rental-Ui  && git checkout 7010cce65c7edad8ec96fe60bed47fabbe54f076
+   > cd /opt/dorent/rental-api
+   > $DC build api && $DC build ui
+   > $DC up -d </dev/null                      # БЕЗ down -v, никогда
+   > ```
+   > Занимает на этом хосте ориентировочно 1–2 мин дополнительно (замерено
+   > 2026-11-07: api 24 с, ui 46 с) вместо мгновенного тег-свопа.
 5. **Smoke:** `./deploy/smoke.sh` (раздел j). Отсутствие `/api/admin/demand`
    (404) — норма для старого образа; остальное обязано быть PASS. Затем — блок
    5.1 ниже. Вспомогательную базу и файл НЕ удалять, пока Тигран не подтвердил,

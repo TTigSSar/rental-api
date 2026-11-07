@@ -461,8 +461,8 @@ public sealed class ChatUnreadEmailDispatcherTests
 
     [Theory]
     [InlineData("en", "Olga wrote to you about Duplo")]
-    [InlineData("ru", "Сообщение от Olga об игрушке «Duplo»")]
-    [InlineData("hy", "«Duplo» խաղալիքի մասին Ձեզ գրել է Olga")]
+    [InlineData("ru", "Olga: новое сообщение об игрушке «Duplo»")]
+    [InlineData("hy", "Olga: նոր հաղորդագրություն «Duplo» խաղալիքի մասին")]
     [InlineData(null, "Olga wrote to you about Duplo")]
     [InlineData("fr", "Olga wrote to you about Duplo")]
     public void Heading_For_A_Human_Message_Is_Localised_With_An_English_Fallback(string? language, string expected)
@@ -474,7 +474,7 @@ public sealed class ChatUnreadEmailDispatcherTests
 
     [Theory]
     [InlineData("en", "New in your chat about Duplo")]
-    [InlineData("ru", "Новое в вашем чате об игрушке «Duplo»")]
+    [InlineData("ru", "Новое в чате об игрушке «Duplo»")]
     [InlineData("hy", "Նոր բան Ձեր զրույցում՝ «Duplo» խաղալիքի մասին")]
     public void Heading_Without_A_Human_Message_Is_Neutral(string language, string expected)
     {
@@ -485,8 +485,8 @@ public sealed class ChatUnreadEmailDispatcherTests
 
     [Theory]
     [InlineData("en", "Deleted user wrote to you about Duplo")]
-    [InlineData("ru", "Сообщение от Удалённый пользователь об игрушке «Duplo»")]
-    [InlineData("hy", "«Duplo» խաղալիքի մասին Ձեզ գրել է Ջնջված օգտատեր")]
+    [InlineData("ru", "Удалённый пользователь: новое сообщение об игрушке «Duplo»")]
+    [InlineData("hy", "Ջնջված օգտատեր: նոր հաղորդագրություն «Duplo» խաղալիքի մասին")]
     public void Heading_For_A_Deleted_Sender_Uses_The_Localised_Deleted_User(string language, string expected)
     {
         var email = Email(language, hasHuman: true, firstName: null, deleted: true);

@@ -30,8 +30,8 @@ public static class ChatUnreadEmailTemplate
     // The design's "написала вам" is gender-specific and the sender's gender is unknown, so the heading is
     // phrased without a past-tense verb.
     private static readonly Copy Russian = new(
-        WroteHeading: (name, toy) => $"Сообщение от {name} об игрушке «{toy}»",
-        NewHeading: toy => $"Новое в вашем чате об игрушке «{toy}»",
+        WroteHeading: (name, toy) => $"{name}: новое сообщение об игрушке «{toy}»",
+        NewHeading: toy => $"Новое в чате об игрушке «{toy}»",
         DeletedUser: "Удалённый пользователь",
         Cta: "Открыть чат",
         Why: "Вы получили это письмо, потому что у вас есть переписка на DoRent и сообщение какое-то время остаётся непрочитанным.",
@@ -41,7 +41,7 @@ public static class ChatUnreadEmailTemplate
     // The design appended "ն" to the name, which is wrong for names ending in a consonant, so the name
     // stays uninflected at the end of the sentence.
     private static readonly Copy Armenian = new(
-        WroteHeading: (name, toy) => $"«{toy}» խաղալիքի մասին Ձեզ գրել է {name}",
+        WroteHeading: (name, toy) => $"{name}: նոր հաղորդագրություն «{toy}» խաղալիքի մասին",
         NewHeading: toy => $"Նոր բան Ձեր զրույցում՝ «{toy}» խաղալիքի մասին",
         DeletedUser: "Ջնջված օգտատեր",
         Cta: "Բացել զրույցը",

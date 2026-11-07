@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.DTOs;
 
 namespace RentalPlatform.Infrastructure.Services;
 
@@ -109,6 +110,23 @@ public sealed class EmailService : IEmailService
             // Never throws and never fails the deletion, which is already committed (ADR-056 section 4).
             // The log carries no address (ADR-029 section 3).
             _logger.LogError("Account-deleted email could not be sent ({ExceptionType}).", exception.GetType().Name);
+        }
+    }
+
+    public async Task SendChatUnreadAsync(
+        ChatUnreadEmail email,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var message = ChatUnreadEmailTemplate.Render(email);
+            await _sender.SendAsync(message, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Never throws; at-most-once (ADR-059 / ADR-029): the send was claimed before this call, so a
+            // failure is logged and not retried. No address and no link in the log (the link carries a token).
+            _logger.LogError("Chat unread email could not be sent ({ExceptionType}).", exception.GetType().Name);
         }
     }
 }

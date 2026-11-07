@@ -429,6 +429,42 @@ public sealed class AuthService : IAuthService
         return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
     }
 
+    public async Task<ServiceResult<CurrentUserResponse>> UpdateChatEmailsAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (_currentUserContext.UserId is not { } userId)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        var user = await _userAuthStore.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.Unauthenticated,
+                Message = "Current user is not authenticated."
+            });
+        }
+
+        if (user.IsBlocked)
+        {
+            return ServiceResult<CurrentUserResponse>.Failure(new ServiceError
+            {
+                Code = ErrorCodes.UserBlocked,
+                Message = "User account is blocked."
+            });
+        }
+
+        user.ChatEmailsEnabled = enabled;
+        await _userAuthStore.SaveChangesAsync(cancellationToken);
+
+        return ServiceResult<CurrentUserResponse>.Success(MapUser(user));
+    }
+
     public async Task<ServiceResult<bool>> UpdateNameAsync(string firstName, string? lastName, CancellationToken cancellationToken = default)
     {
         var loaded = await LoadActiveCurrentUserAsync(cancellationToken);
@@ -914,6 +950,7 @@ public sealed class AuthService : IAuthService
         IsBlocked = user.IsBlocked,
         Role = user.Role,
         HasPassword = PasswordPolicy.HasUsablePassword(user.PasswordHash),
+        ChatEmailsEnabled = user.ChatEmailsEnabled,
         HomePoint = MapHomePoint(user)
     };
 

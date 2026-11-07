@@ -15,12 +15,15 @@ public sealed class AuthController : ControllerBase
     private readonly IAuthService _authService;
     private readonly IExternalNonceService _externalNonceService;
     private readonly IAccountDeletionService _accountDeletionService;
+    private readonly IChatEmailUnsubscribeService _chatEmailUnsubscribeService;
 
     public AuthController(
         IAuthService authService,
         IExternalNonceService externalNonceService,
-        IAccountDeletionService accountDeletionService)
+        IAccountDeletionService accountDeletionService,
+        IChatEmailUnsubscribeService chatEmailUnsubscribeService)
     {
+        _chatEmailUnsubscribeService = chatEmailUnsubscribeService;
         _authService = authService;
         _externalNonceService = externalNonceService;
         _accountDeletionService = accountDeletionService;
@@ -265,6 +268,48 @@ public sealed class AuthController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _authService.UpdatePreferredLanguageAsync(request.PreferredLanguage, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    // ADR-059. The profile Settings toggle for unread-chat-message emails.
+    [HttpPut("me/chat-emails")]
+    [Authorize]
+    [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<CurrentUserResponse>> UpdateChatEmails(
+        [FromBody] UpdateChatEmailsRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Non-null by [Required] - model validation has already run.
+        var result = await _authService.UpdateChatEmailsAsync(request.Enabled!.Value, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    // ADR-059. The page behind the email's unsubscribe link POSTs here with the signed token (a GET would
+    // be triggered by mail scanners). 400 chat_email.unsubscribe_invalid for any bad token or user.
+    [HttpPost("chat-emails/unsubscribe")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterExtensions.AuthPolicy)]
+    [ProducesResponseType(typeof(ChatEmailUnsubscribeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<ChatEmailUnsubscribeResponse>> UnsubscribeChatEmails(
+        [FromBody] ChatEmailUnsubscribeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _chatEmailUnsubscribeService.UnsubscribeAsync(request.Token, cancellationToken);
         if (result.IsSuccess && result.Value is not null)
         {
             return Ok(result.Value);

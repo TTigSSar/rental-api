@@ -506,6 +506,8 @@ public sealed class DeletedUserSurfacesHttpTests
         public Task SendPasswordResetAsync(string email, string? preferredLanguage, string link, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task SendAccountDeletedAsync(string email, string? preferredLanguage, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SendChatUnreadAsync(RentalPlatform.Application.DTOs.ChatUnreadEmail email, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     [Fact]

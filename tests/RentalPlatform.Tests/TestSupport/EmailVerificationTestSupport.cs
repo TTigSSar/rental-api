@@ -46,8 +46,12 @@ public sealed class FakeEmailSendBudget : IEmailSendBudget
 
     public bool HasCapacity() => Remaining is not { } remaining || remaining > 0;
 
+    // Every TryAcquire call, granted or refused.
+    public int Attempts { get; private set; }
+
     public bool TryAcquire()
     {
+        Attempts++;
         if (DenyAcquire)
         {
             return false;

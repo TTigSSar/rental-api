@@ -39,6 +39,15 @@ public sealed class FakeEmailService : IEmailService
         return Task.CompletedTask;
     }
 
+    public List<RentalPlatform.Application.DTOs.ChatUnreadEmail> ChatUnreadSent { get; } = new();
+
+    public Task SendChatUnreadAsync(
+        RentalPlatform.Application.DTOs.ChatUnreadEmail email, CancellationToken cancellationToken = default)
+    {
+        ChatUnreadSent.Add(email);
+        return Task.CompletedTask;
+    }
+
     public List<(string Email, string? Language)> AccountDeletedSent { get; } = new();
 
     // Set to prove a throwing implementation cannot fail a committed deletion (the real one never throws).

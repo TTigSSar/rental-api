@@ -155,6 +155,11 @@ public static class ServiceCollectionExtensions
 
         services.AddHostedService<BookingExpiryBackgroundService>();
 
+        // ADR-059: unread-chat-message emails.
+        services.AddSingleton<IChatEmailUnsubscribeTokens, ChatEmailUnsubscribeTokens>();
+        services.AddScoped<IChatEmailUnsubscribeService, ChatEmailUnsubscribeService>();
+        services.AddHostedService<ChatUnreadEmailDispatcher>();
+
         return services;
     }
 }

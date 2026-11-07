@@ -152,15 +152,16 @@ public sealed class ConversationsStoreModerationConcurrencyTests
             (moderatorOneId, "moderator-one@dedupe.test", (int)UserRole.Admin),
             (moderatorTwoId, "moderator-two@dedupe.test", (int)UserRole.Admin));
 
-        await db.SeedAsync(
-            keeperConversation,
-            loserConversation,
-            new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = keeperId, UserId = moderatorOneId },
-            // Same member participant shape on both threads — exercises the "already present on
-            // the keeper, drop the duplicate" branch.
-            new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = keeperId, UserId = memberId },
-            new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = loserId, UserId = moderatorTwoId },
-            new ConversationParticipant { Id = Guid.NewGuid(), ConversationId = loserId, UserId = memberId });
+        await db.SeedAsync(keeperConversation, loserConversation);
+
+        // Participants via raw SQL: ConversationParticipants gained ChatEmailSentAt (ADR-059) after this
+        // schema state. The member participant is on both threads — exercises the "already present on
+        // the keeper, drop the duplicate" branch.
+        await db.SeedLegacyParticipantsAsync(
+            (keeperId, moderatorOneId),
+            (keeperId, memberId),
+            (loserId, moderatorTwoId),
+            (loserId, memberId));
 
         // Messages via raw SQL: ChatMessages gained ActorUserId (RC-5) after this schema state.
         await db.SeedLegacyTextMessagesAsync(

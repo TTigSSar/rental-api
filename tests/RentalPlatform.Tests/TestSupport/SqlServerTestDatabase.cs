@@ -217,6 +217,25 @@ public sealed class SqlServerTestDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Inserts bare ConversationParticipants rows with raw SQL, naming only columns that exist at the
+    /// schema state the caller migrated to (no ChatEmailSentAt, ADR-059). Same reason as
+    /// <see cref="SeedLegacyUsersAsync"/>.
+    /// </summary>
+    public async Task SeedLegacyParticipantsAsync(params (Guid ConversationId, Guid UserId)[] participants)
+    {
+        await using var context = CreateContext();
+        foreach (var (conversationId, userId) in participants)
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO [ConversationParticipants] ([Id], [ConversationId], [UserId])
+                VALUES ({0}, {1}, {2});
+                """,
+                Guid.NewGuid(), conversationId, userId);
+        }
+    }
+
     /// <summary>Inserts a minimal Categories row with raw SQL. Same reason as <see cref="SeedLegacyUsersAsync"/>.</summary>
     public async Task SeedLegacyCategoryAsync(Guid id, string name, string slug)
     {

@@ -63,6 +63,10 @@ public sealed class User
     // Account deletion (ADR-056): the row is anonymized, not removed. Non-null means the account was deleted.
     public DateTime? DeletedAt { get; set; }
 
+    // ADR-059: whether unread-chat-message emails are sent to this user. Default on; turned off from the
+    // profile Settings toggle or the signed unsubscribe link in the email.
+    public bool ChatEmailsEnabled { get; set; } = true;
+
     public ICollection<Listing> Listings { get; set; } = new List<Listing>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
     public ICollection<Favorite> Favorites { get; set; } = new List<Favorite>();

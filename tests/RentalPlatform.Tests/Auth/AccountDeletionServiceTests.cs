@@ -639,15 +639,38 @@ public sealed class AccountDeletionServiceTests
         var otherChatReport = Guid.NewGuid();
         var userEntry = Guid.NewGuid();
         var listingEntry = Guid.NewGuid();
-        await db.SeedAsync(TestData.User(adminId, "admin@test.local", role: UserRole.Admin));
+        var strangerId = Guid.NewGuid();
+        var strangerChatReport = Guid.NewGuid();
+        var chatReportEntry = Guid.NewGuid();
+        var userReportEntry = Guid.NewGuid();
+        var strangerChatEntry = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var strangerConversationId = Guid.NewGuid();
+        var chatBooking = Guid.NewGuid();
+        var strangerBooking = Guid.NewGuid();
+        var stranger = TestData.User(strangerId, "stranger@test.local");
+        stranger.FirstName = "Gone";
+        stranger.LastName = "Person";
+        await db.SeedAsync(TestData.User(adminId, "admin@test.local", role: UserRole.Admin), stranger);
+        await db.SeedAsync(
+            Rental(chatBooking, UserListingId, OtherId, BookingStatus.Completed, offsetDays: -9),
+            Rental(strangerBooking, OtherListingId, strangerId, BookingStatus.Completed, offsetDays: -20));
+        await db.SeedAsync(
+            TestData.Conversation(conversationId, chatBooking, UserId, OtherId),
+            TestData.Conversation(strangerConversationId, strangerBooking, OtherId, strangerId));
         await db.SeedAsync(
             new AiSearchLog { Id = userLog, UserId = UserId, CreatedAt = DateTime.UtcNow, Outcome = "ok", CostUsd = 0.01m },
             new AiSearchLog { Id = keptLog, UserId = OtherId, CreatedAt = DateTime.UtcNow, Outcome = "ok", CostUsd = 0.02m },
             TestData.Report(userReport, ReportTargetType.User, UserId, OtherId, targetLabel: "Gone Person"),
             TestData.Report(listingReport, ReportTargetType.Listing, UserListingId, OtherId, targetLabel: "LEGO Duplo Starter Set"),
-            TestData.Report(chatReport, ReportTargetType.Message, Guid.NewGuid(), OtherId, targetLabel: "Chat with Gone Person"),
+            TestData.Report(chatReport, ReportTargetType.Message, conversationId, OtherId, targetLabel: "Chat with Gone Person"),
+            // A same-named stranger's chat (not the deleted user's conversation): must keep its label.
+            TestData.Report(strangerChatReport, ReportTargetType.Message, strangerConversationId, OtherId, targetLabel: "Chat with Gone Person"),
             TestData.Report(otherChatReport, ReportTargetType.Message, Guid.NewGuid(), UserId, targetLabel: "Chat with Test User"),
             new ModerationLogEntry { Id = userEntry, ActorUserId = adminId, Action = ModerationAction.UserSuspended, TargetType = ModerationTargetType.User, TargetId = UserId, TargetLabel = "Gone Person", CreatedAt = DateTime.UtcNow },
+            new ModerationLogEntry { Id = userReportEntry, ActorUserId = adminId, Action = ModerationAction.ReportResolved, TargetType = ModerationTargetType.Report, TargetId = userReport, TargetLabel = "Gone Person", CreatedAt = DateTime.UtcNow },
+            new ModerationLogEntry { Id = chatReportEntry, ActorUserId = adminId, Action = ModerationAction.ReportDismissed, TargetType = ModerationTargetType.Report, TargetId = chatReport, TargetLabel = "Chat with Gone Person", CreatedAt = DateTime.UtcNow },
+            new ModerationLogEntry { Id = strangerChatEntry, ActorUserId = adminId, Action = ModerationAction.ReportDismissed, TargetType = ModerationTargetType.Report, TargetId = strangerChatReport, TargetLabel = "Chat with Gone Person", CreatedAt = DateTime.UtcNow },
             new ModerationLogEntry { Id = listingEntry, ActorUserId = adminId, Action = ModerationAction.ListingApproved, TargetType = ModerationTargetType.Listing, TargetId = UserListingId, TargetLabel = "LEGO Duplo Starter Set", CreatedAt = DateTime.UtcNow });
         await using var h = new Harness(db, UserId);
 
@@ -661,8 +684,13 @@ public sealed class AccountDeletionServiceTests
         Assert.Equal("LEGO Duplo Starter Set", labels[listingReport]);
         Assert.Equal("Chat with Deleted user", labels[chatReport]);
         Assert.Equal("Chat with Test User", labels[otherChatReport]);
+        Assert.Equal("Chat with Gone Person", labels[strangerChatReport]);
         var entries = await verify.ModerationLogEntries.AsNoTracking().ToDictionaryAsync(entry => entry.Id, entry => entry.TargetLabel);
         Assert.Equal("Deleted user", entries[userEntry]);
+        // Report-targeted moderation-log rows (resolve/dismiss) carried the report's label.
+        Assert.Equal("Deleted user", entries[userReportEntry]);
+        Assert.Equal("Chat with Deleted user", entries[chatReportEntry]);
+        Assert.Equal("Chat with Gone Person", entries[strangerChatEntry]);
         Assert.Equal("LEGO Duplo Starter Set", entries[listingEntry]);
     }
 

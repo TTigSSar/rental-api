@@ -19,5 +19,7 @@ public static class DeletedUserDisplay
     // The email of a deleted row is the synthetic deleted-{id}@deleted.invalid; it is not shown to anyone.
     public static string Email(User? user) => user is null || IsDeleted(user) ? string.Empty : user.Email;
 
+    public static string? PhoneNumber(User? user) => user is null || IsDeleted(user) ? null : user.PhoneNumber;
+
     public static string FullName(User? user) => $"{FirstName(user)} {LastName(user)}".Trim();
 }

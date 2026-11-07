@@ -436,8 +436,14 @@ public sealed class BookingsService : IBookingsService
 
             // Atomic overlap-then-approve under SERIALIZABLE: blocks concurrent approvals of
             // overlapping pending requests from both committing (double-booking guard).
-            var approved = await _bookingsStore.TryApproveBookingAsync(booking, cancellationToken);
-            if (!approved)
+            var outcome = await _bookingsStore.TryApproveBookingAsync(booking, cancellationToken);
+            if (outcome == ApproveBookingOutcome.NotPending)
+            {
+                // Lost the compare-and-set: the booking left Pending after the read above.
+                return Failure<BookingRequestResponse>(ErrorCodes.BookingNotPending, "Only valid pending booking requests can be managed.");
+            }
+
+            if (outcome == ApproveBookingOutcome.Overlap)
             {
                 return Failure<BookingRequestResponse>(ErrorCodes.Overlap, "Cannot approve booking due to overlap with approved booking.");
             }

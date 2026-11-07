@@ -47,8 +47,13 @@ public sealed class FakeNotificationEmitter : INotificationEmitter
     public Task BookingRequestedAsync(Booking booking, User renter, Listing listing, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task BookingApprovedAsync(Booking booking, User owner, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    public List<Booking> Approved { get; } = new();
+
+    public Task BookingApprovedAsync(Booking booking, User owner, CancellationToken cancellationToken = default)
+    {
+        Approved.Add(booking);
+        return Task.CompletedTask;
+    }
 
     public Task BookingDeclinedAsync(Booking booking, User owner, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;

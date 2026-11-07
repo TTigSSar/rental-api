@@ -2,6 +2,13 @@ using RentalPlatform.Domain.Entities;
 
 namespace RentalPlatform.Application.Abstractions;
 
+public enum ApproveBookingOutcome
+{
+    Approved,
+    Overlap,
+    NotPending
+}
+
 public interface IBookingsStore
 {
     Task<IReadOnlyList<Booking>> ExpirePendingAsync(DateTime utcNow, CancellationToken cancellationToken = default);
@@ -28,10 +35,12 @@ public interface IBookingsStore
         CancellationToken cancellationToken = default);
 
     // Atomically re-checks for an Approved/Active overlap (excluding this booking) and, if absent,
-    // persists the already-mutated tracked booking. Returns false when a blocking overlap exists.
-    // Implemented under a SERIALIZABLE transaction so two concurrent approvals of overlapping
+    // approves the booking by a compare-and-set on Status = Pending (ApprovedAt/UpdatedAt are taken from the
+    // tracked booking the caller already mutated). Overlap when a blocking overlap exists; NotPending when the
+    // booking left Pending in the meantime (e.g. an account deletion cancelled it, ADR-056), in which case nothing
+    // is written. Implemented under a SERIALIZABLE transaction so two concurrent approvals of overlapping
     // pending requests on the same listing cannot both succeed (double-booking guard).
-    Task<bool> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default);
+    Task<ApproveBookingOutcome> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<Booking>> GetRenterBookingsAsync(Guid renterId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Booking>> GetOwnerBookingRequestsAsync(Guid ownerId, CancellationToken cancellationToken = default);

@@ -30,8 +30,11 @@ public sealed class FakeChatSystemMessageEmitter : IChatSystemMessageEmitter
     public Task BookingRequestedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
-    public Task BookingApprovedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    public Task BookingApprovedAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("approved");
+        return Task.CompletedTask;
+    }
 
     public Task BookingHandedOverAsync(Booking booking, Guid? actorUserId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;

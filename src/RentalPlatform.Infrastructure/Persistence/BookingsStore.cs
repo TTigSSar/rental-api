@@ -92,6 +92,18 @@ public sealed class BookingsStore : IBookingsStore
             }
         }
 
+        // The same for the renter (a self-service create racing the renter's own deletion): the read waits for the
+        // deletion's row lock and then refuses; if the read wins, it holds a shared lock on the renter row until
+        // this commit, so the deletion's first statement waits and then finds the new Pending booking and closes it.
+        var renterId = booking.RenterId;
+        var renterDeleted = await _dbContext.Users
+            .AnyAsync(user => user.Id == renterId && user.DeletedAt != null, cancellationToken);
+        if (renterDeleted)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return false;
+        }
+
         // A Pending row only blocks while it is still live: a pending request past its ExpiresAt is
         // effectively dead even if the background sweep hasn't flipped it to Expired yet. This keeps
         // create-correctness independent of sweep timing.
@@ -156,7 +168,7 @@ public sealed class BookingsStore : IBookingsStore
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<bool> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default)
+    public async Task<ApproveBookingOutcome> TryApproveBookingAsync(Booking booking, CancellationToken cancellationToken = default)
     {
         // SERIALIZABLE so two owners (or two tabs) approving overlapping pending requests on the
         // same listing cannot both pass the overlap check: the key-range lock taken by the read
@@ -176,13 +188,40 @@ public sealed class BookingsStore : IBookingsStore
         if (hasApprovedOverlap)
         {
             await transaction.RollbackAsync(cancellationToken);
-            return false;
+            // Nothing was written; do not leave the caller's mutated copy (Status = Approved) tracked as Modified.
+            _dbContext.Entry(booking).State = EntityState.Detached;
+            return ApproveBookingOutcome.Overlap;
         }
 
-        // Persists the field changes the caller already applied to the tracked booking entity.
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // Compare-and-set on Status = Pending (ADR-056): a concurrent account deletion that cancelled/rejected
+        // this booking, a cancel, or the expiry sweep wins, and the approve then writes nothing. A tracked
+        // SaveChanges would be an unconditional UPDATE ... WHERE Id and could resurrect a closed booking.
+        var bookingId = booking.Id;
+        var approvedAt = booking.ApprovedAt;
+        var updatedAt = booking.UpdatedAt;
+        var updated = await _dbContext.Bookings
+            .Where(candidate => candidate.Id == bookingId && candidate.Status == BookingStatus.Pending)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(candidate => candidate.Status, BookingStatus.Approved)
+                .SetProperty(candidate => candidate.ApprovedAt, approvedAt)
+                .SetProperty(candidate => candidate.UpdatedAt, updatedAt), cancellationToken);
+
+        if (updated != 1)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            _dbContext.Entry(booking).State = EntityState.Detached;
+            return ApproveBookingOutcome.NotPending;
+        }
+
         await transaction.CommitAsync(cancellationToken);
-        return true;
+
+        // The row was written by a bulk UPDATE; the tracked copy already holds those values, so mark it clean
+        // and no later SaveChanges can write it again without the predicate.
+        // (Setting the state alone would reset the current values to the originals.)
+        var entry = _dbContext.Entry(booking);
+        entry.OriginalValues.SetValues(entry.CurrentValues);
+        entry.State = EntityState.Unchanged;
+        return ApproveBookingOutcome.Approved;
     }
 
     public async Task<IReadOnlyCollection<Booking>> GetRenterBookingsAsync(

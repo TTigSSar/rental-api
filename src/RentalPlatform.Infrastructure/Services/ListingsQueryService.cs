@@ -60,7 +60,9 @@ public sealed class ListingsQueryService : IListingsQueryService
         // unaffected either way.
         var query = _dbContext.Listings
             .AsNoTracking()
-            .Where(listing => listing.Status == ListingStatus.Approved);
+            // ADR-056: a deleted owner's listings are archived by the deletion; this keeps them out of the
+            // catalogue even if one is ever approved or restored afterwards.
+            .Where(listing => listing.Status == ListingStatus.Approved && listing.Owner.DeletedAt == null);
 
         if (!string.IsNullOrWhiteSpace(filter.City))
         {
@@ -401,7 +403,7 @@ public sealed class ListingsQueryService : IListingsQueryService
             .AsNoTracking()
             .Where(listing => listing.Id == id &&
                 (isAdmin ||
-                 listing.Status == ListingStatus.Approved ||
+                 (listing.Status == ListingStatus.Approved && listing.Owner.DeletedAt == null) ||
                  (callerId.HasValue && listing.OwnerId == callerId.Value)))
             .Select(listing => new
             {
@@ -485,9 +487,10 @@ public sealed class ListingsQueryService : IListingsQueryService
                     Owner = new ListingOwnerResponse
                     {
                         Id = x.Listing.Owner.Id,
-                        FirstName = x.Listing.Owner.FirstName,
-                        LastName = x.Listing.Owner.LastName,
-                        AvatarUrl = x.Listing.Owner.AvatarUrl
+                        FirstName = x.Listing.Owner.DeletedAt == null ? x.Listing.Owner.FirstName : string.Empty,
+                        LastName = x.Listing.Owner.DeletedAt == null ? x.Listing.Owner.LastName : string.Empty,
+                        AvatarUrl = x.Listing.Owner.DeletedAt == null ? x.Listing.Owner.AvatarUrl : null,
+                        IsDeleted = x.Listing.Owner.DeletedAt != null
                     },
                     Images = x.Listing.Images
                         .OrderByDescending(image => image.IsPrimary)

@@ -29,6 +29,8 @@ public sealed class AdminReportRowResponse
     public string ReporterLastName { get; init; } = string.Empty;
     public string ReporterEmail { get; init; } = string.Empty;
     public string? ReporterAvatarUrl { get; init; }
+    // ADR-056: the reporter deleted their account (names and email above are then empty).
+    public bool ReporterIsDeleted { get; init; }
 
     public DateTime? ResolvedAt { get; init; }
     public string? ResolutionNote { get; init; }

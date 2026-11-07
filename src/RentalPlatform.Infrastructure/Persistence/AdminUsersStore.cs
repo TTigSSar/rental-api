@@ -15,7 +15,8 @@ public sealed class AdminUsersStore : IAdminUsersStore
     }
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+        // ADR-056: a deleted user is not an admin target (suspend, verify, message): answers like a missing user.
+        _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId && user.DeletedAt == null, cancellationToken);
 
     public async Task<AdminUsersPage> GetUsersPageAsync(
         UserAccountStatus? status,
@@ -25,7 +26,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
         int pageSize,
         CancellationToken cancellationToken = default)
     {
-        var query = ApplySearch(ApplyStatus(_dbContext.Users.AsNoTracking(), status), search);
+        var query = ApplySearch(ApplyStatus(LiveUsers(), status), search);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -88,7 +89,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
     {
         var r = await _dbContext.Users
             .AsNoTracking()
-            .Where(u => u.Id == userId)
+            .Where(u => u.Id == userId && u.DeletedAt == null)
             .Select(u => new
             {
                 u.Id,
@@ -115,7 +116,7 @@ public sealed class AdminUsersStore : IAdminUsersStore
 
     public async Task<AdminUserStatusCounts> GetStatusCountsAsync(string? search, CancellationToken cancellationToken = default)
     {
-        var query = ApplySearch(_dbContext.Users.AsNoTracking(), search);
+        var query = ApplySearch(LiveUsers(), search);
 
         // One grouped query for all four counts rather than four separate CountAsync round trips
         // — same convention as ReportsStore.GetStatusCountsAsync / AdminOverviewStore's category
@@ -136,6 +137,9 @@ public sealed class AdminUsersStore : IAdminUsersStore
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _dbContext.SaveChangesAsync(cancellationToken);
+
+    // ADR-056: deleted users are excluded from every admin user list and count.
+    private IQueryable<User> LiveUsers() => _dbContext.Users.AsNoTracking().Where(u => u.DeletedAt == null);
 
     private static IQueryable<User> ApplyStatus(IQueryable<User> query, UserAccountStatus? status) => status switch
     {

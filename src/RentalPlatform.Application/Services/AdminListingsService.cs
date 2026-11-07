@@ -280,11 +280,15 @@ public sealed class AdminListingsService : IAdminListingsService
         }, cancellationToken);
 
         // IEmailService contract: never throws. Moderation success is not conditional on delivery.
-        await _emailService.SendListingApprovedAsync(
-            listing.Owner.Email,
-            $"{listing.Owner.FirstName} {listing.Owner.LastName}".Trim(),
-            listing.Title,
-            cancellationToken);
+        // ADR-056: no email is created for a deleted recipient.
+        if (!DeletedUserDisplay.IsDeleted(listing.Owner))
+        {
+            await _emailService.SendListingApprovedAsync(
+                listing.Owner.Email,
+                $"{listing.Owner.FirstName} {listing.Owner.LastName}".Trim(),
+                listing.Title,
+                cancellationToken);
+        }
 
         // Best-effort: notify the owner their listing is live.
         await _notificationEmitter.ListingApprovedAsync(listing, cancellationToken);
@@ -362,12 +366,16 @@ public sealed class AdminListingsService : IAdminListingsService
         }, cancellationToken);
 
         // IEmailService contract: never throws. Moderation success is not conditional on delivery.
-        await _emailService.SendListingRejectedAsync(
-            listing.Owner.Email,
-            $"{listing.Owner.FirstName} {listing.Owner.LastName}".Trim(),
-            listing.Title,
-            trimmedReason,
-            cancellationToken);
+        // ADR-056: no email is created for a deleted recipient.
+        if (!DeletedUserDisplay.IsDeleted(listing.Owner))
+        {
+            await _emailService.SendListingRejectedAsync(
+                listing.Owner.Email,
+                $"{listing.Owner.FirstName} {listing.Owner.LastName}".Trim(),
+                listing.Title,
+                trimmedReason,
+                cancellationToken);
+        }
 
         // Best-effort: notify the owner that changes are needed.
         await _notificationEmitter.ListingRejectedAsync(listing, trimmedCode, trimmedNote, cancellationToken);
@@ -442,10 +450,10 @@ public sealed class AdminListingsService : IAdminListingsService
         {
             Id = listing.Id,
             OwnerId = listing.OwnerId,
-            OwnerEmail = listing.Owner.Email,
+            OwnerEmail = DeletedUserDisplay.Email(listing.Owner),
             OwnerPhoneNumber = listing.Owner.PhoneNumber,
-            OwnerFirstName = listing.Owner.FirstName,
-            OwnerLastName = listing.Owner.LastName,
+            OwnerFirstName = DeletedUserDisplay.FirstName(listing.Owner),
+            OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
             CategoryId = listing.CategoryId,
             CategoryName = listing.Category.Name,
             Title = listing.Title,
@@ -468,7 +476,8 @@ public sealed class AdminListingsService : IAdminListingsService
             RejectionReasonCode = listing.RejectionReasonCode,
             RejectionNote = listing.RejectionNote,
             ModeratedAt = listing.ModeratedAt,
-            OwnerAvatarUrl = listing.Owner.AvatarUrl,
+            OwnerAvatarUrl = DeletedUserDisplay.AvatarUrl(listing.Owner),
+            OwnerIsDeleted = DeletedUserDisplay.IsDeleted(listing.Owner),
             OwnerIsIdConfirmed = listing.Owner.IsIdConfirmed,
             OwnerRating = rating is null || rating.Count == 0 ? null : (decimal?)rating.Average,
             OwnerReviewCount = rating?.Count ?? 0,
@@ -503,9 +512,9 @@ public sealed class AdminListingsService : IAdminListingsService
         {
             Id = listing.Id,
             OwnerId = listing.OwnerId,
-            OwnerEmail = listing.Owner.Email,
-            OwnerFirstName = listing.Owner.FirstName,
-            OwnerLastName = listing.Owner.LastName,
+            OwnerEmail = DeletedUserDisplay.Email(listing.Owner),
+            OwnerFirstName = DeletedUserDisplay.FirstName(listing.Owner),
+            OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
             CategoryId = listing.CategoryId,
             CategoryName = listing.Category.Name,
             Title = listing.Title,
@@ -528,7 +537,8 @@ public sealed class AdminListingsService : IAdminListingsService
             RejectionReasonCode = listing.RejectionReasonCode,
             RejectionNote = listing.RejectionNote,
             ModeratedAt = listing.ModeratedAt,
-            OwnerAvatarUrl = listing.Owner.AvatarUrl,
+            OwnerAvatarUrl = DeletedUserDisplay.AvatarUrl(listing.Owner),
+            OwnerIsDeleted = DeletedUserDisplay.IsDeleted(listing.Owner),
             OwnerIsIdConfirmed = listing.Owner.IsIdConfirmed,
             OwnerRating = rating is null || rating.Count == 0 ? null : (decimal?)rating.Average,
             OwnerReviewCount = rating?.Count ?? 0,
@@ -544,9 +554,10 @@ public sealed class AdminListingsService : IAdminListingsService
     {
         Id = listing.Id,
         OwnerId = listing.OwnerId,
-        OwnerEmail = listing.Owner.Email,
-        OwnerFirstName = listing.Owner.FirstName,
-        OwnerLastName = listing.Owner.LastName,
+        OwnerEmail = DeletedUserDisplay.Email(listing.Owner),
+        OwnerFirstName = DeletedUserDisplay.FirstName(listing.Owner),
+        OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
+        OwnerIsDeleted = DeletedUserDisplay.IsDeleted(listing.Owner),
         CategoryId = listing.CategoryId,
         CategoryName = listing.Category.Name,
         Title = listing.Title,

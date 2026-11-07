@@ -197,6 +197,7 @@ public sealed class ChatController : ControllerBase
             "chat.conversation_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "chat.booking_not_found" => NotFound(error.ToProblemDetails(StatusCodes.Status404NotFound)),
             "chat.conversation_closed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "chat.participant_deleted" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "chat.meeting_point_owner_only" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "chat.meeting_point_unavailable" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "chat.home_point_required" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),

@@ -42,6 +42,7 @@ public sealed class ChatService : IChatService
         public const string ConversationNotFound = "chat.conversation_not_found";
         public const string BookingNotFound = "chat.booking_not_found";
         public const string ConversationClosed = "chat.conversation_closed";
+        public const string ParticipantDeleted = "chat.participant_deleted";
         public const string MessageTooLong = "chat.message_too_long";
         public const string AttachmentTooLarge = "chat.attachment_too_large";
         public const string AttachmentInvalidType = "chat.attachment_invalid_type";
@@ -231,6 +232,11 @@ public sealed class ChatService : IChatService
             return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
         }
 
+        if (await IsOtherPartyDeletedAsync(conversation, userId, cancellationToken))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.ParticipantDeleted, "The other participant has deleted their account.");
+        }
+
         if (conversation.ClosedAt is not null)
         {
             return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
@@ -337,6 +343,11 @@ public sealed class ChatService : IChatService
                 return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
             }
 
+            if (await IsOtherPartyDeletedAsync(conversation, userId, cancellationToken))
+            {
+                return Failure<ChatMessageResponse>(ErrorCodes.ParticipantDeleted, "The other participant has deleted their account.");
+            }
+
             if (conversation.ClosedAt is not null)
             {
                 return Failure<ChatMessageResponse>(ErrorCodes.ConversationClosed, "This conversation is closed.");
@@ -399,6 +410,12 @@ public sealed class ChatService : IChatService
         if (!await IsParticipantAsync(conversation, userId, user, cancellationToken))
         {
             return Failure<ChatMessageResponse>(ErrorCodes.NotParticipant, "You are not a participant of this conversation.");
+        }
+
+        // 1b. ADR-056: the chat with a deleted user is read-only.
+        if (await IsOtherPartyDeletedAsync(conversation, userId, cancellationToken))
+        {
+            return Failure<ChatMessageResponse>(ErrorCodes.ParticipantDeleted, "The other participant has deleted their account.");
         }
 
         // 2. Booking-scoped thread, and only the listing owner (booking conversations pin OwnerId
@@ -539,6 +556,16 @@ public sealed class ChatService : IChatService
         return user is { Role: UserRole.Admin };
     }
 
+    // ADR-056: the chat with a deleted user is read-only. "The other party" is the member (RenterId) for a
+    // sender who is not the member (which also covers a second admin on a Moderation thread), else the
+    // thread's OwnerId. Reading, and marking as read, stay allowed.
+    private async Task<bool> IsOtherPartyDeletedAsync(
+        Conversation conversation, Guid senderId, CancellationToken cancellationToken)
+    {
+        var otherId = senderId == conversation.RenterId ? conversation.OwnerId : conversation.RenterId;
+        return await _store.IsUserDeletedAsync(otherId, cancellationToken);
+    }
+
     // Opportunistic self-heal for the ADR-001 read-only chat lock. Normally a conversation closes
     // the moment both party reviews land (ReviewsService.CloseConversationIfBothReviewsInAsync) or,
     // defensively, when a booking completes with both reviews already in (BookingsService.CompleteAsync).
@@ -602,7 +629,8 @@ public sealed class ChatService : IChatService
         Kind = ChatTokens.ConversationKindToken(item.Conversation.Kind),
         BookingId = item.Conversation.BookingId,
         CounterpartName = DisplayName(item.Counterpart),
-        CounterpartAvatarUrl = item.Counterpart.AvatarUrl,
+        CounterpartAvatarUrl = DeletedUserDisplay.AvatarUrl(item.Counterpart),
+        CounterpartIsDeleted = DeletedUserDisplay.IsDeleted(item.Counterpart),
         ToyTitle = item.Conversation.ToyTitle,
         ToyImageUrl = item.Conversation.ToyImageUrl,
         // item.Booking is null exactly when Kind == Moderation (no booking to derive a pill from).
@@ -624,8 +652,10 @@ public sealed class ChatService : IChatService
         BookingId = details.Conversation.BookingId,
         CounterpartId = details.Conversation.OwnerId == userId ? details.Conversation.RenterId : details.Conversation.OwnerId,
         CounterpartName = DisplayName(details.Counterpart),
-        CounterpartAvatarUrl = details.Counterpart.AvatarUrl,
-        CounterpartVerified = details.Counterpart.IsEmailConfirmed && details.Counterpart.IsPhoneConfirmed,
+        CounterpartAvatarUrl = DeletedUserDisplay.AvatarUrl(details.Counterpart),
+        CounterpartIsDeleted = DeletedUserDisplay.IsDeleted(details.Counterpart),
+        CounterpartVerified = !DeletedUserDisplay.IsDeleted(details.Counterpart)
+            && details.Counterpart.IsEmailConfirmed && details.Counterpart.IsPhoneConfirmed,
         ToyTitle = details.Conversation.ToyTitle,
         ToyImageUrl = details.Conversation.ToyImageUrl,
         // details.Booking is null exactly when Kind == Moderation.
@@ -685,6 +715,11 @@ public sealed class ChatService : IChatService
             ConversationId = message.ConversationId,
             SenderId = message.SenderId,
             SenderName = senderName,
+            SenderIsDeleted = message.SenderId is not null
+                && !isMine
+                && counterpart is not null
+                && counterpart.Id == message.SenderId
+                && DeletedUserDisplay.IsDeleted(counterpart),
             Type = ChatTokens.MessageTypeToken(message.Type),
             SystemKind = ChatTokens.SystemKindToken(message.SystemKind),
             NoteKind = ChatTokens.ModerationNoteKindToken(message.NoteKind),
@@ -722,7 +757,7 @@ public sealed class ChatService : IChatService
         SentAt = message.CreatedAt
     };
 
-    private static string DisplayName(User user) => $"{user.FirstName} {user.LastName}".Trim();
+    private static string DisplayName(User user) => DeletedUserDisplay.FullName(user);
 
     private static string FormatDates(DateOnly startDate, DateOnly endDate) =>
         $"{startDate:yyyy-MM-dd} – {endDate:yyyy-MM-dd}";

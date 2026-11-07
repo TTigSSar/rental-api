@@ -49,6 +49,8 @@ public sealed class AdminListingSummaryResponse
     // Owner trust block — lets the moderator judge the owner's track record without leaving the
     // queue. Computed with grouped queries, not per-row lookups (see AdminListingsStore).
     public string? OwnerAvatarUrl { get; init; }
+    // ADR-056: the owner deleted their account (owner names and email are then empty).
+    public bool OwnerIsDeleted { get; init; }
     public bool OwnerIsIdConfirmed { get; init; }
     public decimal? OwnerRating { get; init; }
     public int OwnerReviewCount { get; init; }

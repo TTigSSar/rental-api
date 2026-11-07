@@ -91,11 +91,16 @@ public sealed record ModerationThreadRow(
     bool LastMessageFromMember,
     MessageType? LastMessageType,
     string? LastMessageNoteSubject,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    // ADR-056: the member deleted their account (MemberFirstName/LastName/AvatarUrl are then empty/null).
+    bool MemberIsDeleted = false);
 
 public interface IConversationsStore
 {
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>ADR-056: true when the user exists and has <c>DeletedAt</c> set.</summary>
+    Task<bool> IsUserDeletedAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the conversation for a booking, creating it (and the two participant rows) on

@@ -112,6 +112,12 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
     {
         try
         {
+            // ADR-056: nothing is created for a deleted recipient.
+            if (await _store.IsUserDeletedAsync(memberId, cancellationToken))
+            {
+                return;
+            }
+
             var conversation = await _store.GetOrCreateForModerationAsync(moderatorId, memberId, cancellationToken);
             var message = await _store.AddModerationNoteAsync(
                 conversation.Id, moderatorId, kind, subject, reason, body, cancellationToken);

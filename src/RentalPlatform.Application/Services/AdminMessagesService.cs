@@ -146,6 +146,7 @@ public sealed class AdminMessagesService : IAdminMessagesService
         MemberFirstName = row.MemberFirstName,
         MemberLastName = row.MemberLastName,
         MemberAvatarUrl = row.MemberAvatarUrl,
+        MemberIsDeleted = row.MemberIsDeleted,
         MemberStatus = DeriveStatus(row.MemberIsBlocked, row.MemberIsIdConfirmed),
         MemberIsIdConfirmed = row.MemberIsIdConfirmed,
         MemberMarketplaceRole = DeriveMarketplaceRole(row.MemberListingCount, row.MemberRentalCount),

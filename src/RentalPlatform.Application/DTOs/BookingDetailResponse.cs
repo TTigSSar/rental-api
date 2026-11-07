@@ -53,4 +53,6 @@ public sealed class BookingDetailResponse
     public string CounterpartyFirstName { get; init; } = string.Empty;
     public string CounterpartyLastName { get; init; } = string.Empty;
     public string? CounterpartyAvatarUrl { get; init; }
+    // ADR-056: the counterparty deleted their account (names above are then empty, avatar null).
+    public bool CounterpartyIsDeleted { get; init; }
 }

@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RentalPlatform.Application.Abstractions;
+using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
 
@@ -31,6 +32,9 @@ public sealed class ConversationsStore : IConversationsStore
 
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _dbContext.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+
+    public Task<bool> IsUserDeletedAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        _dbContext.Users.AnyAsync(user => user.Id == userId && user.DeletedAt != null, cancellationToken);
 
     public async Task<Conversation?> GetOrCreateForBookingAsync(
         Guid bookingId,
@@ -732,9 +736,9 @@ public sealed class ConversationsStore : IConversationsStore
             return new ModerationThreadRow(
                 ConversationId: conversation.Id,
                 MemberId: conversation.RenterId,
-                MemberFirstName: conversation.Renter.FirstName,
-                MemberLastName: conversation.Renter.LastName,
-                MemberAvatarUrl: conversation.Renter.AvatarUrl,
+                MemberFirstName: DeletedUserDisplay.FirstName(conversation.Renter),
+                MemberLastName: DeletedUserDisplay.LastName(conversation.Renter),
+                MemberAvatarUrl: DeletedUserDisplay.AvatarUrl(conversation.Renter),
                 MemberIsBlocked: conversation.Renter.IsBlocked,
                 MemberIsIdConfirmed: conversation.Renter.IsIdConfirmed,
                 MemberListingCount: listingCounts.GetValueOrDefault(conversation.RenterId),
@@ -746,7 +750,8 @@ public sealed class ConversationsStore : IConversationsStore
                 LastMessageFromMember: lastMessageFromMember,
                 LastMessageType: lastMessage?.Type,
                 LastMessageNoteSubject: lastMessageNoteSubject,
-                CreatedAt: conversation.CreatedAt);
+                CreatedAt: conversation.CreatedAt,
+                MemberIsDeleted: DeletedUserDisplay.IsDeleted(conversation.Renter));
         }).ToList();
     }
 

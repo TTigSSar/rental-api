@@ -289,6 +289,13 @@ public sealed class NotificationEmitter : INotificationEmitter
     {
         try
         {
+            // ADR-056: no notification is created for a deleted recipient. The deleted user's own rows are
+            // erased by the deletion; this closes the window of an emit that runs after it.
+            if (await _store.IsRecipientDeletedAsync(notification.RecipientId, cancellationToken))
+            {
+                return;
+            }
+
             await _store.AddAsync(notification, cancellationToken);
             await _store.SaveChangesAsync(cancellationToken);
         }

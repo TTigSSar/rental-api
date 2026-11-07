@@ -85,7 +85,8 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
     private IQueryable<Listing> Approved() =>
         _dbContext.Listings
             .AsNoTracking()
-            .Where(listing => listing.Status == ListingStatus.Approved);
+            // ADR-056: see ListingsQueryService.
+            .Where(listing => listing.Status == ListingStatus.Approved && listing.Owner.DeletedAt == null);
 
     // Shared projection reused across all section queries.
     private static readonly Expression<Func<Listing, ListingPreviewResponse>> ToPreview =

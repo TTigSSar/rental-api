@@ -127,7 +127,7 @@ public sealed class ReportsStore : IReportsStore
         var rows = await _dbContext.Users
             .AsNoTracking()
             .Where(user => ids.Contains(user.Id))
-            .Select(user => new { user.Id, user.AvatarUrl })
+            .Select(user => new { user.Id, AvatarUrl = user.DeletedAt == null ? user.AvatarUrl : null })
             .ToListAsync(cancellationToken);
 
         return rows.ToDictionary(row => row.Id, row => row.AvatarUrl);

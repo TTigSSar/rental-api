@@ -191,9 +191,14 @@ public sealed class ReviewsService : IReviewsService
         };
     }
 
-    public async Task<OwnerReviewSummaryResponse> GetOwnerReviewsAsync(
+    public async Task<OwnerReviewSummaryResponse?> GetOwnerReviewsAsync(
         Guid ownerId, CancellationToken cancellationToken = default)
     {
+        if (await _conversationsStore.IsUserDeletedAsync(ownerId, cancellationToken))
+        {
+            return null;
+        }
+
         var reviews = await _reviewsStore.GetOwnerReviewsByUserAsync(ownerId, cancellationToken);
         var count = reviews.Count;
 
@@ -214,9 +219,14 @@ public sealed class ReviewsService : IReviewsService
         };
     }
 
-    public async Task<RenterReviewSummaryResponse> GetRenterReviewsAsync(
+    public async Task<RenterReviewSummaryResponse?> GetRenterReviewsAsync(
         Guid renterId, CancellationToken cancellationToken = default)
     {
+        if (await _conversationsStore.IsUserDeletedAsync(renterId, cancellationToken))
+        {
+            return null;
+        }
+
         var reviews = await _reviewsStore.GetRenterReviewsByUserAsync(renterId, cancellationToken);
         var count = reviews.Count;
 
@@ -341,9 +351,10 @@ public sealed class ReviewsService : IReviewsService
         Guid id, User reviewer, Booking booking, string comment, DateTime createdAt) => new()
     {
         Id = id,
-        ReviewerFirstName = reviewer.FirstName,
-        ReviewerLastName = reviewer.LastName,
-        ReviewerAvatarUrl = reviewer.AvatarUrl,
+        ReviewerFirstName = DeletedUserDisplay.FirstName(reviewer),
+        ReviewerLastName = DeletedUserDisplay.LastName(reviewer),
+        ReviewerAvatarUrl = DeletedUserDisplay.AvatarUrl(reviewer),
+        ReviewerIsDeleted = DeletedUserDisplay.IsDeleted(reviewer),
         Comment = comment,
         RentedDays = RentalPeriod.Days(booking.StartDate, booking.EndDate),
         CreatedAt = createdAt

@@ -50,6 +50,8 @@ public sealed class AdminListingDetailResponse
     public DateTime? ModeratedAt { get; init; }
 
     public string? OwnerAvatarUrl { get; init; }
+    // ADR-056: the owner deleted their account (owner names and email are then empty).
+    public bool OwnerIsDeleted { get; init; }
     public bool OwnerIsIdConfirmed { get; init; }
     public decimal? OwnerRating { get; init; }
     public int OwnerReviewCount { get; init; }

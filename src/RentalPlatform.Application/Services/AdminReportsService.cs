@@ -306,10 +306,11 @@ public sealed class AdminReportsService : IAdminReportsService
             Status = report.Status,
             CreatedAt = report.CreatedAt,
             ReporterId = report.ReporterUserId,
-            ReporterFirstName = report.Reporter.FirstName,
-            ReporterLastName = report.Reporter.LastName,
-            ReporterEmail = report.Reporter.Email,
-            ReporterAvatarUrl = report.Reporter.AvatarUrl,
+            ReporterFirstName = DeletedUserDisplay.FirstName(report.Reporter),
+            ReporterLastName = DeletedUserDisplay.LastName(report.Reporter),
+            ReporterEmail = DeletedUserDisplay.Email(report.Reporter),
+            ReporterAvatarUrl = DeletedUserDisplay.AvatarUrl(report.Reporter),
+            ReporterIsDeleted = DeletedUserDisplay.IsDeleted(report.Reporter),
             ResolvedAt = report.ResolvedAt,
             ResolutionNote = report.ResolutionNote
         }).ToList();

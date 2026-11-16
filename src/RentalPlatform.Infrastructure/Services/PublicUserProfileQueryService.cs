@@ -166,7 +166,7 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
                 Condition = r.Condition,
                 CreatedAt = r.CreatedAt,
                 ReviewCount = r.ReviewCount,
-                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null,
+                Rating = ListingRatingRule.Exposed(r.ReviewCount, r.RatingSum),
                 District = r.District
             })
             .ToList();

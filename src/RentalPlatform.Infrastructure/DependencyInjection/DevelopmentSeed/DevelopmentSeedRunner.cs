@@ -75,9 +75,10 @@ internal sealed class DevelopmentSeedRunner
         // the owner reassignment queries bookings, and IHomePointService fans the home point out to
         // listings by querying them.
         var reassignedListings = await ReassignSeedListingOwnersAsync(cancellationToken);
+        var backfilledDelivery = await BackfillListingDeliveryAsync(cancellationToken);
         var appliedHomePoints = await ReconcileHomePointsAsync(cancellationToken);
 
-        if (totalInserted == 0 && reassignedListings == 0 && appliedHomePoints == 0)
+        if (totalInserted == 0 && reassignedListings == 0 && backfilledDelivery == 0 && appliedHomePoints == 0)
         {
             _logger.LogInformation("Development seed skipped: demo data already present.");
             return;
@@ -89,6 +90,46 @@ internal sealed class DevelopmentSeedRunner
             insertedImages, insertedFavorites, insertedBookings,
             reassignedListings, appliedHomePoints,
             DevelopmentSeedCredentials.Password);
+    }
+
+    /// <summary>
+    /// Gives seed listings a handover option and a minimum rental where they have none. Only null /
+    /// None values are filled, so a value edited by hand is never overwritten.
+    /// </summary>
+    private async Task<int> BackfillListingDeliveryAsync(CancellationToken cancellationToken)
+    {
+        var seedIds = DevelopmentSeedData.Listings.Select(listing => listing.Id).ToArray();
+        var listings = await _dbContext.Listings
+            .Where(listing => seedIds.Contains(listing.Id))
+            .ToListAsync(cancellationToken);
+
+        var updated = 0;
+        foreach (var listing in listings)
+        {
+            var (options, minDays) = DevelopmentSeedData.GetDeliveryProfile(listing.Id);
+            var dirty = false;
+            if (listing.DeliveryOptions is null || listing.DeliveryOptions == DeliveryOptions.None)
+            {
+                listing.DeliveryOptions = options;
+                listing.DeliveryType = DeliveryOptionsMapper.ToLegacy(options);
+                dirty = true;
+            }
+
+            if (listing.MinRentalDays is null)
+            {
+                listing.MinRentalDays = minDays;
+                dirty = true;
+            }
+
+            if (dirty) updated++;
+        }
+
+        if (updated > 0)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return updated;
     }
 
     /// <summary>

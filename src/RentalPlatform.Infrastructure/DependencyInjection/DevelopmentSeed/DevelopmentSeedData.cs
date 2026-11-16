@@ -1389,6 +1389,42 @@ internal static class DevelopmentSeedData
         new(new Guid("44444444-0004-4000-9000-000000000004"), DevelopmentSeedCredentials.SecondUserEmail, ListingIds.ToyKitchenSet,          CreatedDaysAgo: 2)
     ];
 
+    // Handover + minimum-rental profile per seeded listing, derived from its position in Listings so
+    // the SeedListing record stays untouched. Mostly Pickup / 1 day, with some Courier, Pickup+Courier
+    // and longer minimums so the details-page states are checkable. The minimum is capped by the
+    // shortest seeded booking on the listing (ADR-043: RentalDays >= MinRentalDays) so seeded
+    // bookings stay valid.
+    private static readonly (DeliveryOptions Options, int MinDays)[] DeliveryProfiles =
+    [
+        (DeliveryOptions.Pickup, 1),
+        (DeliveryOptions.Pickup, 1),
+        (DeliveryOptions.Pickup, 2),
+        (DeliveryOptions.Pickup | DeliveryOptions.Courier, 1),
+        (DeliveryOptions.Pickup, 1),
+        (DeliveryOptions.Courier, 3),
+        (DeliveryOptions.Pickup, 1),
+        (DeliveryOptions.Pickup | DeliveryOptions.Courier, 7),
+        (DeliveryOptions.Pickup, 1),
+        (DeliveryOptions.Pickup, 3),
+    ];
+
+    public static (DeliveryOptions Options, int MinRentalDays) GetDeliveryProfile(Guid listingId)
+    {
+        var index = Array.FindIndex(Listings, listing => listing.Id == listingId);
+        var (options, minDays) = DeliveryProfiles[Math.Max(index, 0) % DeliveryProfiles.Length];
+
+        var bookingDays = Bookings
+            .Where(booking => booking.ListingId == listingId)
+            .Select(booking => Math.Max(1, booking.DurationDays))
+            .ToArray();
+        if (bookingDays.Length > 0)
+        {
+            minDays = Math.Min(minDays, bookingDays.Min());
+        }
+
+        return (options, Math.Max(1, minDays));
+    }
+
     // Bookings covering every state the UI needs to render.
     // Dates are relative to today, TotalPrice is calculated by the seeder as RentalPeriod.Days (ADR-043: end - start, min 1) x PricePerDay.
     // DurationDays = rental days: EndDate = StartDate + DurationDays. Renter is never the listing owner;

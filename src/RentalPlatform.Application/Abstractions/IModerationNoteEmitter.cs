@@ -2,13 +2,6 @@ using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Abstractions;
 
-/// <summary>
-/// Auto-posts a ModerationNote <see cref="Domain.Entities.ChatMessage"/> into a member's
-/// Moderation conversation (get-or-created on demand) when an admin takes one of the actions
-/// below. Every method is best-effort: a note failure is logged and swallowed so it can never
-/// break the moderation action (reject/recategorise/suspend) that triggered it — mirrors
-/// <see cref="IChatSystemMessageEmitter"/> exactly, including its try/catch-swallow + log doctrine.
-/// </summary>
 /// <summary>A category's three names (ADR-062). <see cref="ForLanguage"/> falls back to English.</summary>
 public sealed record CategoryNames(string En, string Hy, string Ru)
 {
@@ -20,6 +13,13 @@ public sealed record CategoryNames(string En, string Hy, string Ru)
     };
 }
 
+/// <summary>
+/// Auto-posts a ModerationNote <see cref="Domain.Entities.ChatMessage"/> into a member's
+/// Moderation conversation (get-or-created on demand) when an admin takes one of the actions
+/// below. Every method is best-effort: a note failure is logged and swallowed so it can never
+/// break the moderation action (reject/recategorise/suspend) that triggered it — mirrors
+/// <see cref="IChatSystemMessageEmitter"/> exactly, including its try/catch-swallow + log doctrine.
+/// </summary>
 public interface IModerationNoteEmitter
 {
     // Body and reason are rendered at emit time in the member's language (ADR-025 amendment

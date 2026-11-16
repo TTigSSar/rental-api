@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.DTOs;
@@ -26,42 +25,32 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
         var limit = Math.Clamp(itemsPerSection, 1, MaxItemsPerSection);
 
         // Popular: approved listings ordered by total number of bookings, then newest first.
-        var popular = await Approved()
+        var popular = await ToPreviewsAsync(Approved()
             .OrderByDescending(listing => listing.Bookings.Count)
             .ThenByDescending(listing => listing.CreatedAt)
-            .Take(limit)
-            .Select(ToPreview)
-            .ToListAsync(cancellationToken);
+            .Take(limit), cancellationToken);
 
         // Recent: newest approved listings first.
-        var recent = await Approved()
+        var recent = await ToPreviewsAsync(Approved()
             .OrderByDescending(listing => listing.CreatedAt)
-            .Take(limit)
-            .Select(ToPreview)
-            .ToListAsync(cancellationToken);
+            .Take(limit), cancellationToken);
 
         // Liked: approved listings ordered by number of times favorited, then newest first.
-        var liked = await Approved()
+        var liked = await ToPreviewsAsync(Approved()
             .OrderByDescending(listing => listing.Favorites.Count)
             .ThenByDescending(listing => listing.CreatedAt)
-            .Take(limit)
-            .Select(ToPreview)
-            .ToListAsync(cancellationToken);
+            .Take(limit), cancellationToken);
 
         // Category sections: ordered by newest first; empty list when category has no approved listings.
-        var babyToys = await Approved()
+        var babyToys = await ToPreviewsAsync(Approved()
             .Where(listing => listing.Category.Slug == "baby-toys")
             .OrderByDescending(listing => listing.CreatedAt)
-            .Take(limit)
-            .Select(ToPreview)
-            .ToListAsync(cancellationToken);
+            .Take(limit), cancellationToken);
 
-        var outdoorToys = await Approved()
+        var outdoorToys = await ToPreviewsAsync(Approved()
             .Where(listing => listing.Category.Slug == "outdoor-toys")
             .OrderByDescending(listing => listing.CreatedAt)
-            .Take(limit)
-            .Select(ToPreview)
-            .ToListAsync(cancellationToken);
+            .Take(limit), cancellationToken);
 
         return new HomeSectionsResponse
         {
@@ -88,27 +77,71 @@ public sealed class HomeSectionsQueryService : IHomeSectionsService
             // ADR-056: see ListingsQueryService.
             .Where(listing => listing.Status == ListingStatus.Approved && listing.Owner.DeletedAt == null);
 
-    // Shared projection reused across all section queries.
-    private static readonly Expression<Func<Listing, ListingPreviewResponse>> ToPreview =
-        listing => new ListingPreviewResponse
-        {
-            Id = listing.Id,
-            CategoryId = listing.CategoryId,
-            CategoryName = listing.Category.Name,
-            Title = listing.Title,
-            PricePerDay = listing.PricePerDay,
-            PriceUnit = listing.PriceUnit,
-            Currency = listing.Currency,
-            Country = listing.Country,
-            City = listing.City,
-            PrimaryImageUrl = listing.Images
-                .OrderByDescending(image => image.IsPrimary)
-                .ThenBy(image => image.SortOrder)
-                .Select(image => image.Url)
-                .FirstOrDefault(),
-            AgeFromMonths = listing.AgeFromMonths,
-            AgeToMonths = listing.AgeToMonths,
-            Condition = listing.Condition,
-            CreatedAt = listing.CreatedAt
-        };
+    // Shared projection reused across all section queries. Rating/ReviewCount follow the catalogue
+    // rule (ListingsQueryService): the aggregate is hidden below 2 reviews. The rounding happens in
+    // memory after the single SQL round trip, same as the catalogue.
+    private async Task<List<ListingPreviewResponse>> ToPreviewsAsync(
+        IQueryable<Listing> query,
+        CancellationToken cancellationToken)
+    {
+        var rows = await query
+            .Select(listing => new
+            {
+                listing.Id,
+                listing.CategoryId,
+                CategoryName = listing.Category.Name,
+                listing.Title,
+                listing.PricePerDay,
+                listing.PriceUnit,
+                listing.Currency,
+                listing.Country,
+                listing.City,
+                PrimaryImageUrl = listing.Images
+                    .OrderByDescending(image => image.IsPrimary)
+                    .ThenBy(image => image.SortOrder)
+                    .Select(image => image.Url)
+                    .FirstOrDefault(),
+                listing.AgeFromMonths,
+                listing.AgeToMonths,
+                listing.Condition,
+                listing.CreatedAt,
+                ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id),
+                RatingSum = _dbContext.ToyReviews
+                    .Where(tr => tr.ListingId == listing.Id)
+                    .Sum(tr => tr.OverallRating),
+                // Districts are public and coarse (ADR-008/024); no coordinates are projected.
+                District = listing.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = listing.District.Id,
+                    Code = listing.District.Code,
+                    NameEn = listing.District.NameEn,
+                    NameHy = listing.District.NameHy,
+                    NameRu = listing.District.NameRu
+                }
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(r => new ListingPreviewResponse
+            {
+                Id = r.Id,
+                CategoryId = r.CategoryId,
+                CategoryName = r.CategoryName,
+                Title = r.Title,
+                PricePerDay = r.PricePerDay,
+                PriceUnit = r.PriceUnit,
+                Currency = r.Currency,
+                Country = r.Country,
+                City = r.City,
+                PrimaryImageUrl = r.PrimaryImageUrl,
+                AgeFromMonths = r.AgeFromMonths,
+                AgeToMonths = r.AgeToMonths,
+                Condition = r.Condition,
+                CreatedAt = r.CreatedAt,
+                ReviewCount = r.ReviewCount,
+                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null,
+                District = r.District
+            })
+            .ToList();
+    }
 }

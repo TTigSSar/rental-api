@@ -185,7 +185,7 @@ internal static class DevelopmentSeedData
     // DevelopmentSeedRunner.SeedCategoriesAsync); IsVisible stays at its true default for all of them.
     public static readonly SeedCategory[] Categories =
     [
-        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys", NameHy: "Խաղալիքներ փոքրիկների համար", NameRu: "Игрушки для малышей", "baby-toys",        IconName: "heart",   ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
+        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys", NameHy: "Փոքրիկների խաղալիքներ", NameRu: "Игрушки для малышей", "baby-toys",        IconName: "heart",   ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
         new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks", NameHy: "Կոնստրուկտորներ", NameRu: "Конструкторы", "building-blocks",  IconName: "grid",    ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2,  ColorHex: "#E6F2D9"),
         new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", NameHy: "Զարգացնող խաղալիքներ", NameRu: "Развивающие игрушки", "educational-toys", IconName: "star",    ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3,  ColorHex: "#F0E6FF"),
         new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys", NameHy: "Բացօթյա խաղալիքներ", NameRu: "Игрушки для улицы", "outdoor-toys",     IconName: "sparkle", ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4,  ColorHex: "#D9E8FF"),

@@ -205,6 +205,7 @@ public sealed class AdminListingsService : IAdminListingsService
         }
 
         var fromCategoryName = listing.Category.Name;
+        var fromCategoryNames = new CategoryNames(listing.Category.Name, listing.Category.NameHy, listing.Category.NameRu);
         listing.CategoryId = category.Id;
         listing.Category = category;
         listing.UpdatedAt = DateTime.UtcNow;
@@ -227,7 +228,8 @@ public sealed class AdminListingsService : IAdminListingsService
 
         // Best-effort (see IModerationNoteEmitter): never lets a note failure fail this recategorisation.
         await _moderationNoteEmitter.ListingRecategorisedAsync(
-            admin.Id, listing.OwnerId, listing.Owner?.PreferredLanguage, listing.Title, fromCategoryName, category.Name, cancellationToken);
+            admin.Id, listing.OwnerId, listing.Owner?.PreferredLanguage, listing.Title,
+            fromCategoryNames, new CategoryNames(category.Name, category.NameHy, category.NameRu), cancellationToken);
 
         var detail = await BuildDetailAsync(listing, cancellationToken);
         return ServiceResult<AdminListingDetailResponse>.Success(detail);
@@ -456,6 +458,8 @@ public sealed class AdminListingsService : IAdminListingsService
             OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
             CategoryId = listing.CategoryId,
             CategoryName = listing.Category.Name,
+            CategoryNameHy = listing.Category.NameHy,
+            CategoryNameRu = listing.Category.NameRu,
             Title = listing.Title,
             Description = listing.Description,
             PricePerDay = listing.PricePerDay,
@@ -487,7 +491,9 @@ public sealed class AdminListingsService : IAdminListingsService
             Status = listing.Status,
             OwnerOpenReportCount = stats?.OpenReportCount ?? 0,
             SuggestedCategoryId = suggestion.CategoryId,
-            SuggestedCategoryName = suggestion.CategoryName
+            SuggestedCategoryName = suggestion.CategoryName,
+            SuggestedCategoryNameHy = suggestion.CategoryNameHy,
+            SuggestedCategoryNameRu = suggestion.CategoryNameRu
         };
     }
 
@@ -517,6 +523,8 @@ public sealed class AdminListingsService : IAdminListingsService
             OwnerLastName = DeletedUserDisplay.LastName(listing.Owner),
             CategoryId = listing.CategoryId,
             CategoryName = listing.Category.Name,
+            CategoryNameHy = listing.Category.NameHy,
+            CategoryNameRu = listing.Category.NameRu,
             Title = listing.Title,
             Description = listing.Description,
             PricePerDay = listing.PricePerDay,
@@ -546,7 +554,9 @@ public sealed class AdminListingsService : IAdminListingsService
             OwnerCompletedRentals = stats?.CompletedRentalCount ?? 0,
             OwnerJoinedAt = listing.Owner.CreatedAt,
             SuggestedCategoryId = suggestion.CategoryId,
-            SuggestedCategoryName = suggestion.CategoryName
+            SuggestedCategoryName = suggestion.CategoryName,
+            SuggestedCategoryNameHy = suggestion.CategoryNameHy,
+            SuggestedCategoryNameRu = suggestion.CategoryNameRu
         };
     }
 
@@ -560,6 +570,8 @@ public sealed class AdminListingsService : IAdminListingsService
         OwnerIsDeleted = DeletedUserDisplay.IsDeleted(listing.Owner),
         CategoryId = listing.CategoryId,
         CategoryName = listing.Category.Name,
+        CategoryNameHy = listing.Category.NameHy,
+        CategoryNameRu = listing.Category.NameRu,
         Title = listing.Title,
         Description = listing.Description,
         PricePerDay = listing.PricePerDay,
@@ -605,7 +617,8 @@ public sealed class AdminListingsService : IAdminListingsService
     // One compiled whole-word matcher per keyword row, built once per request (see
     // GetKeywordMatchersAsync) and reused across every listing on the page — the store call is the
     // only per-request DB round trip; everything after that is in-memory.
-    private sealed record CategoryKeywordMatcher(Guid CategoryId, string CategoryName, int CategoryDisplayOrder, Regex Pattern);
+    private sealed record CategoryKeywordMatcher(
+        Guid CategoryId, string CategoryName, string CategoryNameHy, string CategoryNameRu, int CategoryDisplayOrder, Regex Pattern);
 
     private async Task<IReadOnlyList<CategoryKeywordMatcher>> GetKeywordMatchersAsync(CancellationToken cancellationToken)
     {
@@ -624,6 +637,8 @@ public sealed class AdminListingsService : IAdminListingsService
             .Select(entry => new CategoryKeywordMatcher(
                 entry.CategoryId,
                 entry.CategoryName,
+                entry.CategoryNameHy,
+                entry.CategoryNameRu,
                 entry.CategoryDisplayOrder,
                 new Regex(
                     $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(entry.Keyword)}(?![\p{{L}}\p{{N}}])",
@@ -637,20 +652,22 @@ public sealed class AdminListingsService : IAdminListingsService
     // different from the listing's own category. Ties break on the category's DisplayOrder, then
     // its Id, so the same listing never flip-flops between page loads. Only ever computed for
     // PendingApproval listings — an approved listing is settled and must not nag.
-    private static (Guid? CategoryId, string? CategoryName) ComputeSuggestedCategory(
+    private static (Guid? CategoryId, string? CategoryName, string? CategoryNameHy, string? CategoryNameRu) ComputeSuggestedCategory(
         Listing listing, IReadOnlyList<CategoryKeywordMatcher> keywordMatchers)
     {
         if (listing.Status != ListingStatus.PendingApproval || keywordMatchers.Count == 0)
         {
-            return (null, null);
+            return (null, null, null, null);
         }
 
         var best = keywordMatchers
-            .GroupBy(matcher => new { matcher.CategoryId, matcher.CategoryName, matcher.CategoryDisplayOrder })
+            .GroupBy(matcher => new { matcher.CategoryId, matcher.CategoryName, matcher.CategoryNameHy, matcher.CategoryNameRu, matcher.CategoryDisplayOrder })
             .Select(group => new
             {
                 group.Key.CategoryId,
                 group.Key.CategoryName,
+                group.Key.CategoryNameHy,
+                group.Key.CategoryNameRu,
                 group.Key.CategoryDisplayOrder,
                 Score = group.Sum(matcher =>
                     (matcher.Pattern.IsMatch(listing.Title) ? TitleKeywordWeight : 0) +
@@ -664,9 +681,9 @@ public sealed class AdminListingsService : IAdminListingsService
 
         if (best is null || best.CategoryId == listing.CategoryId)
         {
-            return (null, null);
+            return (null, null, null, null);
         }
 
-        return (best.CategoryId, best.CategoryName);
+        return (best.CategoryId, best.CategoryName, best.CategoryNameHy, best.CategoryNameRu);
     }
 }

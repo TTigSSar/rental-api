@@ -242,8 +242,17 @@ public sealed class SqlServerTestDatabase : IDisposable
         await using var context = CreateContext();
         await context.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO [Categories] ([Id], [Name], [Slug], [DisplayOrder], [IsVisible])
-            VALUES ({0}, {1}, {2}, 0, 1);
+            -- NameHy/NameRu (LocalizeCategoryNames) are NOT NULL once the schema reaches that migration,
+            -- but this helper also runs at older schema states where the columns don't exist yet.
+            IF COL_LENGTH('Categories', 'NameHy') IS NULL
+                INSERT INTO [Categories] ([Id], [Name], [Slug], [DisplayOrder], [IsVisible])
+                VALUES ({0}, {1}, {2}, 0, 1);
+            ELSE
+                EXEC sp_executesql
+                    N'INSERT INTO [Categories] ([Id], [Name], [NameHy], [NameRu], [Slug], [DisplayOrder], [IsVisible])
+                      VALUES (@id, @name, @name, @name, @slug, 0, 1);',
+                    N'@id uniqueidentifier, @name nvarchar(120), @slug nvarchar(140)',
+                    @id = {0}, @name = {1}, @slug = {2};
             """,
             id, name, slug);
     }

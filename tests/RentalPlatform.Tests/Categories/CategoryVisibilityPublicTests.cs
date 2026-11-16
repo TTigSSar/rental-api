@@ -42,6 +42,20 @@ public sealed class CategoryVisibilityPublicTests
     }
 
     [Fact]
+    public async Task CategoriesQueryService_Returns_All_Three_Names()
+    {
+        using var db = await SeedAsync();
+
+        await using var context = db.CreateContext();
+        var categories = await new CategoriesQueryService(context).GetAllAsync();
+
+        var visible = categories.Single(c => c.Id == VisibleCategoryId);
+        Assert.Equal("Visible Cat", visible.Name);
+        Assert.Equal("Visible Cat (hy)", visible.NameHy);
+        Assert.Equal("Visible Cat (ru)", visible.NameRu);
+    }
+
+    [Fact]
     public async Task CategoriesQueryService_Includes_ColorHex()
     {
         using var db = await SeedAsync();

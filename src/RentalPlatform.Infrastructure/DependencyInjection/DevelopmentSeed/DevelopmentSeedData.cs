@@ -10,7 +10,7 @@ namespace RentalPlatform.Infrastructure.DependencyInjection.DevelopmentSeed;
 internal static class DevelopmentSeedData
 {
     public sealed record SeedCategory(
-        Guid Id, string Name, string Slug, string? IconName, string? ImageUrl, int DisplayOrder, string? ColorHex = null);
+        Guid Id, string Name, string NameHy, string NameRu, string Slug, string? IconName, string? ImageUrl, int DisplayOrder, string? ColorHex = null);
 
     // Admin console Phase 6 ("Needs category fix"): a word/phrase that, found in a pending
     // listing's title or description, signals the category it belongs in. CategorySlug resolves
@@ -185,16 +185,16 @@ internal static class DevelopmentSeedData
     // DevelopmentSeedRunner.SeedCategoriesAsync); IsVisible stays at its true default for all of them.
     public static readonly SeedCategory[] Categories =
     [
-        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys",        "baby-toys",        IconName: "heart",   ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
-        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks",  "building-blocks",  IconName: "grid",    ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2,  ColorHex: "#E6F2D9"),
-        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", "educational-toys", IconName: "star",    ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3,  ColorHex: "#F0E6FF"),
-        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys",     "outdoor-toys",     IconName: "sparkle", ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4,  ColorHex: "#D9E8FF"),
-        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys",     "ride-on-toys",     IconName: "truck",   ImageUrl: "/assets/categories/ride-on-toys.svg",     DisplayOrder: 5,  ColorHex: "#FFE0E0"),
-        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play",     "pretend-play",     IconName: "sparkle", ImageUrl: "/assets/categories/pretend-play.svg",     DisplayOrder: 6,  ColorHex: "#E8EAFF"),
-        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys",  "montessori-toys",  IconName: "shield",  ImageUrl: "/assets/categories/montessori-toys.svg",  DisplayOrder: 7,  ColorHex: "#FFF1CC"),
-        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles",          "puzzles",          IconName: "grid",    ImageUrl: "/assets/categories/puzzles.svg",           DisplayOrder: 8,  ColorHex: "#D9F0EC"),
-        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games",      "board-games",      IconName: "grid",    ImageUrl: "/assets/categories/board-games.svg",      DisplayOrder: 9,  ColorHex: "#E6F4EE"),
-        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys",       "party-toys",       IconName: "tag",     ImageUrl: "/assets/categories/party-toys.svg",       DisplayOrder: 10, ColorHex: "#EDEAE3")
+        new(new Guid("c0000004-0000-4000-9000-000000000004"), "Baby Toys", NameHy: "Խաղալիքներ փոքրիկների համար", NameRu: "Игрушки для малышей", "baby-toys",        IconName: "heart",   ImageUrl: "/assets/categories/baby-toys.svg",        DisplayOrder: 1,  ColorHex: "#FFE6CC"),
+        new(new Guid("c0000002-0000-4000-9000-000000000002"), "Building Blocks", NameHy: "Կոնստրուկտորներ", NameRu: "Конструкторы", "building-blocks",  IconName: "grid",    ImageUrl: "/assets/categories/building-blocks.svg",  DisplayOrder: 2,  ColorHex: "#E6F2D9"),
+        new(new Guid("c0000001-0000-4000-9000-000000000001"), "Educational Toys", NameHy: "Զարգացնող խաղալիքներ", NameRu: "Развивающие игрушки", "educational-toys", IconName: "star",    ImageUrl: "/assets/categories/educational-toys.svg", DisplayOrder: 3,  ColorHex: "#F0E6FF"),
+        new(new Guid("c0000003-0000-4000-9000-000000000003"), "Outdoor Toys", NameHy: "Բացօթյա խաղալիքներ", NameRu: "Игрушки для улицы", "outdoor-toys",     IconName: "sparkle", ImageUrl: "/assets/categories/outdoor-toys.svg",     DisplayOrder: 4,  ColorHex: "#D9E8FF"),
+        new(new Guid("c0000007-0000-4000-9000-000000000007"), "Ride-On Toys", NameHy: "Մանկական մեքենաներ", NameRu: "Каталки и машинки", "ride-on-toys",     IconName: "truck",   ImageUrl: "/assets/categories/ride-on-toys.svg",     DisplayOrder: 5,  ColorHex: "#FFE0E0"),
+        new(new Guid("c0000006-0000-4000-9000-000000000006"), "Pretend Play", NameHy: "Դերային խաղեր", NameRu: "Сюжетно-ролевые игры", "pretend-play",     IconName: "sparkle", ImageUrl: "/assets/categories/pretend-play.svg",     DisplayOrder: 6,  ColorHex: "#E8EAFF"),
+        new(new Guid("c0000009-0000-4000-9000-000000000009"), "Montessori Toys", NameHy: "Մոնտեսորի խաղալիքներ", NameRu: "Монтессори", "montessori-toys",  IconName: "shield",  ImageUrl: "/assets/categories/montessori-toys.svg",  DisplayOrder: 7,  ColorHex: "#FFF1CC"),
+        new(new Guid("c0000008-0000-4000-9000-000000000008"), "Puzzles", NameHy: "Փազլներ", NameRu: "Пазлы", "puzzles",          IconName: "grid",    ImageUrl: "/assets/categories/puzzles.svg",           DisplayOrder: 8,  ColorHex: "#D9F0EC"),
+        new(new Guid("c0000005-0000-4000-9000-000000000005"), "Board Games", NameHy: "Սեղանի խաղեր", NameRu: "Настольные игры", "board-games",      IconName: "grid",    ImageUrl: "/assets/categories/board-games.svg",      DisplayOrder: 9,  ColorHex: "#E6F4EE"),
+        new(new Guid("c000000a-0000-4000-9000-00000000000a"), "Party Toys", NameHy: "Տոնական խաղալիքներ", NameRu: "Для праздника", "party-toys",       IconName: "tag",     ImageUrl: "/assets/categories/party-toys.svg",       DisplayOrder: 10, ColorHex: "#EDEAE3")
     ];
 
     // Admin console Phase 6 ("Needs category fix"): a sensible keyword set for each of the 10

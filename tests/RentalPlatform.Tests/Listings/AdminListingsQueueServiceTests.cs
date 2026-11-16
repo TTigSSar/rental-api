@@ -221,7 +221,7 @@ public sealed class AdminListingsQueueServiceTests
             TestData.User(AdminId, "admin@test.local", role: UserRole.Admin),
             TestData.User(OwnerId, "owner@test.local"),
             TestData.Category(CategoryId),
-            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", Slug = "outdoor-toys" });
+            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", NameHy = "Outdoor Toys hy", NameRu = "Игрушки для улицы", Slug = "outdoor-toys" });
 
         await db.SeedAsync(MakeListing(listingId, OwnerId, CategoryId, ListingStatus.PendingApproval, "Recategorise Me", DateTime.UtcNow));
 
@@ -255,7 +255,7 @@ public sealed class AdminListingsQueueServiceTests
             TestData.User(AdminId, "admin@test.local", role: UserRole.Admin),
             TestData.User(OwnerId, "owner@test.local"),
             TestData.Category(CategoryId, name: "Building Blocks"),
-            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", Slug = "outdoor-toys" });
+            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", NameHy = "Outdoor Toys hy", NameRu = "Игрушки для улицы", Slug = "outdoor-toys" });
 
         await db.SeedAsync(MakeListing(listingId, OwnerId, CategoryId, ListingStatus.PendingApproval, "Recategorise Me", DateTime.UtcNow));
 
@@ -270,6 +270,9 @@ public sealed class AdminListingsQueueServiceTests
         Assert.Equal("Recategorise Me", call.ListingTitle);
         Assert.Equal("Building Blocks", call.FromCategoryName);
         Assert.Equal("Outdoor Toys", call.ToCategoryName);
+        Assert.Equal("Building Blocks (ru)", call.FromCategory.Ru);
+        Assert.Equal("Building Blocks (hy)", call.FromCategory.Hy);
+        Assert.Equal("Игрушки для улицы", call.ToCategory.Ru);
     }
 
     [Fact]
@@ -281,7 +284,7 @@ public sealed class AdminListingsQueueServiceTests
             TestData.User(AdminId, "admin@test.local", role: UserRole.Admin),
             TestData.User(OwnerId, "owner@test.local"),
             TestData.Category(CategoryId),
-            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", Slug = "outdoor-toys" });
+            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", NameHy = "Outdoor Toys hy", NameRu = "Игрушки для улицы", Slug = "outdoor-toys" });
 
         await db.SeedAsync(MakeListing(listingId, OwnerId, CategoryId, ListingStatus.Approved, "Live Listing", DateTime.UtcNow, DateTime.UtcNow));
 
@@ -318,7 +321,7 @@ public sealed class AdminListingsQueueServiceTests
             TestData.User(AdminId, "admin@test.local", role: UserRole.Admin),
             TestData.User(OwnerId, "owner@test.local"),
             TestData.Category(CategoryId),
-            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", Slug = "outdoor-toys" });
+            new Category { Id = OtherCategoryId, Name = "Outdoor Toys", NameHy = "Outdoor Toys hy", NameRu = "Игрушки для улицы", Slug = "outdoor-toys" });
 
         await db.SeedAsync(MakeListing(listingId, OwnerId, CategoryId, status, "Draft Listing", DateTime.UtcNow));
 

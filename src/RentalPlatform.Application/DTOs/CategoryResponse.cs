@@ -4,6 +4,8 @@ public sealed class CategoryResponse
 {
     public Guid Id { get; init; }
     public string Name { get; init; } = string.Empty;
+    public string NameHy { get; init; } = string.Empty;
+    public string NameRu { get; init; } = string.Empty;
     public string Slug { get; init; } = string.Empty;
     public string? IconName { get; init; }
     public string? ImageUrl { get; init; }

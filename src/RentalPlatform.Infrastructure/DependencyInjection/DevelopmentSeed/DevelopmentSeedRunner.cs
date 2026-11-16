@@ -247,6 +247,8 @@ internal sealed class DevelopmentSeedRunner
             {
                 Id = category.Id,
                 Name = category.Name,
+                NameHy = category.NameHy,
+                NameRu = category.NameRu,
                 Slug = category.Slug,
                 IconName = category.IconName,
                 ImageUrl = category.ImageUrl,
@@ -282,6 +284,18 @@ internal sealed class DevelopmentSeedRunner
             // via the AddCategoryVisibilityAndColor migration, and stomping it on every seed run
             // would silently undo an admin's manual hide toggle on a dev database.
             if (existing.ColorHex != seed.ColorHex)  { existing.ColorHex     = seed.ColorHex;      dirty = true; }
+            // ADR-062 localized names: backfill only when blank or still the English placeholder
+            // (the migration's fallback), so an admin's edit is never overwritten.
+            if (string.IsNullOrWhiteSpace(existing.NameHy) || existing.NameHy == existing.Name)
+            {
+                if (existing.NameHy != seed.NameHy) { existing.NameHy = seed.NameHy; dirty = true; }
+            }
+
+            if (string.IsNullOrWhiteSpace(existing.NameRu) || existing.NameRu == existing.Name)
+            {
+                if (existing.NameRu != seed.NameRu) { existing.NameRu = seed.NameRu; dirty = true; }
+            }
+
             if (dirty) updated++;
         }
 

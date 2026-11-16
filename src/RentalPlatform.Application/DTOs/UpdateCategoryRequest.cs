@@ -9,6 +9,12 @@ public sealed class UpdateCategoryRequest
     [MaxLength(120, ErrorMessage = "Category name must be 120 characters or fewer.")]
     public string? Name { get; init; }
 
+    [MaxLength(120, ErrorMessage = "Armenian category name must be 120 characters or fewer.")]
+    public string? NameHy { get; init; }
+
+    [MaxLength(120, ErrorMessage = "Russian category name must be 120 characters or fewer.")]
+    public string? NameRu { get; init; }
+
     [MaxLength(80, ErrorMessage = "Icon name must be 80 characters or fewer.")]
     public string? IconName { get; init; }
 

@@ -19,6 +19,8 @@ public sealed class BookingDetailResponse
     public string ListingTitle { get; init; } = string.Empty;
     public string? ListingPrimaryImageUrl { get; init; }
     public string? CategoryName { get; init; }
+    public string? CategoryNameHy { get; init; }
+    public string? CategoryNameRu { get; init; }
     public string? Condition { get; init; }
     public string City { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;

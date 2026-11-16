@@ -134,10 +134,14 @@ public static class TestData
         int displayOrder = 0,
         bool isVisible = true,
         string? colorHex = null,
-        string? iconName = null) => new()
+        string? iconName = null,
+        string? nameHy = null,
+        string? nameRu = null) => new()
     {
         Id = id,
         Name = name ?? "Building Blocks",
+        NameHy = nameHy ?? (name ?? "Building Blocks") + " (hy)",
+        NameRu = nameRu ?? (name ?? "Building Blocks") + " (ru)",
         Slug = slug ?? $"building-blocks-{id:N}",
         DisplayOrder = displayOrder,
         IsVisible = isVisible,

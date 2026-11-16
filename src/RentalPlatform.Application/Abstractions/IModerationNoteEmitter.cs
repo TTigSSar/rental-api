@@ -9,6 +9,17 @@ namespace RentalPlatform.Application.Abstractions;
 /// break the moderation action (reject/recategorise/suspend) that triggered it — mirrors
 /// <see cref="IChatSystemMessageEmitter"/> exactly, including its try/catch-swallow + log doctrine.
 /// </summary>
+/// <summary>A category's three names (ADR-062). <see cref="ForLanguage"/> falls back to English.</summary>
+public sealed record CategoryNames(string En, string Hy, string Ru)
+{
+    public string ForLanguage(string language) => language switch
+    {
+        "hy" when !string.IsNullOrWhiteSpace(Hy) => Hy,
+        "ru" when !string.IsNullOrWhiteSpace(Ru) => Ru,
+        _ => En
+    };
+}
+
 public interface IModerationNoteEmitter
 {
     // Body and reason are rendered at emit time in the member's language (ADR-025 amendment
@@ -18,9 +29,9 @@ public interface IModerationNoteEmitter
     Task ListingRejectedAsync(
         Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string reasonCode, string? note, CancellationToken cancellationToken = default);
 
-    /// <summary>A listing was recategorised → a Category note (subject = listing title, reason = "{from} → {to}").</summary>
+    /// <summary>A listing was recategorised → a Category note (subject = listing title, reason = "{from} → {to}", category names in the member's language, English fallback — ADR-062).</summary>
     Task ListingRecategorisedAsync(
-        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string fromCategoryName, string toCategoryName, CancellationToken cancellationToken = default);
+        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, CategoryNames fromCategory, CategoryNames toCategory, CancellationToken cancellationToken = default);
 
     /// <summary>An account was suspended → a Suspend note (reason = the optional suspend reason, admin free text).</summary>
     Task AccountSuspendedAsync(

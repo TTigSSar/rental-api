@@ -482,6 +482,8 @@ public sealed class ListingsQueryService : IListingsQueryService
                     {
                         Id = x.Listing.Category.Id,
                         Name = x.Listing.Category.Name,
+                        NameHy = x.Listing.Category.NameHy,
+                        NameRu = x.Listing.Category.NameRu,
                         Slug = x.Listing.Category.Slug
                     },
                     Owner = new ListingOwnerResponse

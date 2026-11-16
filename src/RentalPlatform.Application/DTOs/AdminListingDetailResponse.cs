@@ -22,6 +22,8 @@ public sealed class AdminListingDetailResponse
 
     public Guid CategoryId { get; init; }
     public string CategoryName { get; init; } = string.Empty;
+    public string CategoryNameHy { get; init; } = string.Empty;
+    public string CategoryNameRu { get; init; } = string.Empty;
 
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
@@ -72,4 +74,6 @@ public sealed class AdminListingDetailResponse
     // differs from CategoryId — see AdminListingsService's suggestion rule for the exact scoring.
     public Guid? SuggestedCategoryId { get; init; }
     public string? SuggestedCategoryName { get; init; }
+    public string? SuggestedCategoryNameHy { get; init; }
+    public string? SuggestedCategoryNameRu { get; init; }
 }

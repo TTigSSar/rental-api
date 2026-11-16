@@ -4,6 +4,10 @@ public sealed class Category
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    // ADR-062: Name is the English name; NameHy/NameRu are the Armenian/Russian names (data, not
+    // i18n keys). All three are required.
+    public string NameHy { get; set; } = string.Empty;
+    public string NameRu { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string? IconName { get; set; }
     public string? ImageUrl { get; set; }

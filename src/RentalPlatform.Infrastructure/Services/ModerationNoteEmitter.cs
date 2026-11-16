@@ -57,12 +57,12 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
         Guid memberId,
         string? memberLanguage,
         string listingTitle,
-        string fromCategoryName,
-        string toCategoryName,
+        CategoryNames fromCategory,
+        CategoryNames toCategory,
         CancellationToken cancellationToken = default)
     {
         var language = NotificationCopy.ResolveLanguage(memberLanguage);
-        var reason = $"{fromCategoryName} → {toCategoryName}";
+        var reason = $"{fromCategory.ForLanguage(language)} → {toCategory.ForLanguage(language)}";
         var body = language switch
         {
             "ru" => $"Объявление «{listingTitle}» перенесено в другую категорию: {reason}.",

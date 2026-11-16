@@ -155,7 +155,8 @@ public sealed class AdminListingsStore : IAdminListingsStore
         await _dbContext.CategoryKeywords
             .AsNoTracking()
             .Select(keyword => new CategoryKeywordEntry(
-                keyword.CategoryId, keyword.Category.Name, keyword.Category.DisplayOrder, keyword.Keyword))
+                keyword.CategoryId, keyword.Category.Name, keyword.Category.DisplayOrder, keyword.Keyword,
+                keyword.Category.NameHy, keyword.Category.NameRu))
             .ToListAsync(cancellationToken);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>

@@ -71,6 +71,39 @@ public sealed class DevelopmentSeedCategoryKeywordsIdempotencyTests
     }
 
     [Fact]
+    public async Task RunAsync_Seeds_Localized_Category_Names_And_Never_Overwrites_Admin_Edits()
+    {
+        using var db = new SqliteTestDatabase();
+
+        await using (var context = db.CreateContext())
+        {
+            await CreateRunner(context).RunAsync(CancellationToken.None);
+        }
+
+        await using (var context = db.CreateContext())
+        {
+            var puzzles = await context.Categories.SingleAsync(c => c.Slug == "puzzles");
+            Assert.Equal("Փազլներ", puzzles.NameHy);
+            Assert.Equal("Пазлы", puzzles.NameRu);
+
+            // Admin edits one; blanks another to the English placeholder (the migration fallback).
+            puzzles.NameRu = "Головоломки";
+            var board = await context.Categories.SingleAsync(c => c.Slug == "board-games");
+            board.NameHy = board.Name;
+            await context.SaveChangesAsync();
+        }
+
+        await using (var context = db.CreateContext())
+        {
+            await CreateRunner(context).RunAsync(CancellationToken.None);
+        }
+
+        await using var verify = db.CreateContext();
+        Assert.Equal("Головоломки", (await verify.Categories.SingleAsync(c => c.Slug == "puzzles")).NameRu);
+        Assert.Equal("Սեղանի խաղեր", (await verify.Categories.SingleAsync(c => c.Slug == "board-games")).NameHy);
+    }
+
+    [Fact]
     public async Task RunAsync_Run_Twice_Does_Not_Duplicate_CategoryKeywords()
     {
         using var db = new SqliteTestDatabase();

@@ -104,6 +104,14 @@ public sealed class AdminCategoriesService : IAdminCategoriesService
             return Failure<AdminCategoryResponse>(ErrorCodes.InvalidName, "Category name is required.");
         }
 
+        var nameHy = (request.NameHy ?? string.Empty).Trim();
+        var nameRu = (request.NameRu ?? string.Empty).Trim();
+        if (nameHy.Length == 0 || nameRu.Length == 0)
+        {
+            return Failure<AdminCategoryResponse>(
+                ErrorCodes.InvalidName, "Category names in English, Armenian and Russian are required.");
+        }
+
         var colorHex = NormalizeColorOrNull(request.ColorHex);
         if (ReferenceEquals(colorHex, InvalidColor))
         {
@@ -124,6 +132,8 @@ public sealed class AdminCategoriesService : IAdminCategoriesService
         {
             Id = Guid.NewGuid(),
             Name = name,
+            NameHy = nameHy,
+            NameRu = nameRu,
             Slug = slug,
             IconName = iconName,
             ColorHex = colorHex?.Value,
@@ -197,6 +207,28 @@ public sealed class AdminCategoriesService : IAdminCategoriesService
             }
         }
 
+        // NameHy/NameRu (ADR-062): same PATCH semantics — null leaves unchanged, supplied-but-blank
+        // is rejected. Applied after the other validations; nothing is saved on a failure return.
+        string? nameHy = null;
+        string? nameRu = null;
+        if (request.NameHy is not null)
+        {
+            nameHy = request.NameHy.Trim();
+            if (nameHy.Length == 0)
+            {
+                return Failure<AdminCategoryResponse>(ErrorCodes.InvalidName, "Armenian category name is required.");
+            }
+        }
+
+        if (request.NameRu is not null)
+        {
+            nameRu = request.NameRu.Trim();
+            if (nameRu.Length == 0)
+            {
+                return Failure<AdminCategoryResponse>(ErrorCodes.InvalidName, "Russian category name is required.");
+            }
+        }
+
         // IconName/ColorHex: null means "leave unchanged"; an empty/whitespace string means
         // "clear this field" (there is no other way to null out an optional PATCH field in JSON
         // without a full wrapper type, and both fields are purely cosmetic so this is low-risk).
@@ -215,6 +247,16 @@ public sealed class AdminCategoriesService : IAdminCategoriesService
             }
 
             category.ColorHex = normalized?.Value;
+        }
+
+        if (nameHy is not null)
+        {
+            category.NameHy = nameHy;
+        }
+
+        if (nameRu is not null)
+        {
+            category.NameRu = nameRu;
         }
 
         await _store.SaveChangesAsync(cancellationToken);
@@ -445,6 +487,8 @@ public sealed class AdminCategoriesService : IAdminCategoriesService
     {
         Id = category.Id,
         Name = category.Name,
+        NameHy = category.NameHy,
+        NameRu = category.NameRu,
         Slug = category.Slug,
         IconName = category.IconName,
         ColorHex = category.ColorHex,

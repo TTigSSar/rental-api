@@ -83,7 +83,7 @@ public sealed class AdminCategoriesServiceTests
 
         await using var context = db.CreateContext();
         var result = await CreateService(context, AdminId).CreateAsync(
-            new CreateCategoryRequest { Name = "board games" });
+            new CreateCategoryRequest { Name = "board games", NameHy = "Սեղանի խաղեր", NameRu = "Настольные игры" });
 
         Assert.False(result.IsSuccess);
         Assert.Equal("admin.category_name_taken", result.Error!.Code);
@@ -99,10 +99,12 @@ public sealed class AdminCategoriesServiceTests
 
         await using var context = db.CreateContext();
         var result = await CreateService(context, AdminId).CreateAsync(
-            new CreateCategoryRequest { Name = "Water Toys", IconName = "pi-droplet", ColorHex = "#AABBCC" });
+            new CreateCategoryRequest { Name = "Water Toys", NameHy = "Ջրային խաղալիքներ", NameRu = "Водные игрушки", IconName = "pi-droplet", ColorHex = "#AABBCC" });
 
         Assert.True(result.IsSuccess);
         Assert.Equal("water-toys", result.Value!.Slug);
+        Assert.Equal("Ջրային խաղալիքներ", result.Value.NameHy);
+        Assert.Equal("Водные игрушки", result.Value.NameRu);
         Assert.Equal(6, result.Value.DisplayOrder);
         Assert.True(result.Value.IsVisible);
         Assert.Equal(0, result.Value.ListingCount);
@@ -169,6 +171,65 @@ public sealed class AdminCategoriesServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("admin.category_invalid_color", result.Error!.Code);
+    }
+
+    [Theory]
+    [InlineData("", "Водные игрушки")]
+    [InlineData("Ջրային խաղալիքներ", "   ")]
+    public async Task Create_Without_Hy_Or_Ru_Name_Is_Rejected(string nameHy, string nameRu)
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAdminAndOwnerAsync(db);
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId).CreateAsync(
+            new CreateCategoryRequest { Name = "Water Toys", NameHy = nameHy, NameRu = nameRu });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("admin.category_invalid_name", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Update_Only_NameRu_Changes_Only_NameRu()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAdminAndOwnerAsync(db);
+        var categoryId = new Guid("e0000000-0000-0000-0000-000000000034");
+        await db.SeedAsync(TestData.Category(categoryId, name: "Puzzles", slug: "puzzles-t6", displayOrder: 1, nameHy: "Փազլներ", nameRu: "Пазлы"));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId).UpdateAsync(
+            categoryId, new UpdateCategoryRequest { NameRu = "  Головоломки  " });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Головоломки", result.Value!.NameRu);
+        Assert.Equal("Փազլներ", result.Value.NameHy);
+        Assert.Equal("Puzzles", result.Value.Name);
+
+        await using var verify = db.CreateContext();
+        var row = await verify.Categories.SingleAsync(c => c.Id == categoryId);
+        Assert.Equal("Головоломки", row.NameRu);
+        Assert.Equal("Փազլներ", row.NameHy);
+        Assert.Equal("Puzzles", row.Name);
+    }
+
+    [Fact]
+    public async Task Update_Blank_NameHy_Is_Rejected_And_Nothing_Saved()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAdminAndOwnerAsync(db);
+        var categoryId = new Guid("e0000000-0000-0000-0000-000000000035");
+        await db.SeedAsync(TestData.Category(categoryId, name: "Puzzles", slug: "puzzles-t7", displayOrder: 1, nameHy: "Փազլներ", nameRu: "Пазлы"));
+
+        await using var context = db.CreateContext();
+        var result = await CreateService(context, AdminId).UpdateAsync(
+            categoryId, new UpdateCategoryRequest { NameHy = "   " });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("admin.category_invalid_name", result.Error!.Code);
+
+        await using var verify = db.CreateContext();
+        Assert.Equal("Փազլներ", (await verify.Categories.SingleAsync(c => c.Id == categoryId)).NameHy);
     }
 
     // ---------- Visibility toggle ----------

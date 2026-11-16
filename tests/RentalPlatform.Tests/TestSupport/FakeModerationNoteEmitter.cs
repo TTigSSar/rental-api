@@ -9,7 +9,7 @@ namespace RentalPlatform.Tests.TestSupport;
 public sealed class FakeModerationNoteEmitter : IModerationNoteEmitter
 {
     public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string ListingTitle, string ReasonCode, string? Note)> ListingRejectedCalls { get; } = new();
-    public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string ListingTitle, string FromCategoryName, string ToCategoryName)> ListingRecategorisedCalls { get; } = new();
+    public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string ListingTitle, string FromCategoryName, string ToCategoryName, CategoryNames FromCategory, CategoryNames ToCategory)> ListingRecategorisedCalls { get; } = new();
     public List<(Guid ModeratorId, Guid MemberId, string? MemberLanguage, string? Reason)> AccountSuspendedCalls { get; } = new();
 
     public Task ListingRejectedAsync(
@@ -20,9 +20,9 @@ public sealed class FakeModerationNoteEmitter : IModerationNoteEmitter
     }
 
     public Task ListingRecategorisedAsync(
-        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string fromCategoryName, string toCategoryName, CancellationToken cancellationToken = default)
+        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, CategoryNames fromCategory, CategoryNames toCategory, CancellationToken cancellationToken = default)
     {
-        ListingRecategorisedCalls.Add((moderatorId, memberId, memberLanguage, listingTitle, fromCategoryName, toCategoryName));
+        ListingRecategorisedCalls.Add((moderatorId, memberId, memberLanguage, listingTitle, fromCategory.En, toCategory.En, fromCategory, toCategory));
         return Task.CompletedTask;
     }
 

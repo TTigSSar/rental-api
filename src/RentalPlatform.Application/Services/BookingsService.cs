@@ -595,6 +595,8 @@ public sealed class BookingsService : IBookingsService
                 .Select(image => image.Url)
                 .FirstOrDefault(),
             CategoryName = listing.Category?.Name,
+            CategoryNameHy = listing.Category?.NameHy,
+            CategoryNameRu = listing.Category?.NameRu,
             Condition = listing.Condition,
             City = listing.City,
             Country = listing.Country,

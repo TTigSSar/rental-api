@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
 using RentalPlatform.Domain.Entities;
 using RentalPlatform.Domain.Enums;
@@ -63,7 +64,7 @@ public sealed class ModerationNoteEmitterTests
         var emitter = CreateEmitter();
 
         var exception = await Record.ExceptionAsync(() =>
-            emitter.ListingRecategorisedAsync(Guid.NewGuid(), Guid.NewGuid(), "ru", "Some Listing", "Building Blocks", "Outdoor Toys"));
+            emitter.ListingRecategorisedAsync(Guid.NewGuid(), Guid.NewGuid(), "ru", "Some Listing", new CategoryNames("Building Blocks", "Կ", "Конструкторы"), new CategoryNames("Outdoor Toys", "Բ", "Игрушки для улицы")));
 
         Assert.Null(exception);
     }
@@ -123,19 +124,44 @@ public sealed class ModerationNoteEmitterTests
 
     [Theory]
     [InlineData("en", "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
-    [InlineData("ru", "Объявление «Toy» перенесено в другую категорию: Blocks → Outdoor.")]
-    [InlineData("hy", "«Toy» հայտարարությունը տեղափոխվել է այլ կատեգորիա՝ Blocks → Outdoor։")]
+    [InlineData("ru", "Объявление «Toy» перенесено в другую категорию: Блоки → Улица.")]
+    [InlineData("hy", "«Toy» հայտարարությունը տեղափոխվել է այլ կատեգորիա՝ Բլոկներ → Բացօթյա։")]
     [InlineData("xx", "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
     [InlineData(null, "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
     public async Task ListingRecategorised_Renders_Body_In_Member_Language(string? language, string expectedBody)
     {
         var (emitter, store) = CreateCapturing();
 
-        await emitter.ListingRecategorisedAsync(Guid.NewGuid(), Guid.NewGuid(), language, "Toy", "Blocks", "Outdoor");
+        await emitter.ListingRecategorisedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), language, "Toy",
+            new CategoryNames("Blocks", "Բլոկներ", "Блоки"), new CategoryNames("Outdoor", "Բացօթյա", "Улица"));
 
         Assert.Equal(ModerationNoteKind.Category, store.Kind);
-        Assert.Equal("Blocks → Outdoor", store.Reason);
+        var expectedReason = language switch
+        {
+            "ru" => "Блоки → Улица",
+            "hy" => "Բլոկներ → Բացօթյա",
+            _ => "Blocks → Outdoor",
+        };
+        Assert.Equal(expectedReason, store.Reason);
         Assert.Equal(expectedBody, store.Body);
+    }
+
+    [Theory]
+    [InlineData("ru", "Блоки → Улица")]
+    [InlineData("hy", "Բլոկներ → Բացօթյա")]
+    [InlineData("en", "Blocks → Outdoor")]
+    [InlineData(null, "Blocks → Outdoor")]
+    public async Task ListingRecategorised_Uses_Category_Names_In_Member_Language(string? language, string expectedReason)
+    {
+        var (emitter, store) = CreateCapturing();
+
+        await emitter.ListingRecategorisedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), language, "Toy",
+            new CategoryNames("Blocks", "Բլոկներ", "Блоки"), new CategoryNames("Outdoor", "Բացօթյա", "Улица"));
+
+        Assert.Equal(expectedReason, store.Reason);
+        Assert.Contains(expectedReason, store.Body);
     }
 
     [Theory]

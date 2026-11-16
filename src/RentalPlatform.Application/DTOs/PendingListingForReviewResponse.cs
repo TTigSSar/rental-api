@@ -13,6 +13,8 @@ public sealed class PendingListingForReviewResponse
 
     public Guid CategoryId { get; init; }
     public string CategoryName { get; init; } = string.Empty;
+    public string CategoryNameHy { get; init; } = string.Empty;
+    public string CategoryNameRu { get; init; } = string.Empty;
 
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;

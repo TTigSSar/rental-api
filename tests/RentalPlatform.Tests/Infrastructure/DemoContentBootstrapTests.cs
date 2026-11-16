@@ -30,6 +30,8 @@ public sealed class DemoContentBootstrapTests
             {
                 Id = c.Id,
                 Name = c.Name,
+                NameHy = c.NameHy,
+                NameRu = c.NameRu,
                 Slug = c.Slug,
                 IconName = c.IconName,
                 ImageUrl = c.ImageUrl,

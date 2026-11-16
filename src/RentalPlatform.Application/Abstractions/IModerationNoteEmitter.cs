@@ -2,6 +2,17 @@ using RentalPlatform.Domain.Enums;
 
 namespace RentalPlatform.Application.Abstractions;
 
+/// <summary>A category's three names (ADR-062). <see cref="ForLanguage"/> falls back to English.</summary>
+public sealed record CategoryNames(string En, string Hy, string Ru)
+{
+    public string ForLanguage(string language) => language switch
+    {
+        "hy" when !string.IsNullOrWhiteSpace(Hy) => Hy,
+        "ru" when !string.IsNullOrWhiteSpace(Ru) => Ru,
+        _ => En
+    };
+}
+
 /// <summary>
 /// Auto-posts a ModerationNote <see cref="Domain.Entities.ChatMessage"/> into a member's
 /// Moderation conversation (get-or-created on demand) when an admin takes one of the actions
@@ -18,9 +29,9 @@ public interface IModerationNoteEmitter
     Task ListingRejectedAsync(
         Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string reasonCode, string? note, CancellationToken cancellationToken = default);
 
-    /// <summary>A listing was recategorised → a Category note (subject = listing title, reason = "{from} → {to}").</summary>
+    /// <summary>A listing was recategorised → a Category note (subject = listing title, reason = "{from} → {to}", category names in the member's language, English fallback — ADR-062).</summary>
     Task ListingRecategorisedAsync(
-        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, string fromCategoryName, string toCategoryName, CancellationToken cancellationToken = default);
+        Guid moderatorId, Guid memberId, string? memberLanguage, string listingTitle, CategoryNames fromCategory, CategoryNames toCategory, CancellationToken cancellationToken = default);
 
     /// <summary>An account was suspended → a Suspend note (reason = the optional suspend reason, admin free text).</summary>
     Task AccountSuspendedAsync(

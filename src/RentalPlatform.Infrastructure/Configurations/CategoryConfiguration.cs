@@ -16,6 +16,14 @@ public sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
             .IsRequired()
             .HasMaxLength(120);
 
+        builder.Property(category => category.NameHy)
+            .IsRequired()
+            .HasMaxLength(120);
+
+        builder.Property(category => category.NameRu)
+            .IsRequired()
+            .HasMaxLength(120);
+
         builder.Property(category => category.Slug)
             .IsRequired()
             .HasMaxLength(140);

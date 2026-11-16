@@ -63,4 +63,6 @@ public sealed record OwnerListingStats(int ApprovedListingCount, int CompletedRe
 
 /// <summary>One CategoryKeyword row denormalised with its owning category's Name/DisplayOrder — everything
 /// AdminListingsService's suggestion-rule scoring needs without a second lookup.</summary>
-public sealed record CategoryKeywordEntry(Guid CategoryId, string CategoryName, int CategoryDisplayOrder, string Keyword);
+public sealed record CategoryKeywordEntry(
+    Guid CategoryId, string CategoryName, int CategoryDisplayOrder, string Keyword,
+    string CategoryNameHy, string CategoryNameRu);

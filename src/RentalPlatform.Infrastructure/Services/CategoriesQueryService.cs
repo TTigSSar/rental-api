@@ -29,6 +29,8 @@ public sealed class CategoriesQueryService : ICategoriesQueryService
             {
                 Id = category.Id,
                 Name = category.Name,
+                NameHy = category.NameHy,
+                NameRu = category.NameRu,
                 Slug = category.Slug,
                 IconName = category.IconName,
                 ImageUrl = category.ImageUrl,

@@ -33,6 +33,8 @@ public sealed class FavoritesStore : IFavoritesStore
                 .ThenInclude(listing => listing.Category)
             .Include(favorite => favorite.Listing)
                 .ThenInclude(listing => listing.Images)
+            .Include(favorite => favorite.Listing)
+                .ThenInclude(listing => listing.District)
             .ToListAsync(cancellationToken);
 
     public async Task<bool> TryAddAsync(Favorite favorite, CancellationToken cancellationToken = default)

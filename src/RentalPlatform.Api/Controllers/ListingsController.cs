@@ -55,6 +55,20 @@ public sealed class ListingsController : ControllerBase
         return Ok(result);
     }
 
+    // ADR-066: sidebar facet counts. Same filter binding as the catalogue; paging, sort and the
+    // viewport box are ignored. Anonymous, like the catalogue (which has no rate-limit policy).
+    [HttpGet("facets")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ListingFacetsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ListingFacetsResponse>> GetFacets(
+        [FromQuery] ListingsQueryFilter filter,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingsQueryService.GetFacetsAsync(filter, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpGet("map-pins")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ListingMapPinsResponse), StatusCodes.Status200OK)]

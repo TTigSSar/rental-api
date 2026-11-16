@@ -53,7 +53,15 @@ public sealed class FavoritesService : IFavoritesService
                 AgeFromMonths = favorite.Listing.AgeFromMonths,
                 AgeToMonths = favorite.Listing.AgeToMonths,
                 Condition = favorite.Listing.Condition,
-                CreatedAt = favorite.Listing.CreatedAt
+                CreatedAt = favorite.Listing.CreatedAt,
+                District = favorite.Listing.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = favorite.Listing.District.Id,
+                    Code = favorite.Listing.District.Code,
+                    NameEn = favorite.Listing.District.NameEn,
+                    NameHy = favorite.Listing.District.NameHy,
+                    NameRu = favorite.Listing.District.NameRu
+                }
             })
             .ToList();
 

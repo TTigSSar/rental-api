@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
@@ -47,7 +48,14 @@ public sealed class ListingsQueryService : IListingsQueryService
     // Shared predicate chain for both the paged public search and the map-pins endpoint — they
     // must never diverge on what "an approved, publicly-visible listing matching this filter"
     // means; only the projection/shape after this differs.
-    private IQueryable<Domain.Entities.Listing> BuildApprovedListingsQuery(ListingsQueryFilter filter)
+    // ADR-066 facets: a facet is counted with every filter except its own dimension, so the builder
+    // can leave one dimension out (and the viewport box, which facets never take).
+    private enum SkippedDimension { None, Category, District, Price }
+
+    private IQueryable<Domain.Entities.Listing> BuildApprovedListingsQuery(
+        ListingsQueryFilter filter,
+        SkippedDimension skip = SkippedDimension.None,
+        bool includeViewport = true)
     {
         // Admin console Phase 2 (narrowed by human review — hiding a category retires the LABEL,
         // not the inventory): a hidden category (Category.IsVisible = false) is excluded from
@@ -70,16 +78,18 @@ public sealed class ListingsQueryService : IListingsQueryService
             query = query.Where(listing => listing.City == city);
         }
 
-        if (filter.CategoryId.HasValue)
+        var categoryIds = filter.ResolveCategoryIds();
+        if (skip != SkippedDimension.Category && categoryIds.Count > 0)
         {
-            // Explicit category-id filter: also require the category itself to be visible (see
-            // the comment above BuildApprovedListingsQuery). Shared with the map-pins endpoint,
-            // which gets the identical narrowing when it passes a CategoryId filter.
-            query = query.Where(listing =>
-                listing.CategoryId == filter.CategoryId.Value && listing.Category.IsVisible);
+            // Explicit category-id filter (legacy CategoryId merged with CategoryIds, ADR-066): also
+            // require the category itself to be visible (see the comment above
+            // BuildApprovedListingsQuery). Shared with the map-pins endpoint, which gets the
+            // identical narrowing when it passes a category filter.
+            var ids = categoryIds.Take(ListingsQueryFilter.MaxCategoryIds).ToList();
+            query = query.Where(listing => ids.Contains(listing.CategoryId) && listing.Category.IsVisible);
         }
 
-        if (filter.DistrictIds is { Count: > 0 })
+        if (skip != SkippedDimension.District && filter.DistrictIds is { Count: > 0 })
         {
             var districtIds = filter.DistrictIds.Distinct().Take(MaxDistrictIds).ToList();
             query = query.Where(listing => listing.DistrictId != null && districtIds.Contains(listing.DistrictId.Value));
@@ -92,12 +102,12 @@ public sealed class ListingsQueryService : IListingsQueryService
             query = query.Where(listing => !excludeIds.Contains(listing.Id));
         }
 
-        if (filter.MinPrice.HasValue)
+        if (skip != SkippedDimension.Price && filter.MinPrice.HasValue)
         {
             query = query.Where(listing => listing.PricePerDay >= filter.MinPrice.Value);
         }
 
-        if (filter.MaxPrice.HasValue)
+        if (skip != SkippedDimension.Price && filter.MaxPrice.HasValue)
         {
             query = query.Where(listing => listing.PricePerDay <= filter.MaxPrice.Value);
         }
@@ -116,6 +126,28 @@ public sealed class ListingsQueryService : IListingsQueryService
             query = query.Where(listing =>
                 (listing.AgeToMonths == null || listing.AgeToMonths >= reqFrom) &&
                 (listing.AgeFromMonths == null || reqTo == null || listing.AgeFromMonths <= reqTo));
+        }
+
+        // ADR-066: several age ranges, OR-ed, each with the same overlap rule as the legacy pair.
+        // Combined with the legacy filter above as AND.
+        var ageRanges = filter.ParseAgeRanges();
+        if (ageRanges is { Count: > 0 })
+        {
+            query = query.Where(BuildAgeRangesPredicate(ageRanges.Take(ListingsQueryFilter.MaxAgeRanges).ToList()));
+        }
+
+        // ADR-066 / ADR-042: Listing.Condition is a free string, so the stored value is normalised in
+        // SQL the way the UI does (trim, lowercase, strip space/_/-), and legacy aliases are accepted.
+        var conditions = filter.ParseConditions();
+        if (conditions is { Count: > 0 })
+        {
+            var accepted = conditions
+                .Take(ListingsQueryFilter.MaxConditions)
+                .SelectMany(ConditionAliases)
+                .ToList();
+            query = query.Where(listing =>
+                listing.Condition != null &&
+                accepted.Contains(listing.Condition.Trim().ToLower().Replace(" ", "").Replace("_", "").Replace("-", "")));
         }
 
         if (filter.OriginLat.HasValue && filter.OriginLng.HasValue && filter.RadiusKm.HasValue)
@@ -172,7 +204,7 @@ public sealed class ListingsQueryService : IListingsQueryService
                 )) <= radiusKm);
         }
 
-        if (filter.MinLat.HasValue && filter.MaxLat.HasValue && filter.MinLng.HasValue && filter.MaxLng.HasValue)
+        if (includeViewport && filter.MinLat.HasValue && filter.MaxLat.HasValue && filter.MinLng.HasValue && filter.MaxLng.HasValue)
         {
             // Maps P2-1 viewport search: same public-coordinate box predicate as the radius filter
             // above, just with caller-supplied bounds instead of ones derived from origin+radius.
@@ -180,6 +212,40 @@ public sealed class ListingsQueryService : IListingsQueryService
         }
 
         return query;
+    }
+
+    private static IEnumerable<string> ConditionAliases(ListingConditionKind kind) => kind switch
+    {
+        ListingConditionKind.New => ["new"],
+        ListingConditionKind.LikeNew => ["likenew", "excellent"],
+        ListingConditionKind.Good => ["good"],
+        _ => ["fair", "used"]
+    };
+
+    // OR of the per-range overlap predicate. Each range becomes its own lambda; the bodies are
+    // re-pointed at one shared parameter and OR-ed, which EF translates (Expression.Invoke would not).
+    private static Expression<Func<Domain.Entities.Listing, bool>> BuildAgeRangesPredicate(
+        IReadOnlyList<ListingAgeRange> ranges)
+    {
+        var parameter = Expression.Parameter(typeof(Domain.Entities.Listing), "listing");
+        Expression? body = null;
+        foreach (var range in ranges)
+        {
+            var reqFrom = range.FromMonths;
+            var reqTo = range.ToMonths;
+            Expression<Func<Domain.Entities.Listing, bool>> single = listing =>
+                (listing.AgeToMonths == null || listing.AgeToMonths >= reqFrom) &&
+                (listing.AgeFromMonths == null || reqTo == null || listing.AgeFromMonths <= reqTo);
+            var rebound = new ParameterReplacer(single.Parameters[0], parameter).Visit(single.Body);
+            body = body is null ? rebound : Expression.OrElse(body, rebound);
+        }
+
+        return Expression.Lambda<Func<Domain.Entities.Listing, bool>>(body!, parameter);
+    }
+
+    private sealed class ParameterReplacer(ParameterExpression from, ParameterExpression to) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) => node == from ? to : base.VisitParameter(node);
     }
 
     private static IQueryable<Domain.Entities.Listing> ApplyBoundingBox(
@@ -193,6 +259,103 @@ public sealed class ListingsQueryService : IListingsQueryService
             listing.PublicLatitude != null && listing.PublicLongitude != null &&
             listing.PublicLatitude >= minLat && listing.PublicLatitude <= maxLat &&
             listing.PublicLongitude >= minLng && listing.PublicLongitude <= maxLng);
+    }
+
+    // ADR-066 server-side sort. Every order ends in CreatedAt desc then Id, so pages never overlap or
+    // skip rows. Price is ordered as double: SQLite (tests) refuses decimal in ORDER BY, and on SQL
+    // Server the cast is order-preserving for money values.
+    private IOrderedQueryable<Domain.Entities.Listing> ApplySort(
+        IQueryable<Domain.Entities.Listing> query,
+        ListingsQueryFilter filter)
+    {
+        IOrderedQueryable<Domain.Entities.Listing> ordered;
+        switch (filter.ParseSort() ?? ListingSortOrder.Newest)
+        {
+            case ListingSortOrder.PriceAsc:
+                ordered = query.OrderBy(listing => (double)listing.PricePerDay);
+                break;
+            case ListingSortOrder.PriceDesc:
+                ordered = query.OrderByDescending(listing => (double)listing.PricePerDay);
+                break;
+            case ListingSortOrder.RatingDesc:
+                // Same exposure rule as the response Rating: only at >= 2 reviews (ADR-064 §2);
+                // listings without one go last. Ordered by the raw average, which never contradicts
+                // the rounded value shown on the card.
+                ordered = query
+                    .OrderBy(listing => _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id) >= 2 ? 0 : 1)
+                    .ThenByDescending(listing =>
+                        _dbContext.ToyReviews.Count(tr => tr.ListingId == listing.Id) >= 2
+                            ? (double?)_dbContext.ToyReviews
+                                .Where(tr => tr.ListingId == listing.Id)
+                                .Average(tr => (double)tr.OverallRating)
+                            : null);
+                break;
+            case ListingSortOrder.Nearest when filter.OriginLat.HasValue && filter.OriginLng.HasValue:
+                // Haversine on the PUBLIC pair only (ADR-008); same formula as the radius filter.
+                var originLatD = (double)filter.OriginLat.Value;
+                var originLngD = (double)filter.OriginLng.Value;
+                ordered = query
+                    .OrderBy(listing => listing.PublicLatitude == null || listing.PublicLongitude == null ? 1 : 0)
+                    .ThenBy(listing => 2 * EarthRadiusKm * Math.Asin(Math.Sqrt(
+                        Math.Pow(Math.Sin((((double)listing.PublicLatitude!.Value - originLatD) * Math.PI / 180.0) / 2.0), 2.0) +
+                        Math.Cos(originLatD * Math.PI / 180.0) * Math.Cos((double)listing.PublicLatitude!.Value * Math.PI / 180.0) *
+                        Math.Pow(Math.Sin((((double)listing.PublicLongitude!.Value - originLngD) * Math.PI / 180.0) / 2.0), 2.0)
+                    )));
+                break;
+            default:
+                return query.OrderByDescending(listing => listing.CreatedAt).ThenBy(listing => listing.Id);
+        }
+
+        return ordered.ThenByDescending(listing => listing.CreatedAt).ThenBy(listing => listing.Id);
+    }
+
+    // ADR-066: sidebar facets. Same predicate chain as the catalogue; each facet leaves out only
+    // its own dimension. Category counts additionally count visible categories only (a hidden
+    // category is not offered as a choice); district and price follow the catalogue exactly so the
+    // numbers add up to what browsing returns.
+    public async Task<ListingFacetsResponse> GetFacetsAsync(
+        ListingsQueryFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var categoryRows = await BuildApprovedListingsQuery(filter, SkippedDimension.Category, includeViewport: false)
+            .Where(listing => listing.Category.IsVisible)
+            .GroupBy(listing => listing.CategoryId)
+            .Select(group => new { CategoryId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var districtRows = await BuildApprovedListingsQuery(filter, SkippedDimension.District, includeViewport: false)
+            .Where(listing => listing.DistrictId != null)
+            .GroupBy(listing => listing.DistrictId!.Value)
+            .Select(group => new { DistrictId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        // Min/Max over decimal is not supported by SQLite either, so take the first row of an
+        // ordered query instead of an aggregate.
+        var priceQuery = BuildApprovedListingsQuery(filter, SkippedDimension.Price, includeViewport: false);
+        var minPrice = await priceQuery
+            .OrderBy(listing => (double)listing.PricePerDay)
+            .Select(listing => (decimal?)listing.PricePerDay)
+            .FirstOrDefaultAsync(cancellationToken);
+        var maxPrice = await priceQuery
+            .OrderByDescending(listing => (double)listing.PricePerDay)
+            .Select(listing => (decimal?)listing.PricePerDay)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new ListingFacetsResponse
+        {
+            Categories = categoryRows
+                .Where(row => row.Count > 0)
+                .OrderByDescending(row => row.Count).ThenBy(row => row.CategoryId)
+                .Select(row => new CategoryFacetCount { CategoryId = row.CategoryId, Count = row.Count })
+                .ToList(),
+            Districts = districtRows
+                .Where(row => row.Count > 0)
+                .OrderByDescending(row => row.Count).ThenBy(row => row.DistrictId)
+                .Select(row => new DistrictFacetCount { DistrictId = row.DistrictId, Count = row.Count })
+                .ToList(),
+            MinPricePerDay = minPrice,
+            MaxPricePerDay = maxPrice
+        };
     }
 
     public async Task<PagedResult<ListingPreviewResponse>> GetApprovedListingsAsync(
@@ -216,8 +379,7 @@ public sealed class ListingsQueryService : IListingsQueryService
         var originLatD = hasOrigin ? (double)filter.OriginLat!.Value : 0.0;
         var originLngD = hasOrigin ? (double)filter.OriginLng!.Value : 0.0;
 
-        var rows = await query
-            .OrderByDescending(listing => listing.CreatedAt)
+        var rows = await ApplySort(query, filter)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(listing => new
@@ -244,6 +406,15 @@ public sealed class ListingsQueryService : IListingsQueryService
                 RatingSum = _dbContext.ToyReviews
                     .Where(tr => tr.ListingId == listing.Id)
                     .Sum(tr => tr.OverallRating),
+                // Districts are public and coarse (ADR-008/024); same projection as the home sections.
+                District = listing.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = listing.District.Id,
+                    Code = listing.District.Code,
+                    NameEn = listing.District.NameEn,
+                    NameHy = listing.District.NameHy,
+                    NameRu = listing.District.NameRu
+                },
                 // Same Haversine formula as the radius filter's refinement in
                 // BuildApprovedListingsQuery — duplicated for the same EF-translation reason
                 // documented there (a shared helper method call would not translate). Keep both in
@@ -278,7 +449,8 @@ public sealed class ListingsQueryService : IListingsQueryService
                 ReviewCount = r.ReviewCount,
                 // Aggregate hidden until the minimum number of reviews (2).
                 Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null,
-                DistanceKm = r.DistanceKm
+                DistanceKm = r.DistanceKm,
+                District = r.District
             })
             .ToList();
 

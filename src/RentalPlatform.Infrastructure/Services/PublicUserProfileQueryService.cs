@@ -136,7 +136,15 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
                 ReviewCount = _dbContext.ToyReviews.Count(tr => tr.ListingId == l.Id),
                 RatingSum = _dbContext.ToyReviews
                     .Where(tr => tr.ListingId == l.Id)
-                    .Sum(tr => tr.OverallRating)
+                    .Sum(tr => tr.OverallRating),
+                District = l.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = l.District.Id,
+                    Code = l.District.Code,
+                    NameEn = l.District.NameEn,
+                    NameHy = l.District.NameHy,
+                    NameRu = l.District.NameRu
+                }
             })
             .ToListAsync(cancellationToken);
 
@@ -158,7 +166,8 @@ public sealed class PublicUserProfileQueryService : IPublicUserProfileService
                 Condition = r.Condition,
                 CreatedAt = r.CreatedAt,
                 ReviewCount = r.ReviewCount,
-                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null
+                Rating = r.ReviewCount >= 2 ? Math.Round((double)r.RatingSum / r.ReviewCount, 1) : null,
+                District = r.District
             })
             .ToList();
     }

@@ -124,8 +124,8 @@ public sealed class ModerationNoteEmitterTests
 
     [Theory]
     [InlineData("en", "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
-    [InlineData("ru", "Объявление «Toy» перенесено в другую категорию: Blocks → Outdoor.")]
-    [InlineData("hy", "«Toy» հայտարարությունը տեղափոխվել է այլ կատեգորիա՝ Blocks → Outdoor։")]
+    [InlineData("ru", "Объявление «Toy» перенесено в другую категорию: Блоки → Улица.")]
+    [InlineData("hy", "«Toy» հայտարարությունը տեղափոխվել է այլ կատեգորիա՝ Բլոկներ → Բացօթյա։")]
     [InlineData("xx", "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
     [InlineData(null, "Your listing \"Toy\" was moved to a different category: Blocks → Outdoor.")]
     public async Task ListingRecategorised_Renders_Body_In_Member_Language(string? language, string expectedBody)
@@ -137,7 +137,13 @@ public sealed class ModerationNoteEmitterTests
             new CategoryNames("Blocks", "Բլոկներ", "Блоки"), new CategoryNames("Outdoor", "Բացօթյա", "Улица"));
 
         Assert.Equal(ModerationNoteKind.Category, store.Kind);
-        Assert.Equal("Blocks → Outdoor", store.Reason);
+        var expectedReason = language switch
+        {
+            "ru" => "Блоки → Улица",
+            "hy" => "Բլոկներ → Բացօթյա",
+            _ => "Blocks → Outdoor",
+        };
+        Assert.Equal(expectedReason, store.Reason);
         Assert.Equal(expectedBody, store.Body);
     }
 

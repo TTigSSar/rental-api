@@ -14,6 +14,11 @@ public interface IListingsQueryService
         ListingsQueryFilter filter,
         CancellationToken cancellationToken = default);
 
+    // ADR-066: per-dimension facet counts over the same Approved-only predicate chain.
+    Task<ListingFacetsResponse> GetFacetsAsync(
+        ListingsQueryFilter filter,
+        CancellationToken cancellationToken = default);
+
     // AI search (ADR-054): the first `limit` listings of the same Approved-only filter chain, in the
     // catalogue's default order, with the public fields the ranker may see.
     Task<IReadOnlyList<AiRankCandidate>> GetAiRankCandidatesAsync(

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
@@ -93,6 +94,18 @@ public sealed class AiSearchService : IAiSearchService
             return Fail(
                 AiSearchErrorCodes.InvalidDescription,
                 $"The description must be 1 to {MaxDescriptionLength} characters.");
+        }
+
+        // ADR-054 amendment 2026-11-17: the ADR-066 lists carry the catalogue's caps and validation.
+        // Checked before any model call, budget or limit work, so a bad filter costs nothing.
+        if (request.Filters is { } givenFilters)
+        {
+            var invalid = new ValidationContext(givenFilters);
+            var problem = CatalogueLists(givenFilters).Validate(invalid).FirstOrDefault();
+            if (problem is not null)
+            {
+                return Fail(AiSearchErrorCodes.InvalidFilters, problem.ErrorMessage ?? "The filters are not valid.");
+            }
         }
 
         var page = request.Page < 1 ? 1 : request.Page;
@@ -278,7 +291,7 @@ public sealed class AiSearchService : IAiSearchService
                 if (result.TotalCount == 0
                     && !string.IsNullOrWhiteSpace(parsed.Purpose)
                     && string.IsNullOrWhiteSpace(parsed.ItemType)
-                    && widenedFilters.CategoryId is not null)
+                    && CatalogueLists(widenedFilters).ResolveCategoryIds().Count > 0)
                 {
                     purposeWidened = true;
                     widenedFilters = With(widenedFilters, clearCategory: true);
@@ -408,6 +421,17 @@ public sealed class AiSearchService : IAiSearchService
     {
         var ageGroup = AiSearchAgeGroups.FromKey(filters.AgeGroup);
 
+        // The single legacy values are merged into the ADR-066 lists (already validated, so the
+        // parsers cannot fail here; a failure degrades to an empty list rather than throwing).
+        var lists = CatalogueLists(filters);
+        var categoryIds = lists.ResolveCategoryIds();
+        var ageRanges = (lists.ParseAgeRanges() ?? Array.Empty<ListingAgeRange>())
+            .Select(range => $"{range.FromMonths}-{range.ToMonths}")
+            .ToList();
+        var conditions = (lists.ParseConditions() ?? Array.Empty<ListingConditionKind>())
+            .Select(condition => condition.ToString())
+            .ToList();
+
         decimal? originLat = null;
         decimal? originLng = null;
         double? radiusKm = null;
@@ -432,10 +456,10 @@ public sealed class AiSearchService : IAiSearchService
 
         var catalogueFilter = new ListingsQueryFilter
         {
-            CategoryId = filters.CategoryId,
+            CategoryIds = categoryIds.Count > 0 ? categoryIds : null,
+            AgeRanges = ageRanges.Count > 0 ? ageRanges : null,
+            Conditions = conditions.Count > 0 ? conditions : null,
             MaxPrice = filters.MaxPrice,
-            AgeFromMonths = ageGroup?.FromMonths,
-            AgeToMonths = ageGroup?.ToMonths,
             DistrictIds = districtIds,
             OriginLat = originLat,
             OriginLng = originLng,
@@ -444,8 +468,11 @@ public sealed class AiSearchService : IAiSearchService
 
         var applied = new AiSearchFilters
         {
-            CategoryId = filters.CategoryId,
+            CategoryId = categoryIds.Count == 1 ? categoryIds[0] : null,
+            CategoryIds = catalogueFilter.CategoryIds,
             AgeGroup = ageGroup?.Key,
+            AgeRanges = catalogueFilter.AgeRanges,
+            Conditions = catalogueFilter.Conditions,
             MaxPrice = filters.MaxPrice,
             DistrictIds = districtIds,
             NearHome = originLat is not null,
@@ -472,6 +499,9 @@ public sealed class AiSearchService : IAiSearchService
             {
                 City = filter.City,
                 CategoryId = filter.CategoryId,
+                CategoryIds = filter.CategoryIds,
+                AgeRanges = filter.AgeRanges,
+                Conditions = filter.Conditions,
                 MinPrice = filter.MinPrice,
                 MaxPrice = filter.MaxPrice,
                 Search = filter.Search,
@@ -486,6 +516,25 @@ public sealed class AiSearchService : IAiSearchService
                 PageSize = pageSize
             },
             cancellationToken);
+    }
+
+    // The ADR-066 lists of an AiSearchFilters as a catalogue filter, with the legacy single category
+    // and age group merged in (the group becomes one more OR-ed range). Used for validation and mapping.
+    private static ListingsQueryFilter CatalogueLists(AiSearchFilters filters)
+    {
+        var ranges = new List<string>(filters.AgeRanges ?? Array.Empty<string>());
+        if (AiSearchAgeGroups.FromKey(filters.AgeGroup) is { } group)
+        {
+            ranges.Add($"{group.FromMonths}-{group.ToMonths}");
+        }
+
+        return new ListingsQueryFilter
+        {
+            CategoryId = filters.CategoryId,
+            CategoryIds = filters.CategoryIds,
+            AgeRanges = ranges,
+            Conditions = filters.Conditions
+        };
     }
 
     private static AiSearchFilters MapParsedToFilters(AiParsedQuery parsed, AiSearchCatalogs catalogs, double nearMeRadiusKm)
@@ -547,7 +596,10 @@ public sealed class AiSearchService : IAiSearchService
         new()
         {
             CategoryId = clearCategory ? null : source.CategoryId,
+            CategoryIds = clearCategory ? null : source.CategoryIds,
             AgeGroup = source.AgeGroup,
+            AgeRanges = source.AgeRanges,
+            Conditions = source.Conditions,
             MaxPrice = source.MaxPrice,
             DistrictIds = districtIds ?? source.DistrictIds,
             NearHome = source.NearHome,

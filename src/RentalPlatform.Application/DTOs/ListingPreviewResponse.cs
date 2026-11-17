@@ -33,8 +33,8 @@ public sealed class ListingPreviewResponse
     public double? DistanceKm { get; init; }
 
     /// <summary>
-    /// The listing's district (public and coarse, ADR-008/024). Filled only by GET /api/home/sections;
-    /// null on every other endpoint that returns this shape, and null when the listing has none.
+    /// The listing's district (public and coarse, ADR-008/024). Filled on the catalogue (GET /api/listings),
+    /// GET /api/home/sections, favorites and public-profile listings (ADR-064, ADR-066); null when the listing has none.
     /// </summary>
     public ListingDistrictResponse? District { get; init; }
 }

@@ -8,6 +8,8 @@ public interface IFavoritesStore
     Task<Listing?> FindListingByIdAsync(Guid listingId, CancellationToken cancellationToken = default);
     Task<Favorite?> FindByUserAndListingAsync(Guid userId, Guid listingId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<Favorite>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
+    // Review count and rating sum per listing (listings without reviews are absent).
+    Task<IReadOnlyDictionary<Guid, (int Count, long Sum)>> GetReviewStatsAsync(IReadOnlyCollection<Guid> listingIds, CancellationToken cancellationToken = default);
     Task<bool> TryAddAsync(Favorite favorite, CancellationToken cancellationToken = default);
     void Remove(Favorite favorite);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

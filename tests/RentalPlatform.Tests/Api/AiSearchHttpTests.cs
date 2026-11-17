@@ -1030,4 +1030,150 @@ public sealed class AiSearchHttpTests
         await Assert.ThrowsAsync<TimeoutException>(
             () => service.SearchAsync(new RentalPlatform.Application.DTOs.AiSearchRequest { Description = "blocks" }, "en"));
     }
+
+    // ---- ADR-066 lists (ADR-054 amendment 2026-11-17) ---------------------------------------------------
+
+    [Fact]
+    public async Task Filter_Lists_Are_Applied_And_Echoed_And_Conditions_Narrow_The_Candidates()
+    {
+        var cat = await SeedCatalogueAsync(4, customise: (l, i) =>
+        {
+            l.Condition = i % 2 == 0 ? "New" : "Fair";
+            l.AgeFromMonths = i < 2 ? 12 : 100;
+            l.AgeToMonths = i < 2 ? 24 : 110;
+        });
+        var (client, _) = await NewUserAsync();
+
+        var response = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryIds = new[] { cat.CategoryId }, conditions = new[] { "new", "LikeNew" }, ageRanges = new[] { "0-36" } }
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await ReadAsync(response);
+        Assert.Equal(new[] { cat.Listings[0].Id }, Ids(body));
+        Assert.Equal(0, Model.ParseCalls);
+
+        var applied = body.GetProperty("appliedFilters");
+        Assert.Equal(new[] { cat.CategoryId }, Guids(applied.GetProperty("categoryIds")));
+        Assert.Equal(cat.CategoryId, applied.GetProperty("categoryId").GetGuid());
+        Assert.Equal(new[] { "New", "LikeNew" }, applied.GetProperty("conditions").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(new[] { "0-36" }, applied.GetProperty("ageRanges").EnumerateArray().Select(e => e.GetString()).ToArray());
+    }
+
+    [Fact]
+    public async Task Several_Categories_Are_OR_ed()
+    {
+        var a = await SeedCatalogueAsync(2);
+        var b = await SeedCatalogueAsync(2);
+        var c = await SeedCatalogueAsync(2);
+        var (client, _) = await NewUserAsync();
+
+        var body = await ReadAsync(await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryIds = new[] { a.CategoryId, b.CategoryId } }
+        }));
+
+        var expected = a.Listings.Concat(b.Listings).Select(l => l.Id).OrderBy(x => x).ToList();
+        Assert.Equal(expected, Ids(body).OrderBy(x => x).ToList());
+        Assert.DoesNotContain(c.Listings[0].Id, Ids(body));
+        var applied = body.GetProperty("appliedFilters");
+        Assert.Equal(2, applied.GetProperty("categoryIds").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, applied.GetProperty("categoryId").ValueKind);
+    }
+
+    [Fact]
+    public async Task LLM_Single_Category_And_Age_Are_Mapped_Into_The_Lists()
+    {
+        var cat = await SeedCatalogueAsync(2, customise: (l, _) => { l.AgeFromMonths = 36; l.AgeToMonths = 72; });
+        var (client, _) = await NewUserAsync();
+        Model.OnParse = (_, _, _) => FakeAiSearchModel.Parsed(cat.Slug, ageMonths: 40);
+
+        var body = await ReadAsync(await client.PostAsJsonAsync(Url, new { description = "blocks" }));
+
+        var applied = body.GetProperty("appliedFilters");
+        Assert.Equal(new[] { cat.CategoryId }, Guids(applied.GetProperty("categoryIds")));
+        Assert.Equal(cat.CategoryId, applied.GetProperty("categoryId").GetGuid());
+        Assert.Equal("36-72", applied.GetProperty("ageGroup").GetString());
+        Assert.Equal(new[] { "36-72" }, applied.GetProperty("ageRanges").EnumerateArray().Select(e => e.GetString()).ToArray());
+    }
+
+    [Fact]
+    public async Task Legacy_Age_Group_Merges_With_The_Age_Ranges_As_One_More_Range()
+    {
+        var cat = await SeedCatalogueAsync(2, customise: (l, i) =>
+        {
+            l.AgeFromMonths = i == 0 ? 5 : 100;
+            l.AgeToMonths = i == 0 ? 8 : 110;
+        });
+        var (client, _) = await NewUserAsync();
+
+        var body = await ReadAsync(await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryId = cat.CategoryId, ageGroup = "72-120", ageRanges = new[] { "0-12" } }
+        }));
+
+        Assert.Equal(2, Ids(body).Count);
+        Assert.Equal(2, body.GetProperty("appliedFilters").GetProperty("ageRanges").GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData("conditions", "Mint")]
+    [InlineData("ageRanges", "abc")]
+    public async Task Invalid_List_Entries_Are_400(string field, string value)
+    {
+        var (client, _) = await NewUserAsync();
+        var filters = new Dictionary<string, object> { [field] = new[] { value } };
+
+        var response = await client.PostAsJsonAsync(Url, new { description = "blocks", filters });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("ai_search.invalid_filters", (await ReadAsync(response)).GetProperty("errorCode").GetString());
+        Assert.Equal(0, Model.ParseCalls);
+    }
+
+    [Fact]
+    public async Task Caps_Are_400()
+    {
+        var (client, _) = await NewUserAsync();
+
+        var tooManyCategories = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { categoryIds = Enumerable.Range(0, 51).Select(_ => Guid.NewGuid()).ToArray() }
+        });
+        var tooManyAges = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { ageRanges = new[] { "0-1", "1-2", "2-3", "3-4", "4-5", "5-6" } }
+        });
+        var tooManyConditions = await client.PostAsJsonAsync(Url, new
+        {
+            description = "blocks",
+            filters = new { conditions = new[] { "New", "LikeNew", "Good", "Fair", "New" } }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyCategories.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyAges.StatusCode);
+        // Duplicates collapse, so five entries of four distinct values are within the cap.
+        Assert.Equal(HttpStatusCode.OK, tooManyConditions.StatusCode);
+        Assert.Equal(0, Model.ParseCalls);
+    }
+
+    [Fact]
+    public async Task Rank_Candidates_Have_A_Stable_Id_Tie_Break()
+    {
+        var sameTime = DateTime.UtcNow.AddHours(-1);
+        var cat = await SeedCatalogueAsync(5, customise: (l, _) => l.CreatedAt = sameTime);
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var query = scope.ServiceProvider.GetRequiredService<IListingsQueryService>();
+        var candidates = await query.GetAiRankCandidatesAsync(
+            new RentalPlatform.Application.DTOs.ListingsQueryFilter { CategoryId = cat.CategoryId }, 5);
+
+        Assert.Equal(cat.Listings.Select(l => l.Id).OrderBy(x => x).ToList(), candidates.Select(c => c.Id).ToList());
+    }
 }

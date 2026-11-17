@@ -32,6 +32,8 @@ public sealed class FavoritesService : IFavoritesService
         }
 
         var favorites = await _favoritesStore.GetByUserIdAsync(userResult.Value.Id, cancellationToken);
+        var stats = await _favoritesStore.GetReviewStatsAsync(
+            favorites.Select(favorite => favorite.ListingId).ToList(), cancellationToken);
         var response = favorites
             .OrderByDescending(favorite => favorite.CreatedAt)
             .Select(favorite => new ListingPreviewResponse
@@ -53,7 +55,19 @@ public sealed class FavoritesService : IFavoritesService
                 AgeFromMonths = favorite.Listing.AgeFromMonths,
                 AgeToMonths = favorite.Listing.AgeToMonths,
                 Condition = favorite.Listing.Condition,
-                CreatedAt = favorite.Listing.CreatedAt
+                CreatedAt = favorite.Listing.CreatedAt,
+                ReviewCount = stats.TryGetValue(favorite.ListingId, out var stat) ? stat.Count : 0,
+                Rating = stats.TryGetValue(favorite.ListingId, out var ratingStat)
+                    ? ListingRatingRule.Exposed(ratingStat.Count, ratingStat.Sum)
+                    : null,
+                District = favorite.Listing.District == null ? null : new ListingDistrictResponse
+                {
+                    Id = favorite.Listing.District.Id,
+                    Code = favorite.Listing.District.Code,
+                    NameEn = favorite.Listing.District.NameEn,
+                    NameHy = favorite.Listing.District.NameHy,
+                    NameRu = favorite.Listing.District.NameRu
+                }
             })
             .ToList();
 

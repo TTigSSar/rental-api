@@ -473,6 +473,7 @@ public sealed class ListingsQueryService : IListingsQueryService
         // listings page 1 shows first. Public fields only: no owner, no coordinates, no address.
         var rows = await BuildApprovedListingsQuery(filter)
             .OrderByDescending(listing => listing.CreatedAt)
+            .ThenBy(listing => listing.Id)
             .Take(Math.Max(0, limit))
             .Select(listing => new
             {

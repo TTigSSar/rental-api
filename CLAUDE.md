@@ -1,6 +1,6 @@
 # rental-api — Backend Rules
 
-ASP.NET Core 8, Clean Architecture, EF Core 8 + SQL Server, JWT auth (BCrypt passwords, optional Google/Apple).
+ASP.NET Core 8, Clean Architecture, EF Core 8 + SQL Server, JWT auth (BCrypt passwords, optional Google sign-in; an Apple path exists in the backend but is hidden, ADR-030).
 
 ## Layering (hard rules)
 
@@ -17,7 +17,8 @@ ASP.NET Core 8, Clean Architecture, EF Core 8 + SQL Server, JWT auth (BCrypt pas
 - New Listing/Booking fields: **nullable and additive** — the public contract stays backward compatible.
 - `IEmailService` never throws; notification failures never roll back the main operation.
 - Booking overlap: only **Approved** bookings block a range; overlap is re-checked at approve time. Composite index `(ListingId, Status, StartDate, EndDate)`.
-- Pending booking expiry (`ExpirePendingAsync`) runs opportunistically inside booking operations — there is no background job.
+- Background work runs as `IHostedService`s registered in `ServiceCollectionExtensions.cs` (e.g. `BookingExpiryBackgroundService` expires stale Pending bookings on a timer; create/approve still evaluate `ExpiresAt` directly). ADR-048 (Hangfire, outbox) is accepted but NOT implemented — do not migrate hosted services to Hangfire outside the Rental v1.1 work.
+- ADR-046 (Rental v1.1 state model), ADR-048, ADR-049 and ADR-050 are accepted but not implemented (`Implemented: no` in knowledge/decisions.md) — the code, not those ADRs, describes current behaviour; `BookingStatus` still has the seven values in CLAUDE.md.
 - Dev seed (`Infrastructure/DependencyInjection/DevelopmentSeed/`) is idempotent and additive; runs only in Development.
 
 ## Migrations

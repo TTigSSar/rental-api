@@ -51,6 +51,7 @@ public sealed class ChatServiceTests
             new BookingsStore(context),
             new ReviewsStore(context),
             realtimeNotifier ?? new FakeChatRealtimeNotifier(),
+            new FakeChatPushNotifier(),
             fileStorageService ?? new FakeFileStorageService(),
             new RentalPlatform.Infrastructure.Services.DistrictBoundaryProvider());
 

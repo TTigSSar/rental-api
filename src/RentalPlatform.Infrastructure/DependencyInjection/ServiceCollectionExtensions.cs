@@ -160,6 +160,19 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChatEmailUnsubscribeService, ChatEmailUnsubscribeService>();
         services.AddHostedService<ChatUnreadEmailDispatcher>();
 
+        // ADR-067: chat Web Push. A bounded in-memory queue, one consumer, a fresh scope per job. Missing VAPID
+        // keys switch push off (non-fatal startup check); the sender is replaced by a fake in tests.
+        services.AddOptions<WebPushOptions>().Bind(configuration.GetSection(WebPushOptions.SectionName));
+        services.AddSingleton<WebPushSettings>();
+        services.AddSingleton<IWebPushSettings>(sp => sp.GetRequiredService<WebPushSettings>());
+        services.AddHostedService<WebPushConfigurationStartupCheck>();
+        services.AddSingleton<ChatPushQueue>();
+        services.AddSingleton<IChatPushNotifier, ChatPushNotifier>();
+        services.AddHttpClient<IPushSender, WebPushSender>();
+        services.AddScoped<IPushSubscriptionStore, PushSubscriptionStore>();
+        services.AddScoped<IPushSubscriptionService, PushSubscriptionService>();
+        services.AddHostedService<ChatPushDispatcher>();
+
         return services;
     }
 }

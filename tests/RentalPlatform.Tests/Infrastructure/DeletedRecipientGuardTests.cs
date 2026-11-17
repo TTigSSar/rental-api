@@ -112,6 +112,7 @@ public sealed class DeletedRecipientGuardTests
         var emitter = new ModerationNoteEmitter(
             new ConversationsStore(context, NullLogger<ConversationsStore>.Instance),
             new FakeChatRealtimeNotifier(),
+            new FakeChatPushNotifier(),
             NullLogger<ModerationNoteEmitter>.Instance);
 
         await emitter.AccountSuspendedAsync(admin.Id, deletedMember.Id, "en", "Spam");

@@ -58,6 +58,7 @@ public sealed class ChatService : IChatService
     private readonly IBookingsStore _bookingsStore;
     private readonly IReviewsStore _reviewsStore;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
+    private readonly IChatPushNotifier _pushNotifier;
     private readonly IFileStorageService _fileStorageService;
     private readonly IDistrictBoundaryProvider _districtBoundaryProvider;
 
@@ -67,6 +68,7 @@ public sealed class ChatService : IChatService
         IBookingsStore bookingsStore,
         IReviewsStore reviewsStore,
         IChatRealtimeNotifier realtimeNotifier,
+        IChatPushNotifier pushNotifier,
         IFileStorageService fileStorageService,
         IDistrictBoundaryProvider districtBoundaryProvider)
     {
@@ -75,6 +77,7 @@ public sealed class ChatService : IChatService
         _bookingsStore = bookingsStore;
         _reviewsStore = reviewsStore;
         _realtimeNotifier = realtimeNotifier;
+        _pushNotifier = pushNotifier;
         _fileStorageService = fileStorageService;
         _districtBoundaryProvider = districtBoundaryProvider;
     }
@@ -254,6 +257,7 @@ public sealed class ChatService : IChatService
 
         var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
         await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+        await _pushNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
 
         return ServiceResult<ChatMessageResponse>.Success(response);
     }
@@ -370,6 +374,7 @@ public sealed class ChatService : IChatService
 
             var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
             await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+            await _pushNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
 
             return ServiceResult<ChatMessageResponse>.Success(response);
         }
@@ -493,6 +498,7 @@ public sealed class ChatService : IChatService
 
         var realtimeMessage = MapRealtimeMessage(message, DisplayName(user));
         await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+        await _pushNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
 
         return ServiceResult<ChatMessageResponse>.Success(response);
     }

@@ -214,6 +214,11 @@ public sealed class AccountDeletionStore : IAccountDeletionStore
                 .Where(token => token.UserId == userId)
                 .ExecuteDeleteAsync(cancellationToken);
 
+            // Web Push subscriptions (ADR-067 section 7): the endpoints are capability URLs for this person's devices.
+            await _dbContext.PushSubscriptions
+                .Where(subscription => subscription.UserId == userId)
+                .ExecuteDeleteAsync(cancellationToken);
+
             // Meeting-point coordinates in messages the user sent (ADR-053, amendment section 3): the row stays.
             await _dbContext.ChatMessages
                 .Where(message => message.SenderId == userId

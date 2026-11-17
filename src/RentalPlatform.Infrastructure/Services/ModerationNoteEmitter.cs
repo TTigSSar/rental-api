@@ -16,15 +16,18 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
 {
     private readonly IConversationsStore _store;
     private readonly IChatRealtimeNotifier _realtimeNotifier;
+    private readonly IChatPushNotifier _pushNotifier;
     private readonly ILogger<ModerationNoteEmitter> _logger;
 
     public ModerationNoteEmitter(
         IConversationsStore store,
         IChatRealtimeNotifier realtimeNotifier,
+        IChatPushNotifier pushNotifier,
         ILogger<ModerationNoteEmitter> logger)
     {
         _store = store;
         _realtimeNotifier = realtimeNotifier;
+        _pushNotifier = pushNotifier;
         _logger = logger;
     }
 
@@ -139,6 +142,7 @@ public sealed class ModerationNoteEmitter : IModerationNoteEmitter
             };
 
             await _realtimeNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
+            await _pushNotifier.MessageSentAsync(realtimeMessage, conversation.OwnerId, conversation.RenterId, cancellationToken);
         }
         catch (Exception exception)
         {

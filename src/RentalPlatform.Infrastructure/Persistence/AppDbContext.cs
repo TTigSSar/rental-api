@@ -29,6 +29,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<UserToken> UserTokens => Set<UserToken>();
     public DbSet<AiSearchLog> AiSearchLogs => Set<AiSearchLog>();
     public DbSet<DemandDailyCount> DemandDailyCounts => Set<DemandDailyCount>();
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
     // Pre-migration listing locations, captured once by AddUserHomePoint. The undo tape for that
     // migration, and the source the demo bootstrap uses to redistribute the showcase by district.

@@ -49,6 +49,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
     // Stands in for the LLM provider (ADR-054 seam). Tests script it and read its call counters.
     public FakeAiSearchModel AiModel { get; } = new();
 
+    // Stands in for the Web Push client (ADR-067 seam): records deliveries, never touches the network.
+    public FakePushSender PushSender { get; } = new();
+
     public RentalPlatformWebAppFactory()
     {
         _connection.Open();
@@ -76,6 +79,12 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
         // OPENAI_API_KEY never changes what the tests see.
         Environment.SetEnvironmentVariable("AiSearch__ApiKey", "xunit-fake-key");
 
+        // Web Push is "configured" (ADR-067); the real sender is replaced by FakePushSender below, so these
+        // values only need to be non-empty. A test that needs push OFF swaps IWebPushSettings.
+        Environment.SetEnvironmentVariable("WebPush__Vapid__PublicKey", "xunit-vapid-public-key");
+        Environment.SetEnvironmentVariable("WebPush__Vapid__PrivateKey", "xunit-vapid-private-key");
+        Environment.SetEnvironmentVariable("WebPush__Vapid__Subject", "mailto:test@dorent.test");
+
         // Google sign-in is "configured" in the test host; one test blanks it to prove the 503.
         Environment.SetEnvironmentVariable("ExternalAuth__Google__ValidAudiences__0", GoogleClientId);
     }
@@ -100,6 +109,9 @@ public sealed class RentalPlatformWebAppFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IAiSearchModel>();
             services.AddSingleton<IAiSearchModel>(AiModel);
+
+            services.RemoveAll<IPushSender>();
+            services.AddSingleton<IPushSender>(PushSender);
 
             services.RemoveAll<IGoogleIdTokenVerifier>();
             services.AddSingleton<IGoogleIdTokenVerifier>(GoogleVerifier);

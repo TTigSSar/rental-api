@@ -53,6 +53,7 @@ public sealed class MeetingPointTests
             new BookingsStore(context),
             new ReviewsStore(context),
             notifier ?? new FakeChatRealtimeNotifier(),
+            new FakeChatPushNotifier(),
             new FakeFileStorageService(),
             new DistrictBoundaryProvider());
 

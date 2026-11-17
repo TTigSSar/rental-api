@@ -71,6 +71,12 @@ public static class ChatUnreadEmailTemplate
         };
     }
 
+    /// <summary>The moderation-thread heading in the user's language (shared with the chat push copy, ADR-067).</summary>
+    public static string ModerationHeadingFor(string? preferredLanguage) => Select(preferredLanguage).ModerationHeading;
+
+    /// <summary>The "Deleted user" label in the user's language (shared with the chat push copy, ADR-067).</summary>
+    public static string DeletedUserFor(string? preferredLanguage) => Select(preferredLanguage).DeletedUser;
+
     /// <summary>The heading (also the subject): a human message names the sender, otherwise it is neutral.</summary>
     public static string Heading(ChatUnreadEmail email)
     {

@@ -2783,3 +2783,18 @@ rm -f /opt/dorent/deployment-notes/p33-state.env
 
 Строка об откате — в `deploys.log`; запись об инциденте — в
 `knowledge/platform-history.md` (создаётся первым реальным инцидентом).
+
+---
+
+## Релиз: Chat Web Push (ADR-067)
+
+Деплой 2026-11-18: rental-api `4c9e545`, Rental-Ui `9da6f6c`; миграция `AddPushSubscriptions` (аддитивная таблица `PushSubscriptions`).
+
+**VAPID-пара** сгенерирована один раз на сервере (`openssl ecparam -name prime256v1`, ключи в base64url) и записана в `/opt/dorent/rental-api/.env` (mode 600):
+`WEBPUSH_VAPID_PUBLIC_KEY`, `WEBPUSH_VAPID_PRIVATE_KEY` (секрет), `WEBPUSH_VAPID_SUBJECT` (`mailto:no-reply@dorent.am`). Значения в репозитории и документах не хранятся. Копия `.env` до изменения: `/opt/dorent/backups/env.pre-1118.bak` (mode 600).
+
+- **Не пересоздавать пару**: замена ключей аннулирует все подписки устройств.
+- Пустые ключи безопасны (M-016): api пишет одну Critical-строку «Web Push is NOT configured», push выключен, `GET /api/push/public-key` -> 404.
+- Проверка: `curl -s https://dorent.am/api/push/public-key` -> 200 с публичным ключом.
+- nginx (UI-контейнер): `/sw.js` и `/manifest.webmanifest` отдаются с `Cache-Control: no-cache`. Cloudflare поверх добавляет `max-age=14400` (Browser Cache TTL); браузер всё равно обновляет сам sw.js (`updateViaCache` по умолчанию).
+- Откат кода: `docker tag rental-api-{api,ui}:pre-deploy-1118` как `:latest` + `up -d --no-build api ui`. Схема: новая таблица не мешает старому коду; полный откат схемы = restore `RentalPlatformDb_2026-11-18_1230.bak` (потеря данных после бэкапа).

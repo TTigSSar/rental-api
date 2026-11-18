@@ -62,7 +62,8 @@ public interface IAccountDeletionSession : IAsyncDisposable
     Task<IReadOnlyList<ClosedBooking>?> ClosePendingBookingsAsync(DateTime now, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Erases the user's data as listed in ADR-056 (and its amendments) and anonymizes the row:
+    /// Erases the user's data as listed in ADR-056 (and its amendments), including their Web Push subscriptions
+    /// (ADR-067), and anonymizes the row:
     /// DeletedAt = <paramref name="now"/>, TokenVersion + 1.
     /// </summary>
     Task EraseAsync(DateTime now, string deletedUserLabel, CancellationToken cancellationToken = default);

@@ -129,6 +129,13 @@ services:
       # auth.external_provider_unavailable; the SPA hides the Google button, password sign-in
       # keeps working. smoke.sh (check google-nonce) fails in that state.
       ExternalAuth__Google__ValidAudiences__0: "${GOOGLE_CLIENT_ID:-}"
+      # Chat Web Push (ADR-067 section 14). VAPID key pair + contact, generated once by platform-engineer.
+      # Empty defaults on purpose (M-016): missing values never crash the api. The api then logs ONE Critical
+      # line at startup ("Web Push is NOT configured: ..."), push is off and GET /api/push/public-key answers 404.
+      # The PUBLIC key is served to browsers; the PRIVATE key is a SECRET that lives only in the server's .env.
+      WebPush__Vapid__PublicKey: ${WEBPUSH_VAPID_PUBLIC_KEY:-}
+      WebPush__Vapid__PrivateKey: ${WEBPUSH_VAPID_PRIVATE_KEY:-}
+      WebPush__Vapid__Subject: "${WEBPUSH_VAPID_SUBJECT:-}"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat

@@ -160,6 +160,22 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChatEmailUnsubscribeService, ChatEmailUnsubscribeService>();
         services.AddHostedService<ChatUnreadEmailDispatcher>();
 
+        // ADR-067: chat Web Push. A bounded in-memory queue, one consumer, a fresh scope per job. Missing VAPID
+        // keys switch push off (non-fatal startup check); the sender is replaced by a fake in tests.
+        services.AddOptions<WebPushOptions>().Bind(configuration.GetSection(WebPushOptions.SectionName));
+        services.AddSingleton<WebPushSettings>();
+        services.AddSingleton<IWebPushSettings>(sp => sp.GetRequiredService<WebPushSettings>());
+        services.AddHostedService<WebPushConfigurationStartupCheck>();
+        services.AddSingleton<ChatPushQueue>();
+        services.AddSingleton<IChatPushNotifier, ChatPushNotifier>();
+        // No redirects (a 3xx from an allow-listed push service must not make the API POST to another host) and a
+        // 10 s timeout so one slow push service cannot stall the single ChatPushDispatcher consumer.
+        services.AddHttpClient<IPushSender, WebPushSender>(client => client.Timeout = TimeSpan.FromSeconds(10))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddScoped<IPushSubscriptionStore, PushSubscriptionStore>();
+        services.AddScoped<IPushSubscriptionService, PushSubscriptionService>();
+        services.AddHostedService<ChatPushDispatcher>();
+
         return services;
     }
 }

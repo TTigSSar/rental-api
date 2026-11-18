@@ -39,12 +39,13 @@ public sealed class ModerationNoteEmitterTests
         new(
             new ThrowingConversationsStore(),
             new FakeChatRealtimeNotifier(),
+            new FakeChatPushNotifier(),
             NullLogger<ModerationNoteEmitter>.Instance);
 
     private static (ModerationNoteEmitter Emitter, CapturingStore Store) CreateCapturing()
     {
         var store = new CapturingStore();
-        return (new ModerationNoteEmitter(store, new FakeChatRealtimeNotifier(), NullLogger<ModerationNoteEmitter>.Instance), store);
+        return (new ModerationNoteEmitter(store, new FakeChatRealtimeNotifier(), new FakeChatPushNotifier(), NullLogger<ModerationNoteEmitter>.Instance), store);
     }
 
     [Fact]

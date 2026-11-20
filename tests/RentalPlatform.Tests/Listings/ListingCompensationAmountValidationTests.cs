@@ -24,8 +24,30 @@ public sealed class ListingCompensationAmountValidationTests
         Title = "Wooden Train Set",
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
+        Condition = "Good",
         CompensationAmount = compensationAmount
     };
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_Rejects_Missing_Or_Blank_Condition(string? condition)
+    {
+        var request = new CreateListingRequest
+        {
+            CategoryId = Guid.NewGuid(),
+            Title = "Wooden Train Set",
+            Description = "A long enough description to satisfy validation rules.",
+            PricePerDay = 12m,
+            Condition = condition,
+            CompensationAmount = 5000m
+        };
+
+        var error = Assert.Single(Validate(request));
+        Assert.Equal("Condition is required.", error.ErrorMessage);
+        Assert.Contains(nameof(CreateListingRequest.Condition), error.MemberNames);
+    }
 
     [Fact]
     public void Create_Rejects_Omitted_CompensationAmount()

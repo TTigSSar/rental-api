@@ -94,7 +94,14 @@ public sealed class UpdateListingRequest : IValidatableObject
                 new[] { nameof(AgeToMonths) });
         }
 
-        if (Condition is { IsSet: true, Value: { } condition } && condition.Length > 50)
+        // Condition is required: absent leaves it unchanged, but an explicit null or blank is rejected.
+        if (Condition.IsSet && string.IsNullOrWhiteSpace(Condition.Value))
+        {
+            yield return new ValidationResult(
+                "Condition is required.",
+                new[] { nameof(Condition) });
+        }
+        else if (Condition is { IsSet: true, Value: { } condition } && condition.Length > 50)
         {
             yield return new ValidationResult(
                 "Condition must be at most 50 characters.",

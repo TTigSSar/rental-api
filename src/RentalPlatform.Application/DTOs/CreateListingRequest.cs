@@ -50,6 +50,9 @@ public sealed class CreateListingRequest : IValidatableObject
     [Range(0, 600, ErrorMessage = "Age (to, months) must be between 0 and 600.")]
     public int? AgeToMonths { get; init; }
 
+    // Required (free string; the canonical set is a UI concern, ADR-042). [Required] also rejects
+    // empty and whitespace-only values.
+    [Required(ErrorMessage = "Condition is required.")]
     [MaxLength(50, ErrorMessage = "Condition must be at most 50 characters.")]
     public string? Condition { get; init; }
 

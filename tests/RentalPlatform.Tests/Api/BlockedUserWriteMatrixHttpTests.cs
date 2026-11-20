@@ -107,6 +107,7 @@ public sealed class BlockedUserWriteMatrixHttpTests
             title = "Wooden Train Set",
             description = "A long enough description to satisfy validation rules.",
             pricePerDay = 2500,
+            condition = "Good",
             compensationAmount = 12000
         });
         await AssertForbiddenAsync(response, "listing.user_blocked");

@@ -42,6 +42,7 @@ public sealed class ListingsOwnerServiceTests
         Title = "Wooden Train Set",
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
+        Condition = "Good",
         PriceUnit = priceUnit,
         AgeFromMonths = ageFromMonths,
         AgeToMonths = ageToMonths,

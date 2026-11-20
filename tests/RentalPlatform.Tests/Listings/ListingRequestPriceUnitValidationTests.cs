@@ -23,6 +23,7 @@ public sealed class ListingRequestPriceUnitValidationTests
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
         PriceUnit = priceUnit,
+        Condition = "Good",
         CompensationAmount = 5000m
     };
 

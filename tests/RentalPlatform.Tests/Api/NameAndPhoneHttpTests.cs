@@ -243,6 +243,7 @@ public sealed class NameAndPhoneHttpTests
         title = "Wooden Train Set",
         description = "A long enough description to satisfy validation rules.",
         pricePerDay = 2500,
+        condition = "Good",
         compensationAmount = 12000
     };
 

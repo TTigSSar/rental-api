@@ -118,7 +118,6 @@ public sealed class ListingUpdateOptionalSemanticsTests
         {
             AgeFromMonths = null,
             AgeToMonths = null,
-            Condition = null,
             HygieneNotes = null,
             SafetyNotes = null,
             MinRentalDays = null
@@ -128,7 +127,7 @@ public sealed class ListingUpdateOptionalSemanticsTests
         var stored = await LoadAsync(db);
         Assert.Null(stored.AgeFromMonths);
         Assert.Null(stored.AgeToMonths);
-        Assert.Null(stored.Condition);
+        Assert.Equal("Good", stored.Condition); // condition is required: never cleared
         Assert.Null(stored.HygieneNotes);
         Assert.Null(stored.SafetyNotes);
         Assert.Null(stored.MinRentalDays);
@@ -171,16 +170,15 @@ public sealed class ListingUpdateOptionalSemanticsTests
         await SeedAsync(db);
 
         await using var context = db.CreateContext();
-        var result = await CreateService(context).UpdateAsync(ListingId, new UpdateListingRequest { Condition = "   " });
+        var result = await CreateService(context).UpdateAsync(ListingId, new UpdateListingRequest { HygieneNotes = "   " });
 
         Assert.True(result.IsSuccess);
-        Assert.Null((await LoadAsync(db)).Condition);
+        Assert.Null((await LoadAsync(db)).HygieneNotes);
     }
 
     // ---- Moderation: text clear is a content change, numeric clear is not ----------------------
 
     [Theory]
-    [InlineData("condition")]
     [InlineData("hygiene")]
     [InlineData("safety")]
     public async Task Clearing_A_Text_Field_On_An_Approved_Listing_Requires_Re_Moderation(string field)
@@ -191,7 +189,6 @@ public sealed class ListingUpdateOptionalSemanticsTests
         await using var context = db.CreateContext();
         var request = field switch
         {
-            "condition" => new UpdateListingRequest { Condition = null },
             "hygiene" => new UpdateListingRequest { HygieneNotes = null },
             _ => new UpdateListingRequest { SafetyNotes = null }
         };
@@ -318,10 +315,47 @@ public sealed class ListingUpdateOptionalSemanticsTests
         {
             AgeFromMonths = null,
             AgeToMonths = null,
-            Condition = null,
             HygieneNotes = null,
             SafetyNotes = null,
             MinRentalDays = null
         }));
+    }
+
+    // ---- Condition is required (explicit null / blank rejected, absent = unchanged) -------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Condition_Explicit_Null_Or_Blank_Is_A_Validation_Error(string? value)
+    {
+        var error = Assert.Single(Validate(new UpdateListingRequest { Condition = value }));
+        Assert.Equal("Condition is required.", error.ErrorMessage);
+        Assert.Contains(nameof(UpdateListingRequest.Condition), error.MemberNames);
+    }
+
+    [Fact]
+    public void Condition_Explicit_Null_Via_Json_Is_A_Validation_Error()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var request = JsonSerializer.Deserialize<UpdateListingRequest>("""{"condition":null}""", options)!;
+
+        var error = Assert.Single(Validate(request));
+        Assert.Equal("Condition is required.", error.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Condition_Absent_Leaves_It_Unchanged()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedAsync(db);
+
+        await using var context = db.CreateContext();
+        var request = new UpdateListingRequest { HygieneNotes = "Sanitised" };
+        Assert.Empty(Validate(request));
+        var result = await CreateService(context).UpdateAsync(ListingId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Good", (await LoadAsync(db)).Condition);
     }
 }

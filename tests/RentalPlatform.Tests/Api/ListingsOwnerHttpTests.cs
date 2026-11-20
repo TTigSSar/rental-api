@@ -57,6 +57,7 @@ public sealed class ListingsOwnerHttpTests
             title = "Wooden Train Set",
             description = "A long enough description to satisfy validation rules.",
             pricePerDay = 2500,
+            condition = "Good",
             compensationAmount = 12000
         });
 
@@ -89,6 +90,7 @@ public sealed class ListingsOwnerHttpTests
             title = "Wooden Train Set",
             description = "A long enough description to satisfy validation rules.",
             pricePerDay = 2500,
+            condition = "Good",
             compensationAmount = 12000,
             latitude = 12.3456,
             longitude = 65.4321,
@@ -222,13 +224,13 @@ public sealed class ListingsOwnerHttpTests
 
         // Explicit null: the same six keys, now present as null, must clear.
         var cleared = await PatchRawAsync(client, listingId,
-            """{"ageFromMonths":null,"ageToMonths":null,"condition":null,"hygieneNotes":null,"safetyNotes":null,"minRentalDays":null}""");
+            """{"ageFromMonths":null,"ageToMonths":null,"hygieneNotes":null,"safetyNotes":null,"minRentalDays":null}""");
         Assert.Equal(HttpStatusCode.NoContent, cleared.StatusCode);
 
         var afterNull = await LoadListingAsync(listingId);
         Assert.Null(afterNull.AgeFromMonths);
         Assert.Null(afterNull.AgeToMonths);
-        Assert.Null(afterNull.Condition);
+        Assert.Equal("Good", afterNull.Condition); // condition is required: not part of the clear set
         Assert.Null(afterNull.HygieneNotes);
         Assert.Null(afterNull.SafetyNotes);
         Assert.Null(afterNull.MinRentalDays);
@@ -249,6 +251,74 @@ public sealed class ListingsOwnerHttpTests
         var setValue = await PatchRawAsync(client, listingId, """{"compensationAmount":7000}""");
         Assert.Equal(HttpStatusCode.NoContent, setValue.StatusCode);
         Assert.Equal(7000m, (await LoadListingAsync(listingId)).CompensationAmount);
+    }
+
+    [Theory]
+    [InlineData("""{"condition":null}""")]
+    [InlineData("""{"condition":"   "}""")]
+    public async Task Patch_Listing_Null_Or_Blank_Condition_Is_400_And_Absent_Or_Value_Is_Not(string body)
+    {
+        var (client, listingId) = await SeedListingWithOptionalsAsync();
+
+        var rejected = await PatchRawAsync(client, listingId, body);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Contains("Condition is required.", await rejected.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal("Good", (await LoadListingAsync(listingId)).Condition);
+
+        var absent = await PatchRawAsync(client, listingId, """{"pricePerDay":3100}""");
+        Assert.Equal(HttpStatusCode.NoContent, absent.StatusCode);
+        Assert.Equal("Good", (await LoadListingAsync(listingId)).Condition);
+
+        var setValue = await PatchRawAsync(client, listingId, """{"condition":"Fair"}""");
+        Assert.Equal(HttpStatusCode.NoContent, setValue.StatusCode);
+        Assert.Equal("Fair", (await LoadListingAsync(listingId)).Condition);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Post_Listing_Without_Condition_Is_400(string? condition)
+    {
+        var ownerId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var email = $"{ownerId:N}@listing-owner.local";
+        await _factory.SeedAsync(TestData.User(ownerId, email), TestData.Category(categoryId));
+
+        var response = await ClientFor(ownerId, email).PostAsJsonAsync("/api/listings", new
+        {
+            categoryId,
+            title = "Wooden Train Set",
+            description = "A long enough description to satisfy validation rules.",
+            pricePerDay = 2500,
+            condition,
+            compensationAmount = 12000
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Condition is required.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Post_Listing_With_Condition_Omitted_Is_400()
+    {
+        var ownerId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var email = $"{ownerId:N}@listing-owner.local";
+        await _factory.SeedAsync(TestData.User(ownerId, email), TestData.Category(categoryId));
+
+        var response = await ClientFor(ownerId, email).PostAsJsonAsync("/api/listings", new
+        {
+            categoryId,
+            title = "Wooden Train Set",
+            description = "A long enough description to satisfy validation rules.",
+            pricePerDay = 2500,
+            compensationAmount = 12000
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Condition is required.", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]

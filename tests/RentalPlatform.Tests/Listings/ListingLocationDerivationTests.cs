@@ -40,6 +40,7 @@ public sealed class ListingLocationDerivationTests
         Title = "Wooden Train Set",
         Description = "A long enough description to satisfy validation rules.",
         PricePerDay = 12m,
+        Condition = "Good",
         CompensationAmount = 12000m
     };
 

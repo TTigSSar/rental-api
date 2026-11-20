@@ -237,6 +237,24 @@ nano .env
 6. DNS-записи в зоне `dorent.am` Cloudflare создаст автоматически при
    добавлении public hostname — руками ничего прописывать не нужно.
 
+### Cache Rule для `/sw.js` (2026-11-20)
+
+Cloudflare по умолчанию кэширует `*.js` и подменяет браузерный TTL на значение зоны
+(Browser Cache TTL), поэтому `/sw.js` отдавался с `Cache-Control: max-age=14400` вместо
+`no-cache` от nginx, и браузеры могли держать устаревший service worker до 4 часов
+(web push, ADR-067). Правило создано Тиграном вручную в панели
+(Caching → Cache Rules), статус Active:
+
+- **Name:** `sw.js - bypass cache, respect origin`
+- **Expression:** `(http.request.uri.path eq "/sw.js" and http.host in {"dorent.am" "www.dorent.am"})`
+- **Cache eligibility:** Bypass cache (Browser TTL не задан, настройки зоны не менялись)
+
+Проверка: `curl -sI https://dorent.am/sw.js` (и `www`) → `Cache-Control: no-cache`,
+`cf-cache-status: DYNAMIC`. Проверка входит в `deploy/smoke.sh` (`sw-cache-header`):
+падает, если вернулся `max-age`. Откат: удалить правило в панели. Остальные файлы
+(`manifest.webmanifest`, `ngsw.json`) не затронуты: `no-cache` доходит как есть;
+`ngsw-worker.js` не существует (404).
+
 ## e. Bootstrap-администратор
 
 В Production dev-сид не запускается (`ASPNETCORE_ENVIRONMENT=Production`

@@ -695,9 +695,8 @@ check_public_routes() {
 # check fails if the override ever comes back (rule deleted/disabled/reordered).
 check_sw_cache_header() {
     local headers cc
-    headers="$(curl -sI --max-time "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/sw.js" 2>/dev/null | tr -d '' || true)"
-    cc="$(printf '%s
-' "${headers}" | grep -i '^cache-control:' | head -n1 | cut -d: -f2- | sed 's/^ *//' || true)"
+    headers="$(curl -sI --max-time "${CURL_TIMEOUT_PUBLIC}" ${ACCESS_CURL_ARGS[@]+"${ACCESS_CURL_ARGS[@]}"} "${PUBLIC_BASE}/sw.js" 2>/dev/null | tr -d '\r' || true)"
+    cc="$(printf '%s\n' "${headers}" | grep -i '^cache-control:' | head -n1 | cut -d: -f2- | sed 's/^ *//' || true)"
     if [[ "${cc,,}" == *no-cache* ]]; then
         report_pass "sw-cache-header" "GET ${PUBLIC_BASE}/sw.js -> Cache-Control: ${cc} (service worker is not cached at the edge or in browsers)"
     else

@@ -47,7 +47,10 @@ services:
       start_period: 30s
 
   api:
-    build: .
+    build:
+      context: .
+      secrets:
+        - sixlabors_lic
     restart: unless-stopped
     depends_on:
       db:
@@ -68,9 +71,11 @@ services:
       Jwt__Audience: "RentalPlatform.Api"
       FileStorage__ListingsImagesPath: "uploads/listings"
       FileStorage__ChatAttachmentsPath: "uploads/chat"
+      FileStorage__AvatarsPath: "uploads/avatars"
     volumes:
       - uploads:/app/wwwroot/uploads/listings
       - chat-uploads:/app/wwwroot/uploads/chat
+      - avatar-uploads:/app/wwwroot/uploads/avatars
 
   ui:
     build: ../Rental-Ui
@@ -95,3 +100,14 @@ volumes:
   sqldata:
   uploads:
   chat-uploads:
+  # Explicit name (ADR-070): independent of the compose project name, so the backup script and the restore
+  # rehearsal can refer to it by this exact name. The two older volumes keep their implicit names.
+  avatar-uploads:
+    name: rental-api_avatar-uploads
+
+# ADR-070: the ImageSharp licence file, passed to `docker build` as a BuildKit secret (never ARG/ENV, never in
+# an image layer). Point SIXLABORS_LIC_FILE at the file OUTSIDE any repo (the build targets also glob
+# **/sixlabors.lic, so a stray copy inside a repo would be picked up and could be committed).
+secrets:
+  sixlabors_lic:
+    file: ${SIXLABORS_LIC_FILE}

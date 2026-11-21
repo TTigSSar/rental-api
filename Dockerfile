@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Stage 1 — build and publish
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /repo
@@ -15,9 +16,15 @@ RUN dotnet restore src/RentalPlatform.Api/RentalPlatform.Api.csproj
 
 # Copy the full source and publish a self-contained, trimming-safe release build.
 COPY src/ src/
-RUN dotnet publish src/RentalPlatform.Api/RentalPlatform.Api.csproj \
+# SixLabors.ImageSharp (ADR-070) checks its licence at BUILD time: a Release/publish build fails without it.
+# The licence file is a BuildKit secret mounted only for this one RUN (never ARG/ENV, never a layer):
+#   docker build --secret id=sixlabors_lic,src=<path outside the repos> .
+# (docker compose: build.secrets + SIXLABORS_LIC_FILE). Nothing is checked at runtime.
+RUN --mount=type=secret,id=sixlabors_lic,target=/run/secrets/sixlabors.lic \
+    dotnet publish src/RentalPlatform.Api/RentalPlatform.Api.csproj \
     --no-restore \
     -c Release \
+    -p:SixLaborsLicenseFile=/run/secrets/sixlabors.lic \
     -o /app/publish
 
 # Stage 2 — runtime image
@@ -31,12 +38,13 @@ RUN addgroup --system --gid 1001 appgroup \
 # Copy published output from the build stage.
 COPY --from=build /app/publish .
 
-# The app writes uploaded listing images under wwwroot/uploads/listings and
-# chat attachments under wwwroot/uploads/chat. Creating both directories here
+# The app writes uploaded listing images under wwwroot/uploads/listings, chat
+# attachments under wwwroot/uploads/chat and profile pictures under
+# wwwroot/uploads/avatars (ADR-070). Creating all three directories here
 # ensures they exist and are owned by appuser *before* the corresponding
 # volumes are mounted over them — otherwise Docker auto-creates the missing
 # mount point as root:root and the appuser process gets Permission denied.
-RUN mkdir -p wwwroot/uploads/listings wwwroot/uploads/chat \
+RUN mkdir -p wwwroot/uploads/listings wwwroot/uploads/chat wwwroot/uploads/avatars \
  && chown -R appuser:appgroup wwwroot
 
 USER appuser

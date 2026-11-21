@@ -2,7 +2,7 @@
 #
 # Production backup for dorent.am (docker-compose.production.yml).
 #
-#   backup-production.sh            daily backup: DB dump + uploads archive, 7-day retention
+#   backup-production.sh            daily backup: DB dump + uploads archive (3 volumes), 7-day retention
 #   backup-production.sh --verify   restore-test the newest local .bak into a throwaway
 #                                    database inside the SAME db container, then drop it
 #
@@ -29,6 +29,8 @@ ENV_FILE="${REPO_ROOT}/.env"
 COMPOSE_PROJECT_NAME="rental-api"
 UPLOADS_VOLUME="rental-api_uploads"
 CHAT_UPLOADS_VOLUME="rental-api_chat-uploads"
+# ADR-070: profile pictures. Explicit name in all three compose files (volumes: avatar-uploads: name:).
+AVATAR_UPLOADS_VOLUME="rental-api_avatar-uploads"
 
 BACKUPS_DIR="${BACKUPS_DIR:-/opt/dorent/backups}"
 BACKUP_LOG="${BACKUPS_DIR}/backup.log"
@@ -179,6 +181,17 @@ run_backup() {
     bak_out="${BACKUPS_DIR}/${bak_name}"
     uploads_tgz="uploads_${stamp}.tgz"
 
+    # Never archive a volume that does not exist: `docker run -v <missing>:...` would silently CREATE an empty
+    # one and the backup would look fine while holding no files. Fail loudly instead (canonical FAIL entry).
+    local volume
+    for volume in "${UPLOADS_VOLUME}" "${CHAT_UPLOADS_VOLUME}" "${AVATAR_UPLOADS_VOLUME}"; do
+        if ! docker volume inspect "${volume}" >/dev/null 2>&1; then
+            log "FAIL backup: docker volume ${volume} does not exist; nothing was backed up"
+            echo "ERROR: docker volume ${volume} does not exist; refusing to archive an empty mount" >&2
+            exit 1
+        fi
+    done
+
     "${COMPOSE[@]}" exec -T db mkdir -p "${CONTAINER_BACKUP_DIR}"
 
     sqlcmd_exec "BACKUP DATABASE [${DB_NAME}] TO DISK = N'${bak_in_container}' WITH COMPRESSION, INIT;"
@@ -192,8 +205,9 @@ run_backup() {
     docker run --rm \
         -v "${UPLOADS_VOLUME}:/data/uploads:ro" \
         -v "${CHAT_UPLOADS_VOLUME}:/data/chat-uploads:ro" \
+        -v "${AVATAR_UPLOADS_VOLUME}:/data/avatar-uploads:ro" \
         -v "${BACKUPS_DIR}:/backup" \
-        alpine sh -c "tar czf /backup/${uploads_tgz} -C /data uploads chat-uploads"
+        alpine sh -c "tar czf /backup/${uploads_tgz} -C /data uploads chat-uploads avatar-uploads"
 
     # Retention: keep 7 days of local backups. (Off-site copy is a separate,
     # not-yet-automated step — see DEPLOY-PRODUCTION.md.)

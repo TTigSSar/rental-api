@@ -40,7 +40,7 @@ public sealed partial class LocalFileStorageService : IFileStorageService
     {
         _logger = logger;
         var avatarRelativePath = NormalizeRelativePath(options.Value.AvatarsPath, hostEnvironment.ContentRootPath);
-        _avatarTargetDirectory = Path.GetFullPath(Path.Combine(hostEnvironment.ContentRootPath, "wwwroot", avatarRelativePath));
+        _avatarTargetDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(hostEnvironment.ContentRootPath, "wwwroot", avatarRelativePath)));
         _avatarPublicPrefix = "/" + avatarRelativePath.Replace("\\", "/", StringComparison.Ordinal).Trim('/');
 
         var relativePath = NormalizeRelativePath(options.Value.ListingsImagesPath, hostEnvironment.ContentRootPath);

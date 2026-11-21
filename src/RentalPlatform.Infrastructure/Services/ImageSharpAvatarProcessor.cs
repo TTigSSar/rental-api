@@ -110,7 +110,7 @@ public sealed class ImageSharpAvatarProcessor : IAvatarImageProcessor
         {
             return new AvatarProcessingResult(AvatarProcessingStatus.TooLarge, null);
         }
-        catch (Exception exception) when (exception is UnknownImageFormatException or InvalidImageContentException)
+        catch (Exception exception) when (exception is UnknownImageFormatException or InvalidImageContentException or ImageFormatException)
         {
             return new AvatarProcessingResult(AvatarProcessingStatus.InvalidType, null);
         }

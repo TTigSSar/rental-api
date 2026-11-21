@@ -22,7 +22,7 @@ public sealed class FakeHostEnvironment : IHostEnvironment
 // and what must NOT have been, written - the link token above all (M-013).
 public sealed class ListLogger<T> : ILogger<T>
 {
-    public sealed record Entry(LogLevel Level, string Message, Exception? Exception);
+    public sealed record Entry(LogLevel Level, string Message, Exception? Exception, EventId EventId = default);
 
     private readonly List<Entry> _entries = new();
 
@@ -46,7 +46,7 @@ public sealed class ListLogger<T> : ILogger<T>
     {
         lock (_entries)
         {
-            _entries.Add(new Entry(logLevel, formatter(state, exception), exception));
+            _entries.Add(new Entry(logLevel, formatter(state, exception), exception, eventId));
         }
     }
 

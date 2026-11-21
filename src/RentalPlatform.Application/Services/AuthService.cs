@@ -795,10 +795,7 @@ public sealed class AuthService : IAuthService
 
                 existing.ExternalAuthProvider = provider;
                 existing.ExternalProviderId = externalUser.ProviderUserId;
-                if (!string.IsNullOrWhiteSpace(externalUser.AvatarUrl))
-                {
-                    existing.AvatarUrl = externalUser.AvatarUrl;
-                }
+                // ADR-070 point 3: Google sets AvatarUrl only when the account is created, never on a link.
 
                 // A unique-index violation means this identity got linked to another account in
                 // the meantime: 409, never a 500. Other database failures propagate.

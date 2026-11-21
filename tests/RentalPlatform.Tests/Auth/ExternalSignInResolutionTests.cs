@@ -21,7 +21,8 @@ public sealed class ExternalSignInResolutionTests
         string sub = "google-sub-1",
         string? first = "Gina",
         string? last = "Google",
-        string? full = "Gina Google") => new()
+        string? full = "Gina Google",
+        string? avatarUrl = null) => new()
     {
         Provider = "google",
         ProviderUserId = sub,
@@ -29,7 +30,8 @@ public sealed class ExternalSignInResolutionTests
         FirstName = first,
         LastName = last,
         FullName = full,
-        HostedDomain = hostedDomain
+        HostedDomain = hostedDomain,
+        AvatarUrl = avatarUrl
     };
 
     private static User Confirmed(string email, bool blocked = false) =>
@@ -100,6 +102,71 @@ public sealed class ExternalSignInResolutionTests
         Assert.Equal(RealHash, stored.PasswordHash);
         Assert.Equal("Original", stored.FirstName);
         Assert.Equal("Name", stored.LastName);
+    }
+
+    // G-3 (ADR-070 point 3): linking an existing account never writes AvatarUrl, so a user's own
+    // uploaded picture survives a Google link (regression: the old code overwrote it).
+    [Fact]
+    public async Task G3_Linking_An_Existing_Account_Does_Not_Overwrite_The_Users_Own_Avatar()
+    {
+        var existing = Confirmed("someone@gmail.com");
+        existing.AvatarUrl = "/uploads/avatars/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg";
+        var info = Google("someone@gmail.com", avatarUrl: "https://lh3.googleusercontent.com/a/google-photo");
+        var (db, h, holder) = await ArrangeAsync(info, existing);
+        using var _ = db;
+        await using var __ = holder;
+
+        var result = await h.Auth.ExternalAsync(Request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(existing.AvatarUrl, (await UserAsync(db, "someone@gmail.com")).AvatarUrl);
+        Assert.Equal(existing.AvatarUrl, result.Value!.User.AvatarUrl);
+    }
+
+    // G-4: a removed photo stays removed after a link.
+    [Fact]
+    public async Task G4_Linking_An_Account_Whose_Avatar_Was_Removed_Keeps_It_Null()
+    {
+        var info = Google("someone@gmail.com", avatarUrl: "https://lh3.googleusercontent.com/a/google-photo");
+        var (db, h, holder) = await ArrangeAsync(info, Confirmed("someone@gmail.com"));
+        using var _ = db;
+        await using var __ = holder;
+
+        Assert.True((await h.Auth.ExternalAsync(Request)).IsSuccess);
+
+        Assert.Null((await UserAsync(db, "someone@gmail.com")).AvatarUrl);
+    }
+
+    // G-1: a brand-new Google account still gets the Google picture at creation.
+    [Fact]
+    public async Task G1_A_New_Google_Account_Takes_The_Google_Avatar()
+    {
+        var info = Google("fresh@gmail.com", avatarUrl: "https://lh3.googleusercontent.com/a/google-photo");
+        var (db, h, holder) = await ArrangeAsync(info);
+        using var _ = db;
+        await using var __ = holder;
+
+        Assert.True((await h.Auth.ExternalAsync(Request)).IsSuccess);
+
+        Assert.Equal("https://lh3.googleusercontent.com/a/google-photo", (await UserAsync(db, "fresh@gmail.com")).AvatarUrl);
+    }
+
+    // G-2: signing in again (already linked) never writes it either.
+    [Fact]
+    public async Task G2_Signing_In_Again_After_Removing_The_Avatar_Does_Not_Bring_It_Back()
+    {
+        var info = Google("fresh@gmail.com", avatarUrl: "https://lh3.googleusercontent.com/a/google-photo");
+        var (db, h, holder) = await ArrangeAsync(info);
+        using var _ = db;
+        await using var __ = holder;
+        Assert.True((await h.Auth.ExternalAsync(Request)).IsSuccess);
+        await h.Context.Users.Where(u => u.Email == "fresh@gmail.com")
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.AvatarUrl, (string?)null));
+        h.Context.ChangeTracker.Clear();
+
+        Assert.True((await h.Auth.ExternalAsync(Request)).IsSuccess);
+
+        Assert.Null((await UserAsync(db, "fresh@gmail.com")).AvatarUrl);
     }
 
     [Fact]

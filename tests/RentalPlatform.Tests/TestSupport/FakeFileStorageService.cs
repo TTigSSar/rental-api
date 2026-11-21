@@ -11,6 +11,9 @@ public sealed class FakeFileStorageService : IFileStorageService
     public List<string> DeletedUrls { get; } = new();
     public List<string> SavedChatUrls { get; } = new();
 
+    // Avatar calls (ADR-070), recorded for the account-deletion and avatar-service tests.
+    public List<Guid> DeletedAvatarDirectories { get; } = new();
+
     public Task<string> SaveListingImageAsync(
         Stream content,
         string fileName,

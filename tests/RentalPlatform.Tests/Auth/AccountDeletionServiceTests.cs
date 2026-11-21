@@ -737,6 +737,20 @@ public sealed class AccountDeletionServiceTests
         Assert.Equal(1, h.Budget.Acquired); // counts against the send budget
     }
 
+    // D-1 (ADR-070 point 12): the old code called the listings-only delete for the avatar, which never
+    // touched a stored avatar. The account's avatar directory is wiped instead.
+    [Fact]
+    public async Task D1_The_Avatar_Directory_Of_The_Deleted_Account_Is_Wiped()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await using var h = new Harness(db, UserId);
+
+        Assert.True((await h.Service.DeleteCurrentUserAsync(WithPassword())).IsSuccess);
+
+        Assert.Equal(new[] { UserId }, h.Storage.DeletedAvatarDirectories);
+    }
+
     [Fact]
     public async Task A_Throwing_Email_Service_Does_Not_Fail_The_Committed_Deletion()
     {

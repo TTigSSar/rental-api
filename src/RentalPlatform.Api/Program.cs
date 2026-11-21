@@ -123,6 +123,33 @@ Directory.CreateDirectory(chatUploadsPhysicalRoot);
     });
 }
 
+// ADR-070: profile pictures, from FileStorage:AvatarsPath (its own volume). Only .jpg is ever written here, so only
+// .jpg is served. Cache-Control is public, max-age=86400 and deliberately NOT immutable: a removed picture must
+// stop being served from edge and browser caches within about a day. nosniff comes from the security headers.
+var avatarsRelPath = fileStorageOptions.AvatarsPath.Trim().TrimStart('/', '\\');
+var avatarsPhysicalRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot", avatarsRelPath);
+var avatarsRequestPath = "/" + avatarsRelPath.Replace("\\", "/", StringComparison.Ordinal).Trim('/');
+Directory.CreateDirectory(avatarsPhysicalRoot);
+{
+    var avatarContentTypeProvider = new FileExtensionContentTypeProvider();
+    avatarContentTypeProvider.Mappings.Clear();
+    avatarContentTypeProvider.Mappings[".jpg"] = "image/jpeg";
+
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        RequestPath = avatarsRequestPath,
+        FileProvider = new PhysicalFileProvider(avatarsPhysicalRoot),
+        ContentTypeProvider = avatarContentTypeProvider,
+        ServeUnknownFileTypes = false,
+        OnPrepareResponse = static context =>
+        {
+            var headers = context.Context.Response.Headers;
+            headers.CacheControl = "public, max-age=86400";
+            headers.ContentDisposition = "inline";
+        }
+    });
+}
+
 app.UseCors(RentalPlatform.Api.Extensions.ServiceCollectionExtensions.FrontendCorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();

@@ -721,7 +721,7 @@ public sealed class AccountDeletionServiceTests
     // ---- after the commit ------------------------------------------------------------------------------
 
     [Fact]
-    public async Task After_The_Commit_Sessions_Are_Revoked_The_Avatar_Is_Deleted_And_The_Email_Goes_To_The_Old_Address_In_The_Old_Language()
+    public async Task After_The_Commit_Sessions_Are_Revoked_The_Avatar_Directory_Is_Wiped_And_The_Email_Goes_To_The_Old_Address_In_The_Old_Language()
     {
         using var db = new SqliteTestDatabase();
         await SeedBaselineAsync(db);
@@ -730,7 +730,8 @@ public sealed class AccountDeletionServiceTests
         Assert.True((await h.Service.DeleteCurrentUserAsync(WithPassword())).IsSuccess);
 
         Assert.Equal(new[] { UserId }, h.Revoker.Revoked);
-        Assert.Equal(new[] { AvatarUrl }, h.Storage.DeletedUrls);
+        Assert.Equal(new[] { UserId }, h.Storage.DeletedAvatarDirectories);
+        Assert.Empty(h.Storage.DeletedUrls); // the listings-only delete is no longer used for avatars
         var sent = Assert.Single(h.Email.AccountDeletedSent);
         Assert.Equal(UserEmail, sent.Email);
         Assert.Equal("hy", sent.Language);
@@ -781,8 +782,10 @@ public sealed class AccountDeletionServiceTests
         Assert.NotNull((await UserAsync(db)).DeletedAt);
     }
 
+    // D-2: an account whose AvatarUrl is null (e.g. a replaced-then-removed picture, or a crash leftover) still
+    // gets its directory wiped, because files can exist without a current URL.
     [Fact]
-    public async Task An_Account_Without_An_Avatar_Deletes_No_File()
+    public async Task D2_An_Account_Without_An_Avatar_Url_Still_Gets_Its_Directory_Wiped()
     {
         using var db = new SqliteTestDatabase();
         var deleter = Deleter();
@@ -792,6 +795,23 @@ public sealed class AccountDeletionServiceTests
 
         Assert.True((await h.Service.DeleteCurrentUserAsync(WithPassword())).IsSuccess);
 
+        Assert.Equal(new[] { UserId }, h.Storage.DeletedAvatarDirectories);
         Assert.Empty(h.Storage.DeletedUrls);
+    }
+
+    // D-3: the wipe is best effort after the commit; a throwing storage never fails the deletion.
+    [Fact]
+    public async Task D3_A_Throwing_Directory_Wipe_Does_Not_Fail_The_Committed_Deletion()
+    {
+        using var db = new SqliteTestDatabase();
+        await SeedBaselineAsync(db);
+        await using var h = new Harness(db, UserId);
+        h.Storage.ThrowOnDeleteAvatarDirectory = true;
+
+        var result = await h.Service.DeleteCurrentUserAsync(WithPassword());
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull((await UserAsync(db)).DeletedAt);
+        Assert.Single(h.Email.AccountDeletedSent); // the email after the wipe still goes out
     }
 }

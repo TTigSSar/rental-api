@@ -934,7 +934,7 @@ public sealed class AuthService : IAuthService
         Message = "User account is blocked."
     };
 
-    private static CurrentUserResponse MapUser(User user) => new()
+    internal static CurrentUserResponse MapUser(User user) => new()
     {
         Id = user.Id,
         Email = user.Email,

@@ -36,6 +36,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.*" />
+    <!-- ADR-070: server-side avatar re-encoding. Pinned exactly; Infrastructure only. Release/publish builds need
+         -p:SixLaborsLicenseFile=<path> (licence is never committed). -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="4.1.3" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.*" />
   </ItemGroup>
 </Project>

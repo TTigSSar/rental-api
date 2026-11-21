@@ -1,11 +1,21 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RentalPlatform.Application.Abstractions;
 
 namespace RentalPlatform.Infrastructure.Services;
 
-public sealed class LocalFileStorageService : IFileStorageService
+public sealed partial class LocalFileStorageService : IFileStorageService
 {
+    // Stable log events (ADR-070 / plan 3.3); counted with `docker logs api | grep 690x`.
+    public static readonly EventId AvatarOldFileDeleteFailedEvent = new(6901, "AvatarOldFileDeleteFailed");
+    public static readonly EventId AvatarDirectoryWipeFailedEvent = new(6903, "AvatarDirectoryWipeFailed");
+
+    // The only file name this service ever writes under an avatar directory.
+    [GeneratedRegex(@"^[0-9a-f]{32}\.jpg$", RegexOptions.CultureInvariant)]
+    private static partial Regex AvatarFileNameRegex();
+
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg",
@@ -19,9 +29,20 @@ public sealed class LocalFileStorageService : IFileStorageService
     private readonly string _publicPrefix;
     private readonly string _chatTargetDirectory;
     private readonly string _chatPublicPrefix;
+    private readonly string _avatarTargetDirectory;
+    private readonly string _avatarPublicPrefix;
+    private readonly ILogger<LocalFileStorageService>? _logger;
 
-    public LocalFileStorageService(IHostEnvironment hostEnvironment, IOptions<LocalFileStorageOptions> options)
+    public LocalFileStorageService(
+        IHostEnvironment hostEnvironment,
+        IOptions<LocalFileStorageOptions> options,
+        ILogger<LocalFileStorageService>? logger = null)
     {
+        _logger = logger;
+        var avatarRelativePath = NormalizeRelativePath(options.Value.AvatarsPath, hostEnvironment.ContentRootPath);
+        _avatarTargetDirectory = Path.GetFullPath(Path.Combine(hostEnvironment.ContentRootPath, "wwwroot", avatarRelativePath));
+        _avatarPublicPrefix = "/" + avatarRelativePath.Replace("\\", "/", StringComparison.Ordinal).Trim('/');
+
         var relativePath = NormalizeRelativePath(options.Value.ListingsImagesPath, hostEnvironment.ContentRootPath);
         // Path.GetFullPath is essential here, not just cosmetic: the configured relative
         // path may still contain forward slashes (e.g. "uploads/chat"), and a bare
@@ -153,6 +174,161 @@ public sealed class LocalFileStorageService : IFileStorageService
 
         File.Delete(candidate);
         return Task.FromResult(true);
+    }
+
+    // ---- Avatars (ADR-070) ------------------------------------------------------------------------------
+
+    public async Task<string> SaveAvatarAsync(Stream content, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var userDirectory = Path.GetFullPath(Path.Combine(_avatarTargetDirectory, userId.ToString("N")));
+        if (!IsWithinRoot(userDirectory, _avatarTargetDirectory))
+        {
+            throw new InvalidOperationException("Resolved avatar storage path escaped the configured root.");
+        }
+
+        Directory.CreateDirectory(userDirectory);
+
+        string storageFileName;
+        string fullPath;
+        do
+        {
+            storageFileName = $"{Guid.NewGuid():N}.jpg";
+            fullPath = Path.Combine(userDirectory, storageFileName);
+        } while (File.Exists(fullPath));
+
+        if (content.CanSeek)
+        {
+            content.Position = 0;
+        }
+
+        try
+        {
+            await using var destination = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await content.CopyToAsync(destination, cancellationToken);
+        }
+        catch
+        {
+            // A partial file must never be left behind; the failure itself still propagates.
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch (Exception cleanup)
+            {
+                _logger?.LogWarning(cleanup, "Could not remove partial avatar file {Path}.", fullPath);
+            }
+
+            throw;
+        }
+
+        return $"{_avatarPublicPrefix}/{userId:N}/{storageFileName}";
+    }
+
+    public Task<bool> DeleteAvatarAsync(Guid callerId, string? url, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveAvatarFile(callerId, url, out var candidate))
+        {
+            return Task.FromResult(false);
+        }
+
+        try
+        {
+            if (!File.Exists(candidate))
+            {
+                return Task.FromResult(false);
+            }
+
+            File.Delete(candidate);
+            return Task.FromResult(true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(AvatarOldFileDeleteFailedEvent, exception, "Could not delete avatar file {Url} of user {UserId}.", url, callerId);
+            return Task.FromResult(false);
+        }
+    }
+
+    public Task<bool> DeleteAvatarDirectoryAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var userDirectory = Path.GetFullPath(Path.Combine(_avatarTargetDirectory, userId.ToString("N")));
+        if (!IsWithinRoot(userDirectory, _avatarTargetDirectory))
+        {
+            return Task.FromResult(false);
+        }
+
+        try
+        {
+            if (Directory.Exists(userDirectory))
+            {
+                Directory.Delete(userDirectory, recursive: true);
+            }
+
+            return Task.FromResult(true);
+        }
+        catch (Exception exception) when (exception is DirectoryNotFoundException or FileNotFoundException)
+        {
+            return Task.FromResult(true); // raced with another remover: already gone
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogError(AvatarDirectoryWipeFailedEvent, exception, "Could not wipe the avatar directory of user {UserId}.", userId);
+            return Task.FromResult(false);
+        }
+    }
+
+    public Task<IReadOnlyList<string>> ListAvatarDirectoryNamesAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<string> names = Directory.Exists(_avatarTargetDirectory)
+            ? Directory.EnumerateDirectories(_avatarTargetDirectory).Select(path => Path.GetFileName(path)).ToList()
+            : new List<string>();
+        return Task.FromResult(names);
+    }
+
+    public Task<IReadOnlyList<AvatarFileEntry>> ListAvatarFilesAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var userDirectory = Path.GetFullPath(Path.Combine(_avatarTargetDirectory, userId.ToString("N")));
+        IReadOnlyList<AvatarFileEntry> files = IsWithinRoot(userDirectory, _avatarTargetDirectory) && Directory.Exists(userDirectory)
+            ? Directory.EnumerateFiles(userDirectory)
+                .Select(path => new FileInfo(path))
+                .Where(info => AvatarFileNameRegex().IsMatch(info.Name))
+                .Select(info => new AvatarFileEntry($"{_avatarPublicPrefix}/{userId:N}/{info.Name}", info.LastWriteTimeUtc))
+                .ToList()
+            : new List<AvatarFileEntry>();
+        return Task.FromResult(files);
+    }
+
+    // Only /uploads/avatars/{callerId:N}/{guid:N}.jpg of the CALLER resolves; an external URL, another
+    // user's path, a traversal attempt or any odd character does not.
+    private bool TryResolveAvatarFile(Guid callerId, string? url, out string path)
+    {
+        path = string.Empty;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        var expectedPrefix = $"{_avatarPublicPrefix}/{callerId:N}/";
+        if (!url.StartsWith(expectedPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var fileName = url[expectedPrefix.Length..];
+        if (fileName.IndexOfAny(new[] { '/', '\\', '?', '#', '%' }) >= 0
+            || fileName.Contains("..", StringComparison.Ordinal)
+            || !AvatarFileNameRegex().IsMatch(fileName))
+        {
+            return false;
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine(_avatarTargetDirectory, callerId.ToString("N"), fileName));
+        if (!IsWithinRoot(candidate, _avatarTargetDirectory))
+        {
+            return false;
+        }
+
+        path = candidate;
+        return true;
     }
 
     private static string NormalizeExtension(string fileName)

@@ -180,17 +180,16 @@ public sealed class AccountDeletionService : IAccountDeletionService
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(account.AvatarUrl))
+        try
         {
-            try
-            {
-                // Removes a locally stored file; a remote URL (Google avatar) is left alone by the storage.
-                await _fileStorage.DeleteListingImageAsync(account.AvatarUrl);
-            }
-            catch
-            {
-                // The application layer has no logger; the file is orphaned, the account is gone.
-            }
+            // ADR-070 point 12: wipe the whole avatar directory (a replaced-but-not-yet-swept file lives there
+            // too). Idempotent; a Google avatar is an external URL with nothing on disk. A failure is logged by
+            // the storage and the AvatarOrphanSweepService removes the directory within 24 h.
+            await _fileStorage.DeleteAvatarDirectoryAsync(account.Id, CancellationToken.None);
+        }
+        catch
+        {
+            // The application layer has no logger; the sweep is the retry.
         }
 
         try

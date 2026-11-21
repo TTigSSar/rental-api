@@ -46,6 +46,10 @@ public static class RateLimiterExtensions
     public const string NameUpdatePolicy = "name-update";
     public const string PhoneUpdatePolicy = "phone-update";
 
+    // Profile picture (ADR-070): 10 per hour per ACCOUNT, ONE counter shared by PUT and DELETE (a policy owns a
+    // single partitioned limiter, keyed user:{id}). In process memory: scaling out needs a distributed limiter.
+    public const string AvatarUpdatePolicy = "avatar-update";
+
     // The district-under-the-pin lookup. Anonymous by design (sign-up needs it before an account
     // exists), so per IP is the only partition available. Generous enough for a map being dragged
     // (the client debounces), tight enough that it is not a free point-in-polygon service.
@@ -181,6 +185,16 @@ public static class RateLimiterExtensions
                 }));
 
             options.AddPolicy(NameUpdatePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ResolveUserKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromHours(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy(AvatarUpdatePolicy, context => RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: ResolveUserKey(context),
                 factory: _ => new FixedWindowRateLimiterOptions
                 {

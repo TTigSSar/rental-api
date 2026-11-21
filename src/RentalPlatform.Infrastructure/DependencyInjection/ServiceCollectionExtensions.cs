@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<LocalFileStorageOptions>()
             .Bind(configuration.GetSection(LocalFileStorageOptions.SectionName))
             .Validate(static options => !string.IsNullOrWhiteSpace(options.ListingsImagesPath), "FileStorage:ListingsImagesPath is required.")
+            .Validate(static options => !string.IsNullOrWhiteSpace(options.AvatarsPath), "FileStorage:AvatarsPath is required.")
             .ValidateOnStart();
 
         services.AddOptions<ExternalAuthOptions>()
@@ -48,6 +49,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountDeletionService, AccountDeletionService>();
         services.AddScoped<IAccountDeletionStore, AccountDeletionStore>();
         services.AddScoped<IUserAuthStore, UserAuthStore>();
+        // ADR-070 profile pictures. The processor is a singleton: it owns the decode semaphore (max 2 at once).
+        services.AddScoped<IAvatarService, AvatarService>();
+        services.AddScoped<IAvatarStore, AvatarStore>();
+        services.AddSingleton<IAvatarImageProcessor, ImageSharpAvatarProcessor>();
+        services.AddHostedService<AvatarOrphanSweepService>();
         services.AddScoped<IExternalIdentityTokenValidator, ExternalIdentityTokenValidator>();
         services.AddSingleton<IGoogleIdTokenVerifier, GoogleIdTokenVerifier>();
         // Singleton on purpose: the nonce store is process-wide state (ADR-030 section 2). The

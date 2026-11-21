@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using RentalPlatform.Api.Controllers.Requests;
 using RentalPlatform.Api.Extensions;
 using RentalPlatform.Application.Abstractions;
 using RentalPlatform.Application.Common;
@@ -16,13 +17,19 @@ public sealed class AuthController : ControllerBase
     private readonly IExternalNonceService _externalNonceService;
     private readonly IAccountDeletionService _accountDeletionService;
     private readonly IChatEmailUnsubscribeService _chatEmailUnsubscribeService;
+    private readonly IAvatarService _avatarService;
+
+    // ADR-070. The request may be 3 MiB (image 2 MiB + multipart framing), the multipart body 2.5 MiB.
+    private const int MaxAvatarRequestBytes = 3_145_728;
 
     public AuthController(
         IAuthService authService,
         IExternalNonceService externalNonceService,
         IAccountDeletionService accountDeletionService,
-        IChatEmailUnsubscribeService chatEmailUnsubscribeService)
+        IChatEmailUnsubscribeService chatEmailUnsubscribeService,
+        IAvatarService avatarService)
     {
+        _avatarService = avatarService;
         _chatEmailUnsubscribeService = chatEmailUnsubscribeService;
         _authService = authService;
         _externalNonceService = externalNonceService;
@@ -297,6 +304,66 @@ public sealed class AuthController : ControllerBase
         return FromError(result.Error);
     }
 
+    // ADR-070. Exactly one multipart field "file"; the server re-encodes it (the client's bytes and name are never
+    // stored). 200 carries the new CurrentUserResponse. 413 and 429 are bare.
+    [HttpPut("me/avatar")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.AvatarUpdatePolicy)]
+    [RequestSizeLimit(MaxAvatarRequestBytes)]
+    [RequestFormLimits(
+        MultipartBodyLengthLimit = 2_621_440,
+        MultipartHeadersLengthLimit = 16_384,
+        MultipartHeadersCountLimit = 16,
+        ValueCountLimit = 8,
+        ValueLengthLimit = 4_096,
+        KeyLengthLimit = 256)]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<CurrentUserResponse>> UpdateAvatar(
+        [FromForm] UpdateAvatarRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Exactly one file: none, or several, is "missing" (the client filename is never used).
+        var single = Request.Form.Files.Count == 1 ? request.File : null;
+        await using var stream = single?.OpenReadStream();
+        var content = single is null || stream is null ? null : new AvatarContent(stream, single.Length);
+
+        var result = await _avatarService.UploadAsync(content, cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
+    // ADR-070. Idempotent: 200 with avatarUrl null whether or not there was a picture.
+    [HttpDelete("me/avatar")]
+    [Authorize]
+    [EnableRateLimiting(RateLimiterExtensions.AvatarUpdatePolicy)]
+    [ProducesResponseType(typeof(CurrentUserResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<CurrentUserResponse>> RemoveAvatar(CancellationToken cancellationToken)
+    {
+        var result = await _avatarService.RemoveAsync(cancellationToken);
+        if (result.IsSuccess && result.Value is not null)
+        {
+            return Ok(result.Value);
+        }
+
+        return FromError(result.Error);
+    }
+
     // ADR-059. The page behind the email's unsubscribe link POSTs here with the signed token (a GET would
     // be triggered by mail scanners). 400 chat_email.unsubscribe_invalid for any bad token or user.
     [HttpPost("chat-emails/unsubscribe")]
@@ -441,6 +508,12 @@ public sealed class AuthController : ControllerBase
         return StatusCode(StatusCodes.Status429TooManyRequests, error.ToProblemDetails(StatusCodes.Status429TooManyRequests));
     }
 
+    private ObjectResult BusyResponse(ServiceError error)
+    {
+        Response.Headers.RetryAfter = (error.RetryAfterSeconds ?? 5).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, error.ToProblemDetails(StatusCodes.Status503ServiceUnavailable));
+    }
+
     private ActionResult FromError(ServiceError? error)
     {
         if (error is null)
@@ -474,6 +547,8 @@ public sealed class AuthController : ControllerBase
             "account.admin_cannot_delete" => StatusCode(StatusCodes.Status403Forbidden, error.ToProblemDetails(StatusCodes.Status403Forbidden)),
             "account.has_open_rentals" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             "account.state_changed" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.avatar_conflict" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
+            "auth.avatar_busy" => BusyResponse(error),
             "auth.home_point_in_use" => Conflict(error.ToProblemDetails(StatusCodes.Status409Conflict)),
             // 400: the pin is simply in the wrong place and the user can move it. Reached from both
             // POST /register (optional home-point step) and PUT /me/home-point.
